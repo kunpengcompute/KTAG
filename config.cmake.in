@@ -1,0 +1,62 @@
+cmake_minimum_required(VERSION 3.16.3)
+
+# ----------------------------------------------------------------------------
+# KDADK_APPID cmake options
+# ----------------------------------------------------------------------------
+KDADK_APPID_OPTION(BUILD_SHARED_LIBS            "Build shared libraries (.dll/.so) instead of static ones (.lib/.a)"  ON)
+
+KDADK_APPID_OPTION(OPTIMIZE            "HS OPTIMIZE"  TRUE)
+
+set(CMAKE_SKIP_RPATH TRUE)
+
+#---------------------------------------------------------------------
+# config build option
+#--------------------------------------------------------------------------
+set (CMAKE_BUILD_TYPE Release)
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "4.8.5" OR CMAKE_CXX_COMPILER_VERSION VERSION_EQUAL "4.8.5")
+    message("-- Insufficient g++ version:${CMAKE_CXX_COMPILER_VERSION}")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8-a+crc+crypto+fp+simd -mtune=cortex-a53 -fno-strict-aliasing -std=gnu11")
+else()
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8-a+crc")
+endif()
+endif()
+message("-- Building type: Release")
+
+set(KDADK_APPID_CPU_LIMIT 1)
+if ("$ENV{KDADK_APPID_CPU_CHECK_ENABLE}" STREQUAL "N")
+    set(KDADK_APPID_CPU_LIMIT 0)
+endif()
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DKDADK_APPID_CPU_LIMIT=${KDADK_APPID_CPU_LIMIT} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O0 -fstack-protector-all -Wl,-z,relro,-z,now,-z,noexecstack -fPIC -s -fcommon")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DKDADK_APPID_CPU_LIMIT=${KDADK_APPID_CPU_LIMIT} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-all -Wl,-z,relro,-z,now,-z,noexecstack -fPIC -s -fcommon")
+set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-all -fPIC -fcommon -march=armv8-a+sve")
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,relro,-z,now,-z,noexecstack -s")
+
+# 添加选项以启用 SVE256 指令集
+if(ENABLE_SVE_256)
+    message(STATUS "Enabling SVE256")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=armv8-a+sve -msve-vector-bits=256 ")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=armv8-a+sve -msve-vector-bits=256")
+    set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -march=armv8-a+sve -msve-vector-bits=256")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -march=armv8-a+sve -msve-vector-bits=256")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -march=armv8-a+sve -msve-vector-bits=256")
+endif()
+
+# 添加选项以启用覆盖率
+option(ENABLE_TEST_COVERAGE "Enable test coverage" OFF)
+
+if(ENABLE_TEST_COVERAGE)
+    message(STATUS "Enabling test coverage options")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage -g")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage -g")
+    set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -fprofile-arcs -ftest-coverage -g")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lgcov")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -lgcov")
+endif()
+
+message("-- C_FLAGS: ${CMAKE_C_FLAGS}")
+message("-- CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
+message("-- CMAKE_ASM_FLAGS: ${CMAKE_ASM_FLAGS}")
+message("-- CMAKE_SHARED_LINKER_FLAGS: ${CMAKE_SHARED_LINKER_FLAGS}")
