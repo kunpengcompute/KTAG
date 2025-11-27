@@ -45,7 +45,7 @@ static uint32_t hash_func_djb2_hash32(const uint8_t *key)
 {
     uint32_t hash = DJB2_HASH_SEED;
 
-    for (uint32_t I = 0; I < IPV4_TUPLE_SIZE; i++) {
+    for (uint32_t i = 0; i < IPV4_TUPLE_SIZE; i++) {
         hash = ((hash << DJB2_HASH_SHIFT) + hash) + key[i];
     }
 
@@ -59,7 +59,7 @@ KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
     int malloc_result;
     size_t malloc_size = 0;
     uint8_t *malloc_ptr = nullptr;
-    uint32_t I;
+    uint32_t i;
 
     if (hash_table == nullptr || buckets == 0) {
         return KDADK_STS_PARAMETER_ERR;
@@ -82,7 +82,7 @@ KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
     memset_s(malloc_ptr, malloc_size, 0, malloc_size);
     table->buckets = (flow_hash_bucket *)malloc_ptr;
 
-    for (I = 0; I < buckets; i++) {
+    for (i = 0; i < buckets; i++) {
         malloc_result = pthread_rwlock_init(&table->buckets[i].rwlock, nullptr);
         if (malloc_result) {
             ret = KDADK_STS_INIT_RWLOCK_FAIL;
@@ -97,7 +97,7 @@ KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
     return KDADK_STS_NO_ERR;
 error:
     printf("hash table init error\n");
-    for (uint32_t k = 0; k < I; k++) {
+    for (uint32_t k = 0; k < i; k++) {
         pthread_rwlock_destroy(&table->buckets[k].rwlock);
     }
     free(table->buckets);
@@ -199,13 +199,13 @@ flow_hash_node *hash_table_add(flow_hash *hash_table, const packet_info *info)
 
 KDADKResult hash_table_destroy(flow_hash *hash_table)
 {
-    uint32_t I;
+    uint32_t i;
 
     if (hash_table == nullptr)
         return KDADK_STS_NULL_PTR_ERR;
 
     /* free all rwlock of hash_bucket. */
-    for (I = 0; I < hash_table->bucket_num; i++) {
+    for (i = 0; i < hash_table->bucket_num; i++) {
         (void)pthread_rwlock_destroy(&hash_table->buckets[i].rwlock);
     }
 

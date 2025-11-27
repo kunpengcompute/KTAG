@@ -45,7 +45,7 @@ if (length < HTTP_MIN_LENGTH || !packet) {
         return false;
     }
 
-    for (int I = 0; I < HTTP_METHOD_NUMS; i++) {
+    for (int i = 0; i < HTTP_METHOD_NUMS; i++) {
         if (strncmp(reinterpret_cast<const char *>(packet), http_methods[i], strlen(http_methods[i])) == 0) {
             return true;
         }
@@ -160,12 +160,12 @@ size_t parse_tls_cipher_suits(size_t msg_start, packet_info *info, const std::st
     info->tls_info.cipher_suites_length = cipher_suites_len;
 
     size_t cipher_suites_count = cipher_suites_len / 2;
-    for (size_t I = 0; I < cipher_suites_count; ++i) {
-        if (msg_body_start + (I << 1) + 1 >= sv.size()) {
+    for (size_t i = 0; i < cipher_suites_count; ++i) {
+        if (msg_body_start + (i << 1) + 1 >= sv.size()) {
             return msg_body_start;
         }
-        uint8_t high_byte = sv[msg_body_start + (I << 1)];
-        uint8_t low_byte = sv[msg_body_start + (I << 1) + 1];
+        uint8_t high_byte = sv[msg_body_start + (i << 1)];
+        uint8_t low_byte = sv[msg_body_start + (i << 1) + 1];
         uint16_t cipher_suite = (high_byte << 8) | low_byte;
         info->tls_info.cipher_suites[i] = cipher_suite;
     }
@@ -324,7 +324,7 @@ KDADKResult decode_udp(const u_char *packet, packet_info *info, domain_name_hash
         std::string domain = parse_domain(packet, question_pos);
 
         size_t answer_pos = question_pos + 6;
-        for (int I = 0; I < ntohs(dns->ancount); i++) {
+        for (int i = 0; i < ntohs(dns->ancount); i++) {
             dns_resource_record *rr = (dns_resource_record *)(packet + answer_pos);
             answer_pos += (sizeof(dns_resource_record) + ntohs(rr->len));
 

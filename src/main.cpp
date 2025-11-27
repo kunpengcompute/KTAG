@@ -36,7 +36,7 @@ void print_usage(const char *prog)
     printf("  %s -f <pcap_file>              Extract features from PCAP\n", prog);
     printf("  %s -t <config.yaml>            Train model\n", prog);
     printf("  %s -e <config.yaml>            Evaluate model\n", prog);
-    printf("  %s -I <config.yaml>            Run inference\n", prog);
+    printf("  %s -i <config.yaml>            Run inference\n", prog);
     printf("  %s -h                          Show this help\n\n", prog);
 }
 
@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
             printf("Evaluating model with: %s\n", optarg);
             return run_python(EVALUATION_SCRIPT, optarg);
 
-        case 'I':  // C++推理
+        case 'i':  // C++推理
             if (!check_file(optarg))
                 return -1;
             printf("Running inference with: %s\n", optarg);
