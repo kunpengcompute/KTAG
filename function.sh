@@ -15,18 +15,6 @@ function kdadk_appid_util_conf()
 function kdadk_appid_build()
 {
     kdadk_appid_util_conf
-    UTIL_DIR="./util"
-    if [ ! -d "$UTIL_DIR" ]; then
-        git clone --branch tag_Huawei_Secure_C_V100R001C01SPC017B001_00001 https://codehub-dg-y.huawei.com/hwsecurec_group/huawei_secure_c.git  ./util/huawei_secure_c
-    if [ $? -ne 0 ]; then
-        echo "huawei_secure_c download failed"
-        exit 1
-    else
-        echo "huawei_secure_c download sucess"
-    fi
-    else
-        echo "huawei_secure_c already exist"
-    fi
     if ! rpm -q libpcap &>/dev/null || ! rpm -q libpcap-devel &>/dev/null; then
         yum install -y libpcap libpcap-devel
         if [ $? -ne 0 ]; then
