@@ -45,7 +45,55 @@ TEST(KDADK_DECODE, IS_HTTP_PAYLOAD_Invalid)
 TEST(KDADK_DECODE, PARSE_PAYLOAD_NullPacket)
 {
     packet_info info = {};
-    EXPECT_EQ(pample.com:8080");
+    EXPECT_EQ(parse_http_payload(nullptr, &info, 100), KDADK_STS_INVALID_PCAP_PACKET);
+}
+
+TEST(KDADK_DECODE, PARSE_PAYLOAD_NoCRLF)
+{
+    const unsigned char packet[] = "GET /index.html";
+    packet_info info = {};
+    EXPECT_EQ(parse_http_payload(packet, &info, sizeof(packet) - 1), KDADK_STS_DECODE_HTTP_ERROR);
+}
+
+TEST(KDADK_DECODE, PARSE_PAYLOAD_NoFirstSpace)
+{
+    const unsigned char packet[] = "GET/index.html\r\n";
+    packet_info info = {};
+    EXPECT_EQ(parse_http_payload(packet, &info, sizeof(packet) - 1), KDADK_STS_DECODE_HTTP_ERROR);
+}
+
+TEST(KDADK_DECODE, PARSE_PAYLOAD_NoSecondSpace)
+{
+    const unsigned char packet[] = "GET /index.html\r\n";
+    packet_info info = {};
+    EXPECT_EQ(parse_http_payload(packet, &info, sizeof(packet) - 1), KDADK_STS_DECODE_HTTP_ERROR);
+}
+
+TEST(KDADK_DECODE, PARSE_PAYLOAD_FullURLInURI)
+{
+    const std::string request = "GET http://example.com/path HTTP/1.1\r\nHost: example.com\r\n\r\n";
+    packet_info info = {};
+    EXPECT_EQ(parse_http_payload(reinterpret_cast<const unsigned char*>(request.c_str()), &info, request.size()), KDADK_STS_NO_ERR);
+    EXPECT_EQ(info.http_uri, "http://example.com/path");
+    EXPECT_EQ(info.http_url, "http://example.com/path");
+    EXPECT_TRUE(info.http_host.empty());
+}
+
+TEST(KDADK_DECODE, PARSE_PAYLOAD_NoHostHeader){
+    const std::string request = "GET /path HTTP/1.1\r\nUser-Agent: Test\r\n\r\n";
+    packet_info info = {};
+    EXPECT_EQ(parse_http_payload(reinterpret_cast<const unsigned char*>(request.c_str()), &info, request.size()), KDADK_STS_NO_ERR);
+    EXPECT_EQ(info.http_uri, "/path");
+    EXPECT_EQ(info.http_url, "/path");
+    EXPECT_TRUE(info.http_host.empty());
+}
+
+TEST(KDADK_DECODE, PARSE_PAYLOAD_HostHeaderWithSpaces)
+{
+    const std::string request = "GET /data HTTP/1.1\r\nHost: example.com:8080\r\n\r\n";
+    packet_info info = {};
+    EXPECT_EQ(parse_http_payload(reinterpret_cast<const unsigned char*>(request.c_str()), &info, request.size()), KDADK_STS_NO_ERR);
+    EXPECT_EQ(info.http_host, "example.com:8080");
     EXPECT_EQ(info.http_url, HTTP_PREFIX + "example.com:8080/data");
 }
 
