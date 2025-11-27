@@ -143,10 +143,10 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
 
 KDADKResult process_remaining_node(flow_hash *hash_table, std::string feature_csv_file)
 {
-    uint32_t I;
+    uint32_t i;
     flow_hash_node *node = nullptr;
     KDADKResult ret;
-    for (I = 0; I < hash_table->bucket_num; ++i) {
+    for (i = 0; i < hash_table->bucket_num; ++i) {
         node = hash_table->buckets[i].nodes;
         while (node) {
             ret = feature_extract_node(node, feature_csv_file);

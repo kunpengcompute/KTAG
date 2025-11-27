@@ -23,15 +23,15 @@ if (array == nullptr) {
     array[begin++] = data.max_value;
     array[begin++] = data.mean_value;
     array[begin++] = data.var_value;
-    for (int I = 0; I < HISTOGRAM_NUMS; ++i) {
+    for (int i = 0; i < HISTOGRAM_NUMS; ++i) {
         array[begin++] = data.hist_array[i];
     }
 
-    for (int I = 0; I < HISTOGRAM_NUMS; ++i) {
+    for (int i = 0; i < HISTOGRAM_NUMS; ++i) {
         array[begin++] = data.hist_array_abs[i];
     }
 
-    for (int I = 0; I < HISTOGRAM_NUMS; ++i) {
+    for (int i = 0; i < HISTOGRAM_NUMS; ++i) {
         array[begin++] = data.hist_array_nor[i];
     }
     return KDADK_STS_NO_ERR;
@@ -67,7 +67,7 @@ KDADKResult streamFeatur2Array(const stream_feature &data, double *array, int si
     statisticsInfo2Array(data.receive_pld, array, FEATURE_MAX_SIZE, index);
     statisticsInfo2Array(data.receive_interval, array, FEATURE_MAX_SIZE, index);
 
-    for (int I = 0; I < RAW_BOW_HISTOGRAM_NUMS; ++i) {
+    for (int i = 0; i < RAW_BOW_HISTOGRAM_NUMS; ++i) {
         array[index++] = data.raw_bow_crc_result[i];
     }
     return KDADK_STS_NO_ERR;
@@ -88,11 +88,11 @@ KDADKResult write_csv_header(const std::string &csv_file_name)
     const std::string direct[2] = {"send", "receive"};
     const std::string type[3] = {"hdr", "pld", "interval"};
 
-    for (int I = 0; I < tuple_num; ++i) {
+    for (int i = 0; i < tuple_num; ++i) {
         fprintf(file, "%s,", tupleHeader[i].c_str());
     }
 
-    for (int I = 0; I < direct_num; ++i) {
+    for (int i = 0; i < direct_num; ++i) {
         fprintf(file, "%s_byte_nums,", direct[i].c_str());
         fprintf(file, "%s_packet_nums,", direct[i].c_str());
         for (int j = 0; j < type_num; ++j) {
@@ -115,7 +115,7 @@ KDADKResult write_csv_header(const std::string &csv_file_name)
         }
     }
 
-    for (int I = 0; I < RAW_BOW_HISTOGRAM_NUMS; ++i) {
+    for (int i = 0; i < RAW_BOW_HISTOGRAM_NUMS; ++i) {
         fprintf(file, "raw_bow_crc_hist_%d,", i);
     }
     fprintf(file, "raw_bow\n");
@@ -134,11 +134,11 @@ KDADKResult write_feature_to_csv(flow_hash_node *node, const stream_feature &dat
         return KDADK_STS_FOPEN_FILE_ERR;
     }
 
-    for (int I = 0; I < FEATURE_MAX_SIZE - 1; ++i) {
+    for (int i = 0; i < FEATURE_MAX_SIZE - 1; ++i) {
         fprintf(file, "%.6f,", array[i]);
     }
     std::string combined;
-    for (uint32_t I = 0; I < node->rawbow_cnt; ++i) {
+    for (uint32_t i = 0; i < node->rawbow_cnt; ++i) {
         if (!combined.empty()) {
             combined += "_";
         }
@@ -262,13 +262,13 @@ void cal_diffs(const std::vector<struct timeval> &ts, std::vector<uint32_t> &tim
         return;
     }
 
-    for (size_t I = 1; I < ts.size(); ++i) {
+    for (size_t i = 1; i < ts.size(); ++i) {
         int64_t current = ts[i].tv_sec * 1000000LL + ts[i].tv_usec;
-        int64_t previous = ts[I - 1].tv_sec * 1000000LL + ts[I - 1].tv_usec;
+        int64_t previous = ts[i - 1].tv_sec * 1000000LL + ts[i - 1].tv_usec;
 
         uint32_t diff_micro = current - previous;
 
-        time_diff[I - 1] = diff_micro;
+        time_diff[i - 1] = diff_micro;
     }
 
     return;
@@ -277,7 +277,7 @@ void cal_diffs(const std::vector<struct timeval> &ts, std::vector<uint32_t> &tim
 void calculate_crc_byte(char &byte, uint16_t &crc)
 {
     crc ^= static_cast<uint16_t>(byte) << 8;
-    for (int I = 0; I < 8; ++i) {
+    for (int i = 0; i < 8; ++i) {
         if (crc & 0x8000) {
             crc = (crc << 1) ^ 0xA001;
         } else {
@@ -305,7 +305,7 @@ void calculate_crc(flow_hash_node *node, double *raw_bow_crc_result, int raw_bow
         return;
     }
 
-    for (uint32_t I = 0; I < node->rawbow_cnt; ++i) {
+    for (uint32_t i = 0; i < node->rawbow_cnt; ++i) {
         uint16_t crc = 0xFFFF;
         for (char byte : node->rawbow[i]) {
             calculate_crc_byte(byte, crc);
@@ -336,7 +336,7 @@ KDADKResult cal_statistics_info(std::vector<uint32_t> &array, statistics_info &a
     double sum = 0.0;
     double sum_sq = 0.0;
     double cur_num = 0.0;
-    for (uint32_t I = 0; I < array.size(); ++i) {
+    for (uint32_t i = 0; i < array.size(); ++i) {
         array_si.min_value = array_si.min_value < array[i] ? array_si.min_value : array[i];
         array_si.max_value = array_si.max_value > array[i] ? array_si.max_value : array[i];
 
