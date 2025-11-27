@@ -2,16 +2,10 @@ if(NOT KDADK_APPID_MODULES_PATH)
 set(KDADK_APPID_MODULES_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
 endif(NOT KDADK_APPID_MODULES_PATH)
 
-# ============= securec 库配置 =============
-add_library(securec STATIC IMPORTED)
-set_target_properties(securec PROPERTIES
-    IMPORTED_LOCATION ${PROJECT_SOURCE_DIR}/util/huawei_secure_c/lib/libsecurec.a
-)
-
 # ============= ONNX Runtime 配置 =============
 set(ONNXRUNTIME_ROOT "$ENV{ONNXRUNTIME_HOME}" CACHE PATH "Root directory of ONNX Runtime installation")
 if(NOT ONNXRUNTIME_ROOT)
-    set(ONNXRUNTIME_ROOT "${PROJECT_SOURCE_DIR}/onnxruntime-linux-aarch64-1.22.0")
+    set(ONNXRUNTIME_ROOT "${PROJECT_SOURCE_DIR}/util/onnxruntime-linux-aarch64-1.22.0")
 endif()
 
 # 查找 ONNX Runtime
@@ -52,6 +46,31 @@ get_filename_component(YAML_CPP_LIB_DIR ${YAML_CPP_LIB} DIRECTORY)
 message(STATUS "Found yaml-cpp library: ${YAML_CPP_LIB}")
 message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 
+# ============= huawei安全函数配置 =============
+set(SECUREC_ROOT "$ENV{SECUREC_HOME}" CACHE PATH "Root directory of SECUREC installation")
+if(NOT SECUREC_ROOT)
+    set(SECUREC_ROOT "${PROJECT_SOURCE_DIR}/util/libboundscheck")
+endif()
+find_path(SECUREC_INCLUDE
+    NAMES securec.h
+    PATHS ${SECUREC_ROOT}
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
+    REQUIRED
+)
+
+find_library(SECUREC_LIB
+    NAMES boundscheck
+    PATHS ${SECUREC_ROOT}
+    PATH_SUFFIXES lib
+    NO_DEFAULT_PATH
+    REQUIRED
+)
+
+get_filename_component(SECUREC_LIB_DIR ${SECUREC_LIB} DIRECTORY)
+message(STATUS "Found securec library: ${SECUREC_LIB}")
+message(STATUS "securec library directory: ${SECUREC_LIB_DIR}")
+
 # ============= 生成特征提取动态链接库 =============
 add_library(featureExtract SHARED
     ${PROJECT_SOURCE_DIR}/src/decode.cpp
@@ -61,12 +80,12 @@ add_library(featureExtract SHARED
     ${PROJECT_SOURCE_DIR}/src/process_feature.cpp
 )
 
-target_link_libraries(featureExtract PRIVATE securec pcap)
+target_link_libraries(featureExtract PRIVATE ${SECUREC_LIB} pcap)
 
 target_include_directories(featureExtract PRIVATE
     ${PROJECT_SOURCE_DIR}/
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/util/huawei_secure_c/include
+    ${PROJECT_SOURCE_DIR}/util/libboundscheck/include
 )
 
 # ============= 生成 ONNX 推理动态链接库 =============
@@ -100,7 +119,7 @@ add_executable(kdadk_appid
 )
 
 target_link_libraries(kdadk_appid PRIVATE 
-    securec 
+    ${SECUREC_LIB} 
     pcap 
     featureExtract
     onnxInference
@@ -109,7 +128,7 @@ target_link_libraries(kdadk_appid PRIVATE
 target_include_directories(kdadk_appid PRIVATE
     ${PROJECT_SOURCE_DIR}/
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/util/huawei_secure_c/include
+    ${PROJECT_SOURCE_DIR}/util/libboundscheck/include
 )
 
 set_target_properties(kdadk_appid PROPERTIES
@@ -130,7 +149,7 @@ if(ENABLE_BUILD_LIB)
     )
 
     target_link_libraries(kdadk_appidlib PRIVATE 
-        securec 
+        ${SECUREC_LIB} 
         pcap
         onnxInference
     )
@@ -138,7 +157,7 @@ if(ENABLE_BUILD_LIB)
     target_include_directories(kdadk_appidlib PRIVATE
         ${PROJECT_SOURCE_DIR}/
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/util/huawei_secure_c/include
+        ${PROJECT_SOURCE_DIR}/util/libboundscheck/include
     )
     
     set_target_properties(kdadk_appidlib PROPERTIES

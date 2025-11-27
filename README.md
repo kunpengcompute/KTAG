@@ -84,6 +84,19 @@ tar -xzf onnxruntime-linux-aarch64-1.22.0.tgz
 export ONNXRUNTIME_HOME=/path/to/your/onnxruntime
 ```
 
+#### 3.1.3 配置华为安全函数
+[这里](https://gitee.com/openeuler/libboundscheck)下载源码包
+
+将下载好的源码放在`KDADK-APPID/util/`文件夹下
+
+```
+# 进入到KDADK-APPID/util/libboundscheck/下
+make CC=gcc
+
+# 设置环境变量
+export SECUREC_HOME=/path/to/your/libboundscheck
+```
+
 ### 3.2 编译指导
 在根目录下KDADK-APPID/执行下述命令
 
