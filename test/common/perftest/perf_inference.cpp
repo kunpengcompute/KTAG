@@ -7,12 +7,14 @@ TEST(KDADK_PERFTEST_INFERENCE, TimeTest)
 {
     struct timespec start_sys, end_sys;
     int ITER = 10;
+    int ret;
     std::string config_file = "../../../src/config.yaml";
     clock_gettime(CLOCK_REALTIME, &start_sys);
     for (int i = 0; i < ITER; ++i) {
-        KDADK_Inference(config_file);
+        ret = KDADK_Inference(config_file);
     }
     clock_gettime(CLOCK_REALTIME, &end_sys);
+    EXPECT_EQ(ret, 0);
     double time_ms = calculate_time_ms(start_sys, end_sys);
     double avg_time_ms = time_ms / ITER;                      // 毫秒
     double avg_time_s = avg_time_ms / 1000.0;                 // 秒

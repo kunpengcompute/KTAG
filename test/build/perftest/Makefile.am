@@ -13,7 +13,7 @@ KDADK_APPID_DIR += -I $(GMOCK_DIR)/include/
 KDADK_APPID_DIR += -I $(TEST_modules_DIR)/common/include/
 KDADK_APPID_DIR += -I $(TEST_modules_DIR)/common/perftest/
 KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/include/
-KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/util/huawei_secure_c/include
+KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/util/libboundscheck/include
 
 KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/include/
 CFLAGS += -DLIB_KDADK_APPID_NAME=\"libkdadk_appidlib.so\"
