@@ -43,7 +43,7 @@ TEST(KDADK_PERFTEST_E2E, CALCULATE_STATIC_INFO)
 
     std::mt19937 gen(std::random_device{}());
     std::uniform_int_distribution<uint32_t> dist(0, UINT32_MAX);
-
+    KDADKResult ret;
     for (size_t i = 0; i < test_data.size(); ++i) {
         test_data[i] = dist(gen);
     }
@@ -51,9 +51,10 @@ TEST(KDADK_PERFTEST_E2E, CALCULATE_STATIC_INFO)
     statistics_info result;
     clock_gettime(CLOCK_REALTIME, &start_sys);
     for (int i = 0; i < 1000; ++i) {
-        cal_statistics_info(test_data, result);
+        ret = cal_statistics_info(test_data, result);
     }
     clock_gettime(CLOCK_REALTIME, &end_sys);
+    EXPECT_EQ(ret, KDADK_STS_NO_ERR);
     double time_sys = calculate_time_ms(start_sys, end_sys);
     printf("Performance of cal_statistics_info : %.6f ms\n", time_sys);
 }
@@ -62,13 +63,15 @@ TEST(KDADK_PERFTEST_E2E, FEATURE_EXTRACT)
 {
     struct timespec start_sys, end_sys;
     int ITER = 1;
+    int ret;
     std::string pcap_file = GetFirstPcapFile();
     size_t pcapFileSize = getFileSize(pcap_file.c_str());
     clock_gettime(CLOCK_REALTIME, &start_sys);
     for (int i = 0; i < ITER; ++i) {
-        feature_extract(pcap_file.c_str());
+        ret = feature_extract(pcap_file.c_str());
     }
     clock_gettime(CLOCK_REALTIME, &end_sys);
+    EXPECT_EQ(ret, 0);
     double time_ms = calculate_time_ms(start_sys, end_sys);
     double avg_time_ms = time_ms / ITER;                      // 毫秒
     double avg_time_s = avg_time_ms / 1000.0;                 // 秒

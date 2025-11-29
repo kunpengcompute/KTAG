@@ -13,7 +13,7 @@ KDADK_APPID_DIR += -I $(GMOCK_DIR)/include/
 KDADK_APPID_DIR += -I $(TEST_modules_DIR)/common/include/
 KDADK_APPID_DIR += -I $(TEST_modules_DIR)/common/functest/
 KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/include/
-KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/util/huawei_secure_c/include
+KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/util/libboundscheck/include
 
 
 KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/include/
@@ -37,7 +37,7 @@ endif
 SRC_FILES_DIRS += $(TEST_modules_DIR)/common/functest/
 
 # Static and shared libraries that need to be linked to the program.
-LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest -L$(KDADK_APPID_modules_DIR)/output/ -lkdadk_appidlib -Wl,-rpath $(KDADK_APPID_modules_DIR)/output/
+LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest -L$(KDADK_APPID_modules_DIR)/output/ -lkdadk_appidlib -lboundscheck -Wl,-rpath $(KDADK_APPID_modules_DIR)/output/
 
 LD_LIBRARIES += -pthread -lgtest -lgtest_main -lgmock -lgmock_main -lpcap
 
