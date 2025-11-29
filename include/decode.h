@@ -8,14 +8,14 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include "securec.h"
 #include "kdadk.h"
 #include "domain_name_hash.h"
-#define SLL_HEADER_LEN                16
+#define SLL_HEADER_LEN 16
 
 typedef struct {
-uint16_t sll_pkttype;      /* packet type */
-    uint16_t sll_hatype;       /* link-layer address type */
-    uint16_t sll_halen;        /* link-layer address length */
-    uint8_t sll_addr[8];       /* link-layer address */
-    uint16_t sll_protocol;     /* protocol */
+    uint16_t sll_pkttype;  /* packet type */
+    uint16_t sll_hatype;   /* link-layer address type */
+    uint16_t sll_halen;    /* link-layer address length */
+    uint8_t sll_addr[8];   /* link-layer address */
+    uint16_t sll_protocol; /* protocol */
 } sll_header;
 
 struct dns_header {
@@ -76,12 +76,15 @@ extern const int BYTE_OFFSET_2;
 extern const int SHIFT_16;
 extern const int SHIFT_8;
 
-KDADKResult decode_link_layer(const u_char *packet, packet_info* info, int link_type, domain_name_hash *domain_name_table);
+KDADKResult decode_link_layer(const u_char *packet, packet_info *info, int link_type,
+                              domain_name_hash *domain_name_table);
 bool is_http_payload(const u_char *packet, int length);
 KDADKResult parse_http_payload(const u_char *packet, packet_info *info, uint32_t length);
-KDADKResult parse_tls_sni(const size_t msg_body_start, const size_t extensions_len, packet_info *info, const std::string_view &sv);
+KDADKResult parse_tls_sni(const size_t msg_body_start, const size_t extensions_len, packet_info *info,
+                          const std::string_view &sv);
 size_t parse_tls_cipher_suits(size_t msg_start, packet_info *info, const std::string_view &sv);
-KDADKResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end, packet_info *info, const std::string_view &sv);
+KDADKResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end, packet_info *info,
+                                   const std::string_view &sv);
 KDADKResult parse_tls(const u_char *data, packet_info *info, uint32_t len);
 KDADKResult decode_tcp(const u_char *packet, packet_info *info);
 std::string parse_domain(const u_char *data, size_t &pos);
@@ -89,6 +92,5 @@ KDADKResult decode_udp(const u_char *packet, packet_info *info, domain_name_hash
 KDADKResult decode_ipv4(const u_char *packet, packet_info *info, domain_name_hash *domain_name_table);
 KDADKResult decode_ethernet(const u_char *packet, packet_info *info, domain_name_hash *domain_name_table);
 KDADKResult decode_sll(const u_char *packet, packet_info *info, domain_name_hash *domain_name_table);
-
 
 #endif

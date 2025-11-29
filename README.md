@@ -107,7 +107,7 @@ sh build.sh
 回显如下：
 ```
 [root@ceph1 output]# ls
-kdadk_appid  libfeatureExtract.so  libkdadk_appidlib.so  libonnxInference.so
+kdadk_appid  libfeatureExtract.so  libonnxInference.so
 ```
 
 ## 4. 使用说明
@@ -124,7 +124,7 @@ Usage:
 ```
 四个接口的使用方法分别是：
 
-### 4.1 **特征提取接口**
+### 4.1 特征提取接口
 `./kdadk_appid -f <pcap_file>`
 其中参数`<pcap_file>`为要进行特征提取操作的pcap文件地址，输出为csv特征数据，位于pcap文件同级目录下。
 
@@ -145,7 +145,7 @@ python delete_flow_under_16.py
 
 python delete_first_two_column.py
 ```
-### 4.2 **模型训练接口**
+### 4.2 模型训练接口
 `./kdadk_appid -t <config.yaml>`
 其中参数`<config.yaml>`为配置模型训练所需csv文件的yaml文件地址，该接口采用调用随机森林训练python文件运行的方式执行。`config.yaml`默认在`src/`目录下。
 
@@ -193,7 +193,7 @@ Training model with: src/config.yaml
 2025-11-25 14:56:52,843 - INFO - Scaler saved as result/scaler.pkl
 StandardScaler 参数已导出到 result/scaler_params.json
 ```
-### 4.3 **模型评估接口（python）**
+### 4.3 模型评估接口（python）
 `./kdadk_appid -e <config.yaml>`
 其中参数`<config.yaml>`为配置模型评估所需csv文件的yaml文件地址，该接口采用调用随机森林评估python文件运行的方式执行。`config.yaml`默认在`src/`目录下。
 
@@ -221,7 +221,7 @@ weighted avg     0.9953    0.9952    0.9952     26863
 2025-11-25 14:58:35,966 - INFO - Total samples: 26863
 2025-11-25 14:58:35,966 - INFO - Correct predictions: 26735/26863
 ```
-### 4.4 **模型评估接口（C++）**
+### 4.4 模型评估接口（C++）
 `./kdadk_appid -i <config.yaml>`
 其中参数`<config.yaml>`为配置模型推理所需csv文件的yaml文件地址，该接口采用随机森林模型C++推理方式执行。`config.yaml`默认在`src/`目录下。
 

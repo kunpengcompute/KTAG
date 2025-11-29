@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16.3)
 project(KDADK_APPID LANGUAGES C CXX ASM)
 
-if(NOT EXISTS ${PROJECT_SOURCE_DIR}/util/huawei_secure_c/lib/)
-execute_process(COMMAND make -C ${PROJECT_SOURCE_DIR}/util/huawei_secure_c/src lib WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+if(NOT EXISTS ${PROJECT_SOURCE_DIR}/util/libboundscheck/lib/)
+execute_process(COMMAND make -C ${PROJECT_SOURCE_DIR}/util/libboundscheck/src lib WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 endif()
 
 # ----------------------------------------------------------------------------
