@@ -4,14 +4,10 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include "securec.h"
 #include "kdadk_core.h"
 #include "kdadk_appidver.h"
-const KDADKLibraryVersion* KDADK_GetLibVersion()
+const KDADKLibraryVersion *KDADK_GetLibVersion()
 {
-static KDADKLibraryVersion libVersion = {
-        KDADK_APPID_VERSION_MAJOR,
-        KDADK_APPID_VERSION_MINOR,
-        KDADK_APPID_VERSION_PATCH,
-        KDADK_APPID_VERSION_BUILDDATE
-    };
+    static KDADKLibraryVersion libVersion = {KDADK_APPID_VERSION_MAJOR, KDADK_APPID_VERSION_MINOR,
+                                             KDADK_APPID_VERSION_PATCH, KDADK_APPID_VERSION_BUILDDATE};
     return &libVersion;
 }
 
