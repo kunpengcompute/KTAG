@@ -31,7 +31,14 @@ CFLAGS +=
 SRC_FILES_DIRS += $(TEST_modules_DIR)/common/perftest/
 
 # Static and shared libraries that need to be linked to the program.
-LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest -L$(KDADK_APPID_modules_DIR)/output/ -lkdadk_appidlib -lonnxInference -Wl,-rpath $(KDADK_APPID_modules_DIR)/output/
+LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
+                -L$(KDADK_APPID_modules_DIR)/output/ \
+                -L$(KDADK_APPID_modules_DIR)/util/libboundscheck/lib \
+                -lkdadk_appidlib \
+                -lonnxInference \
+                -lboundscheck \
+                -Wl,-rpath,$(KDADK_APPID_modules_DIR)/output/ \
+                -Wl,-rpath,$(KDADK_APPID_modules_DIR)/util/libboundscheck/lib
 
 LD_LIBRARIES += -pthread -lgtest -lgtest_main -lgmock -lgmock_main
 
@@ -71,9 +78,11 @@ endif
 
 all : $(PROGRAM)
 run:
-	env LD_LIBRARY_PATH=$(KDADK_APPID_modules_DIR)/output/ ../../gtest-parallel/gtest-parallel ./kdadk_appid_perftest --gtest_filter=$(FILTER)
+	env LD_LIBRARY_PATH=$(KDADK_APPID_modules_DIR)/output/:$(KDADK_APPID_modules_DIR)/util/libboundscheck/lib:$$LD_LIBRARY_PATH \
+						../../gtest-parallel/gtest-parallel ./kdadk_appid_perftest --gtest_filter=$(FILTER)
 rrun:
-	env LD_LIBRARY_PATH=/usr/local/ksl/lib/ ../../gtest-parallel/gtest-parallel ./kdadk_appid_perftest --gtest_filter=$(FILTER)
+	env LD_LIBRARY_PATH=/usr/local/ksl/lib/:$(KDADK_APPID_modules_DIR)/util/libboundscheck/lib:$$LD_LIBRARY_PATH \
+						../../gtest-parallel/gtest-parallel ./kdadk_appid_perftest --gtest_filter=$(FILTER)
 
 clean :
 	@-$(RM) *.d *.a *.so

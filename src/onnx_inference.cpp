@@ -407,36 +407,114 @@ Config load_config(const string &config_path)
     try {
         yaml_config = YAML::LoadFile(config_path);
     } catch (const YAML::Exception &e) {
-        throw runtime_error("YAML解析错误: " + string(e.what()));
+        throw runtime_error(string(e.what()));
     }
 
-    if (yaml_config["evaluation_data_paths"]) {
-        for (const auto &class_paths : yaml_config["evaluation_data_paths"]) {
-            vector<string> paths;
-            for (const auto &path : class_paths) {
-                paths.push_back(resolve_path(path.as<string>()));
-            }
-            config.evaluation_data_paths.push_back(paths);
+    // 检查并加载 evaluation_data_paths
+    if (!yaml_config["evaluation_data_paths"]) {
+        throw runtime_error("YAML缺少必需字段 'evaluation_data_paths'");
+    }
+    
+    if (!yaml_config["evaluation_data_paths"].IsSequence()) {
+        throw runtime_error("'evaluation_data_paths' 必须是数组类型");
+    }
+    
+    for (const auto &class_paths : yaml_config["evaluation_data_paths"]) {
+        if (!class_paths.IsSequence()) {
+            throw runtime_error("YAML 'evaluation_data_paths' 中的每个元素必须是数组类型");
         }
+        
+        vector<string> paths;
+        for (const auto &path : class_paths) {
+            try {
+                paths.push_back(resolve_path(path.as<string>()));
+            } catch (const YAML::Exception &e) {
+                throw runtime_error("YAML 'evaluation_data_paths' 中的路径格式错误 - " + string(e.what()));
+            }
+        }
+        config.evaluation_data_paths.push_back(paths);
     }
 
-    if (yaml_config["evaluation_labels"]) {
-        config.evaluation_labels = yaml_config["evaluation_labels"].as<vector<int>>();
+    // 根据 evaluation_data_paths 的大小自动生成 evaluation_labels
+    // 从 0 开始递增到 evaluation_data_paths.size() - 1
+    config.evaluation_labels.clear();
+    for (size_t i = 0; i < config.evaluation_data_paths.size(); ++i) {
+        config.evaluation_labels.push_back(static_cast<int>(i));
     }
 
-    config.model_path = resolve_path(yaml_config["model_path_onnx"].as<string>("model_classifier.onnx"));
-    config.scaler_path = resolve_path(yaml_config["scaler_path_json"].as<string>("scaler_params.json"));
-    // 默认不开启异常检测开关
+    // 检查并加载 model_path_onnx
+    if (!yaml_config["model_path_onnx"]) {
+        throw runtime_error("YAML 缺少必需字段 'model_path_onnx'");
+    }
+    
+    try {
+        config.model_path = resolve_path(yaml_config["model_path_onnx"].as<string>());
+    } catch (const YAML::Exception &e) {
+        throw runtime_error("YAML 'model_path_onnx' 格式错误 - " + string(e.what()));
+    }
+
+    // 检查并加载 scaler_path_json
+    if (!yaml_config["scaler_path_json"]) {
+        throw runtime_error("YAML 缺少必需字段 'scaler_path_json'");
+    }
+    
+    try {
+        config.scaler_path = resolve_path(yaml_config["scaler_path_json"].as<string>());
+    } catch (const YAML::Exception &e) {
+        throw runtime_error("YAML 'scaler_path_json' 格式错误 - " + string(e.what()));
+    }
     config.anomaly_detect_switch = 0;
     config.anomaly_detect_limit = 0.5;
 
-    config.output_dir = resolve_path(yaml_config["output_dir"].as<string>("result"));
-    config.classification_report_file =
-        resolve_path(yaml_config["classification_report_file"].as<string>("result/classification_report.txt"));
-    config.predictions_detail_file =
-        resolve_path(yaml_config["predictions_detail_file"].as<string>("result/predictions_detail.csv"));
+    // 检查并加载 output_dir
+    if (!yaml_config["output_dir"]) {
+        throw runtime_error("YAML 缺少必需字段 'output_dir'");
+    }
+    
+    try {
+        config.output_dir = resolve_path(yaml_config["output_dir"].as<string>());
+    } catch (const YAML::Exception &e) {
+        throw runtime_error("YAML 'output_dir' 格式错误 - " + string(e.what()));
+    }
 
-    config.onnx_log_level = yaml_config["onnx_log_level"].as<string>("WARNING");
+    // 检查并加载 classification_report_file
+    if (!yaml_config["classification_report_file"]) {
+        throw runtime_error("YAML 缺少必需字段 'classification_report_file'");
+    }
+    
+    try {
+        config.classification_report_file = resolve_path(yaml_config["classification_report_file"].as<string>());
+    } catch (const YAML::Exception &e) {
+        throw runtime_error("YAML 'classification_report_file' 格式错误 - " + string(e.what()));
+    }
+
+    // 检查并加载 predictions_detail_file
+    if (!yaml_config["predictions_detail_file"]) {
+        throw runtime_error("YAML 缺少必需字段 'predictions_detail_file'");
+    }
+    
+    try {
+        config.predictions_detail_file = resolve_path(yaml_config["predictions_detail_file"].as<string>());
+    } catch (const YAML::Exception &e) {
+        throw runtime_error("YAML 'predictions_detail_file' 格式错误 - " + string(e.what()));
+    }
+
+    // 检查并加载 onnx_log_level
+    if (!yaml_config["onnx_log_level"]) {
+        throw runtime_error("YAML 缺少必需字段 'onnx_log_level'");
+    }
+    
+    try {
+        config.onnx_log_level = yaml_config["onnx_log_level"].as<string>();
+    } catch (const YAML::Exception &e) {
+        throw runtime_error("YAML 'onnx_log_level' 格式错误 - " + string(e.what()));
+    }
+
+    // 验证 onnx_log_level 的有效值
+    const vector<string> valid_log_levels = {"VERBOSE", "INFO", "WARNING", "ERROR", "FATAL"};
+    if (find(valid_log_levels.begin(), valid_log_levels.end(), config.onnx_log_level) == valid_log_levels.end()) {
+        throw runtime_error("YAML 'onnx_log_level' 的值无效，有效值为: VERBOSE, INFO, WARNING, ERROR, FATAL");
+    }
 
     return config;
 }
