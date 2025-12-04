@@ -82,6 +82,7 @@ tar -xzf onnxruntime-linux-aarch64-1.22.0.tgz
 
 # 设置环境变量
 export ONNXRUNTIME_HOME=/path/to/your/onnxruntime
+export LD_LIBRARY_PATH=$ONNXRUNTIME_HOME/lib:$LD_LIBRARY_PATH
 ```
 
 #### 3.1.3 配置华为安全函数
@@ -95,6 +96,13 @@ make CC=gcc
 
 # 设置环境变量
 export SECUREC_HOME=/path/to/your/libboundscheck
+export LD_LIBRARY_PATH=$SECUREC_HOME/lib:$LD_LIBRARY_PATH
+```
+#### 3.1.4 配置python环境
+
+在`src/py/packages.txt`文件中记录了离线训练需要的python环境依赖，可以执行下述命令安装python环境依赖
+```
+pip install -r src/py/packages.txt
 ```
 
 ### 3.2 编译指导
@@ -147,7 +155,8 @@ python delete_first_two_column.py
 ```
 ### 4.2 模型训练接口
 `./kdadk_appid -t <config.yaml>`
-其中参数`<config.yaml>`为配置模型训练所需csv文件的yaml文件地址，该接口采用调用随机森林训练python文件运行的方式执行。`config.yaml`默认在`src/`目录下。
+其中参数`<config.yaml>`为配置模型训练所需csv文件的yaml文件地址，该接口采用调用随机森林训练python文件运行的方式执行。`config.yaml`默认在`src/`目录下。[config配置说明](#config配置)
+
 
 ```
 (base) [root@ceph1 output]# ./kdadk_appid -t ../src/config.yaml 
@@ -195,7 +204,7 @@ StandardScaler 参数已导出到 result/scaler_params.json
 ```
 ### 4.3 模型评估接口（python）
 `./kdadk_appid -e <config.yaml>`
-其中参数`<config.yaml>`为配置模型评估所需csv文件的yaml文件地址，该接口采用调用随机森林评估python文件运行的方式执行。`config.yaml`默认在`src/`目录下。
+其中参数`<config.yaml>`为配置模型评估所需csv文件的yaml文件地址，该接口采用调用随机森林评估python文件运行的方式执行。`config.yaml`默认在`src/`目录下。[config配置说明](#config配置)
 
 ```
 (base) [root@ceph1 output]# ./kdadk_appid -e ../src/config.yaml 
@@ -223,7 +232,7 @@ weighted avg     0.9953    0.9952    0.9952     26863
 ```
 ### 4.4 模型评估接口（C++）
 `./kdadk_appid -i <config.yaml>`
-其中参数`<config.yaml>`为配置模型推理所需csv文件的yaml文件地址，该接口采用随机森林模型C++推理方式执行。`config.yaml`默认在`src/`目录下。
+其中参数`<config.yaml>`为配置模型推理所需csv文件的yaml文件地址，该接口采用随机森林模型C++推理方式执行。`config.yaml`默认在`src/`目录下。[config配置说明](#config配置)
 
 ```
 (base) [root@ceph1 output]# ./kdadk_appid -i ../src/config.yaml 
@@ -250,7 +259,79 @@ ONNX推理：成功解析标签数量 = 26863
 
 推理完成！结果已保存到 result 目录
 Inference completed.
-``` 
+```
+<a id="config配置"></a>
+### 4.5 config配置
+- **`training_data_paths`**：**模型训练**数据输入，每一类数据置于一个数组中，不同数组代表不同类别，一类数据可以存放多个csv文件
+
+```
+training_data_paths:
+- [
+  'data/bilibili/csv/bilibili_20250616_204043_10h_android_16.csv',
+  'data/bilibili/csv/bilibili_20250716_101749_5h_android_18.csv',
+  'data/bilibili/csv/bilibili_20250717_191237_50400_android_17.csv',
+  'data/bilibili/csv/bilibili_20250718_101704_25200_android_19.csv'
+]
+- [
+  'data/wenxiaoyan/csv/wenxiaoyan_20250726_172552_129600_android_16.csv',
+  'data/wenxiaoyan/csv/wenxiaoyan_20250804_204806_144000_android_17.csv',
+  'data/wenxiaoyan/csv/wenxiaoyan_20250804_205024_144000_android_18.csv',
+  'data/wenxiaoyan/csv/wenxiaoyan_20250804_205029_144000_android_19.csv'
+]
+```
+- **`model_path_pkl`**：训练后的模型权重输出路径，同时也是模型评估（python）的输入路径
+
+```
+model_path_pkl: result/model_classifier_2.pkl
+```
+- **`scaler_path_pkl`**：训练后的标准化器权重输出路径，同时也是模型评估（python）的输入路径
+
+```
+scaler_path_pkl: result/scaler_2.pkl
+```
+- **`model_path_onnx`**：训练后的模型权重输出路径，同时也是模型评估（C++）的输入路径
+
+```
+model_path_onnx: result/model_classifier_2.onnx
+```
+- **`scaler_path_json`**：训练后的标准化器权重输出路径，同时也是模型评估（C++）的输入路径
+
+```
+scaler_path_json: result/scaler_2.json
+```
+- **`evaluation_data_paths`**：**模型评估**数据输入，每一类数据置于一个数组中，不同数组代表不同类别，一类数据可以存放多个csv文件
+
+```
+evaluation_data_paths:
+  - ['data/bilibili/csv/bilibili_20250721_141827_21600_android_20.csv']
+  - ['data/wenxiaoyan/csv/wenxiaoyan_20250804_205038_144000_android_20.csv']
+```
+- **`output_dir`**：模型评估结果输出文件夹
+
+```
+output_dir: result
+```
+- **`classification_report_file`**：流分类报告结果路径
+
+```
+classification_report_file: result/classification_report_2.txt
+```
+- **`predictions_detail_file`**：流分类详细结果路径
+
+```
+predictions_detail_file: result/predictions_detail_2.csv
+```
+- **`onnx_log_level`**：ONNX运行时配置
+
+```
+onnx_log_level: WARNING
+# VERBOSE   详细信息
+# INFO      一般信息
+# WARNING   警告
+# ERROR     错误
+# FATAL     致命错误
+```
+❗**注：所有路径支持绝对路径和相对路径，推荐使用绝对路径，在使用相对路径时默认从当前仓库根目录下算起。**
 ## 5. 测试框架
 
 ### 5.1 功能测试
