@@ -5,7 +5,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #define DECODE_H
 #include <stdint.h>
 #include <unordered_map>
-#include "securec.h"
 #include "kdadk.h"
 #include "domain_name_hash.h"
 #define SLL_HEADER_LEN 16

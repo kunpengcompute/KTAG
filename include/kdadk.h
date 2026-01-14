@@ -10,8 +10,6 @@
 
 #include "kdadk_type.h"
 
-void process_error(KDADKResult type);
-
 typedef struct {
 uint32_t src_ip;
     uint16_t src_port;

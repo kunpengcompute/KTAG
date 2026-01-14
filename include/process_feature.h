@@ -20,19 +20,13 @@ typedef struct {
     domain_name_hash *domain_name_table;
     std::string feature_csv_file;
     int link_type;
+    std::vector<std::vector<float>> *data;
+    std::vector<std::string> *rawbow;
 } pcap_handler_parameters;
 
-extern uint32_t g_total_packet;
-extern uint32_t g_decode_packet;
-
-void process_error(KDADKResult type);
 flow_hash_node *process_tcp_packet(flow_hash *hash_table, packet_info *info);
 flow_hash_node *process_udp_packet(flow_hash *hash_table, packet_info *info);
 void process_rawbow(flow_hash *hash_table, packet_info *info, flow_hash_node *node,
                     domain_name_hash *domain_name_table);
-void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet);
-KDADKResult process_remaining_node(flow_hash *hash_table, std::string feature_csv_file);
-std::string init_csv_result_file(const char *filename);
-int feature_extract(const char *pcap_file);
 
 #endif
