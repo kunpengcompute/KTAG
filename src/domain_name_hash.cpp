@@ -5,7 +5,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include <cstring>
 #include <algorithm>
 #include "domain_name_hash.h"
-#include "securec.h"
+
 KDADKResult domain_name_table_create(domain_name_hash **domain_name_table)
 {
 if (domain_name_table == nullptr) {

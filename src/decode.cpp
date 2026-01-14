@@ -330,12 +330,12 @@ KDADKResult decode_udp(const u_char *packet, packet_info *info, domain_name_hash
 
             if (ntohs(rr->type) == DNS_RESPOND_IPV4_TYPE) {
                 struct in_addr ipv4_addr;
-                memcpy_s(&ipv4_addr, sizeof(struct in_addr), rr->data, sizeof(struct in_addr));
+                memcpy(&ipv4_addr, rr->data, sizeof(struct in_addr));
 
                 domain_name_table_add(domain_name_table, ipv4_addr.s_addr, domain);
             } else if (ntohs(rr->type) == DNS_RESPOND_IPV6_TYPE) {
                 struct in6_addr ipv6_addr;
-                memcpy_s(&ipv6_addr, sizeof(struct in6_addr), rr->data, sizeof(struct in6_addr));
+                memcpy(&ipv6_addr, rr->data, sizeof(struct in6_addr));
                 char ipv6_str[INET6_ADDRSTRLEN];
                 inet_ntop(AF_INET6, &ipv6_addr, ipv6_str, sizeof(ipv6_str));
             }

@@ -8,8 +8,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include <unordered_set>
 #include <algorithm>
 
-#include "securec.h"
-
 #define ALIGN(s) (((s) + 63) & ~63)
 const int ALIGN_SIZE = 64;
 
@@ -70,7 +68,7 @@ KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
         return KDADK_STS_MALLOC_FAILED;
     }
 
-    (void)memset_s(table, sizeof(flow_hash), 0, sizeof(flow_hash));
+    memset(table, 0, sizeof(flow_hash));
     table->bucket_num = buckets;
     table->build_ok = 0;
 
@@ -79,7 +77,7 @@ KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
     if (malloc_result || malloc_ptr == nullptr) {
         return KDADK_STS_MALLOC_FAILED;
     }
-    memset_s(malloc_ptr, malloc_size, 0, malloc_size);
+    memset(malloc_ptr, 0, malloc_size);
     table->buckets = (flow_hash_bucket *)malloc_ptr;
 
     for (i = 0; i < buckets; i++) {
@@ -187,7 +185,7 @@ flow_hash_node *hash_table_add(flow_hash *hash_table, const packet_info *info)
     if (hash_table->buckets[bucket_idx].nodes != nullptr)
         hash_table->buckets[bucket_idx].nodes->link_pre = node;
     hash_table->buckets[bucket_idx].nodes = node;
-    (void)memcpy_s(&node->tuple, IPV4_TUPLE_SIZE, &key, IPV4_TUPLE_SIZE);
+    memcpy(&node->tuple, &key, IPV4_TUPLE_SIZE);
     node->flow_src_ip = info->tuple.src_ip;
 
     hash_table->buckets[bucket_idx].node_num++;

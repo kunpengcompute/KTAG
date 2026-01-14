@@ -2,6 +2,9 @@ if(NOT KDADK_APPID_MODULES_PATH)
 set(KDADK_APPID_MODULES_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
 endif(NOT KDADK_APPID_MODULES_PATH)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # ============= ONNX Runtime 配置 =============
 set(ONNXRUNTIME_ROOT "$ENV{ONNXRUNTIME_HOME}" CACHE PATH "Root directory of ONNX Runtime installation")
 if(NOT ONNXRUNTIME_ROOT)
@@ -46,123 +49,71 @@ get_filename_component(YAML_CPP_LIB_DIR ${YAML_CPP_LIB} DIRECTORY)
 message(STATUS "Found yaml-cpp library: ${YAML_CPP_LIB}")
 message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 
-# ============= huawei安全函数配置 =============
-set(SECUREC_ROOT "$ENV{SECUREC_HOME}" CACHE PATH "Root directory of SECUREC installation")
-if(NOT SECUREC_ROOT)
-    set(SECUREC_ROOT "${PROJECT_SOURCE_DIR}/util/libboundscheck")
-endif()
-find_path(SECUREC_INCLUDE
-    NAMES securec.h
-    PATHS ${SECUREC_ROOT}
-    PATH_SUFFIXES include
-    NO_DEFAULT_PATH
-    REQUIRED
-)
-
-find_library(SECUREC_LIB
-    NAMES boundscheck
-    PATHS ${SECUREC_ROOT}
-    PATH_SUFFIXES lib
-    NO_DEFAULT_PATH
-    REQUIRED
-)
-
-get_filename_component(SECUREC_LIB_DIR ${SECUREC_LIB} DIRECTORY)
-message(STATUS "Found securec library: ${SECUREC_LIB}")
-message(STATUS "securec library directory: ${SECUREC_LIB_DIR}")
-
 # ============= 生成特征提取动态链接库 =============
-add_library(featureExtract SHARED
+add_library(KDADK_feature_extract SHARED
     ${PROJECT_SOURCE_DIR}/src/decode.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
     ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/process_feature.cpp
+    ${PROJECT_SOURCE_DIR}/src/kdadk_feature_extract.cpp
 )
 
-target_link_libraries(featureExtract PRIVATE ${SECUREC_LIB} pcap)
+target_link_libraries(KDADK_feature_extract PRIVATE pcap)
 
-target_include_directories(featureExtract PRIVATE
+target_include_directories(KDADK_feature_extract PRIVATE
     ${PROJECT_SOURCE_DIR}/
     ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/util/libboundscheck/include
 )
 
 # ============= 生成 ONNX 推理动态链接库 =============
-add_library(onnxInference SHARED
-    ${PROJECT_SOURCE_DIR}/src/onnx_inference.cpp
+add_library(KDADK_inference SHARED
+    ${PROJECT_SOURCE_DIR}/src/utils.cpp
+    ${PROJECT_SOURCE_DIR}/src/kdadk_inference.cpp
 )
 
 # 直接使用库文件路径，不使用 -l 链接
-target_link_libraries(onnxInference PRIVATE 
+target_link_libraries(KDADK_inference PRIVATE 
     ${ONNXRUNTIME_LIB}
     ${YAML_CPP_LIB}
 )
 
-target_include_directories(onnxInference PRIVATE
+target_include_directories(KDADK_inference PRIVATE
     ${PROJECT_SOURCE_DIR}/
     ${PROJECT_SOURCE_DIR}/include
     ${YAML_CPP_INCLUDE}
     ${ONNXRUNTIME_INCLUDE_DIR}
 )
 
-set_target_properties(onnxInference PROPERTIES
+set_target_properties(KDADK_inference PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     LINK_FLAGS "-Wl,-rpath,${ONNXRUNTIME_LIB_DIR}:${YAML_CPP_LIB_DIR}:/usr/local/lib64:/usr/lib64"
-)
-
-# ============= 生成可执行文件 =============
-add_executable(kdadk_appid 
-    ${PROJECT_SOURCE_DIR}/src/getProductVersion.c
-    ${PROJECT_SOURCE_DIR}/src/main.cpp
-)
-
-target_link_libraries(kdadk_appid PRIVATE 
-    ${SECUREC_LIB} 
-    pcap 
-    featureExtract
-    onnxInference
-)
-
-target_include_directories(kdadk_appid PRIVATE
-    ${PROJECT_SOURCE_DIR}/
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/util/libboundscheck/include
-)
-
-set_target_properties(kdadk_appid PROPERTIES
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    LINK_FLAGS "-Wl,-rpath,${ONNXRUNTIME_LIB_DIR}:${YAML_CPP_LIB_DIR}:/usr/local/lib64:/usr/lib64:\$ORIGIN"
 )
 
 # ============= 生成动态库(可选) =============
 if(ENABLE_BUILD_LIB)
     add_library(kdadk_appidlib SHARED
         ${PROJECT_SOURCE_DIR}/src/getProductVersion.c
-        ${PROJECT_SOURCE_DIR}/src/decode.cpp
-        ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
-        ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
-        ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
-        ${PROJECT_SOURCE_DIR}/src/process_feature.cpp
     )
 
-    target_link_libraries(kdadk_appidlib PRIVATE 
-        ${SECUREC_LIB} 
+    target_link_libraries(kdadk_appidlib PRIVATE
         pcap
-        onnxInference
+        KDADK_feature_extract
+        KDADK_inference
+        ${ONNXRUNTIME_LIB} 
     )
 
     target_include_directories(kdadk_appidlib PRIVATE
         ${PROJECT_SOURCE_DIR}/
         ${PROJECT_SOURCE_DIR}/include
-        ${PROJECT_SOURCE_DIR}/util/libboundscheck/include
+        ${ONNXRUNTIME_INCLUDE_DIR}
     )
     
     set_target_properties(kdadk_appidlib PROPERTIES
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED ON
+        LINK_FLAGS "-Wl,-rpath,${ONNXRUNTIME_LIB_DIR}:${YAML_CPP_LIB_DIR}:/usr/local/lib64:/usr/lib64:\$ORIGIN"
     )
 endif()
 

@@ -1,7 +1,9 @@
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
-#include "securec.h"
+#include <stdio.h>
+#include <stddef.h>
+#include <string.h>
 #include "kdadk_core.h"
 #include "kdadk_appidver.h"
 const KDADKLibraryVersion *KDADK_GetLibVersion()
@@ -16,12 +18,14 @@ KDADKResult KDADK_GetProductVersion(KDADKProVersion *packageInfo)
     if (packageInfo == NULL) {
         return KDADK_STS_NULL_PTR_ERR;
     }
-    strcpy_s(packageInfo->componentName, KDADK_VERSION_INFO_LEN, KDADK_APPID_COMPONENT_NAME);
-    strcpy_s(packageInfo->componentVersion, KDADK_VERSION_INFO_LEN, KDADK_APPID_VERSION);
-    strcpy_s(packageInfo->componentAppendInfo, KDADK_VERSION_INFO_LEN, KDADK_APPID_TOOLCHAIN_INFO);
-    strcpy_s(packageInfo->productName, KDADK_VERSION_INFO_LEN, "Kunpeng Boostkit");
-    strcpy_s(packageInfo->productVersion, KDADK_VERSION_INFO_LEN, KDADK_APPID_PRODUCT_VERSION);
-    strcpy_s(packageInfo->softwareName, KDADK_VERSION_INFO_LEN, KDADK_APPID_SOFTWARE_NAME);
-    strcpy_s(packageInfo->softwareVersion, KDADK_VERSION_INFO_LEN, KDADK_APPID_VERSION);
+    
+    snprintf(packageInfo->componentName, KDADK_VERSION_INFO_LEN, "%s", KDADK_APPID_COMPONENT_NAME);
+    snprintf(packageInfo->componentVersion, KDADK_VERSION_INFO_LEN, "%s", KDADK_APPID_VERSION);
+    snprintf(packageInfo->componentAppendInfo, KDADK_VERSION_INFO_LEN, "%s", KDADK_APPID_TOOLCHAIN_INFO);
+    snprintf(packageInfo->productName, KDADK_VERSION_INFO_LEN, "%s", "Kunpeng Boostkit");
+    snprintf(packageInfo->productVersion, KDADK_VERSION_INFO_LEN, "%s", KDADK_APPID_PRODUCT_VERSION);
+    snprintf(packageInfo->softwareName, KDADK_VERSION_INFO_LEN, "%s", KDADK_APPID_SOFTWARE_NAME);
+    snprintf(packageInfo->softwareVersion, KDADK_VERSION_INFO_LEN, "%s", KDADK_APPID_VERSION);
+    
     return KDADK_STS_NO_ERR;
 }
