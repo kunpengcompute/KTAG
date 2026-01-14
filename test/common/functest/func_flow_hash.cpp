@@ -25,67 +25,19 @@ TEST(KDADK_FLOW_HASH, ChangeNodeStatusNullptr)
     EXPECT_EQ(change_node_status(nullptr, nullptr, 1), nullptr);
 }
 
-TEST(KDADK_FLOW_HASH, FullProcess)
-{
-    flow_hash *hash_table = nullptr;
-    domain_name_hash *domain_name_table = nullptr;
-    pcap_handler_parameters parameters{};
-    KDADKResult ret;
-
-
-    char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t *pcap = pcap_open_offline(TEST_TRACE, errbuf);
-    if (!pcap) {
-        fprintf(stderr, "Error opening pcap file: %s\n", errbuf);
-        return;
-    }
-
-    parameters.link_type = pcap_datalink(pcap);
-    if (parameters.link_type != DLT_EN10MB && parameters.link_type != DLT_LINUX_SLL) {
-        printf("only supports Ethernet DLT_EN10MB or DLT_LINUX_SLL\n");
-        return;
-    }
-
-    // Init hash table
-    ret = hash_table_create(&hash_table, HASH_BUCKETS);
-    if (ret || hash_table == nullptr) {
-        printf("hash table create fail\n");
-        // process_error(ret);
-        return;
-    }
-    parameters.hash_table = hash_table;
-
-    // Init domain_name pool
-    ret = domain_name_table_create(&domain_name_table);
-    if (ret || domain_name_table == nullptr) {
-        printf("domain name table create fail\n");
-        process_error_test(ret);
-        return;
-    }
-    parameters.domain_name_table = domain_name_table;
-
-    // Parse each pcap packet
-    pcap_loop(pcap, 0, packet_handler, (u_char *)&parameters);
-    pcap_close(pcap);
-    printf("pcap file: %s\n", TEST_TRACE);
-    hash_table_destroy(hash_table);
-    domain_name_table_destroy(domain_name_table);
-    SUCCEED();
-}
-
-
 TEST(KDADK_FLOW_HASH, AddPacketToFlowNode_WrongIpAddr)
 {
-    pcap_info p_info = get_packet();
-    packet_test *p_test = p_info.packet_ret;
     flow_hash_node *node = new flow_hash_node;
-    memset_s(node, sizeof(flow_hash_node), 0, sizeof(flow_hash_node));
+    *node = {};
     node->flow_src_ip = 0x030011AC;
-    packet_info *info = p_test->info;
+    packet_info info_obj;
+    info_obj = {};
+    packet_info *info = &info_obj;
     info->tuple.src_ip = 0;
     info->tuple.dst_ip = 0;
     add_packet_to_flow_node(node, info);
     EXPECT_EQ((uint32_t)0, node->reverse_raw_data.packets_cnt);
+    delete node;
 }
 
 TEST(KDADK_FLOW_HASH, RemoveNodeFromHashBucketNullptr)

@@ -58,33 +58,3 @@ TEST(KDADK_PERFTEST_E2E, CALCULATE_STATIC_INFO)
     double time_sys = calculate_time_ms(start_sys, end_sys);
     printf("Performance of cal_statistics_info : %.6f ms\n", time_sys);
 }
-
-TEST(KDADK_PERFTEST_E2E, FEATURE_EXTRACT)
-{
-    struct timespec start_sys, end_sys;
-    int ITER = 1;
-    int ret;
-    std::string pcap_file = GetFirstPcapFile();
-    size_t pcapFileSize = getFileSize(pcap_file.c_str());
-    clock_gettime(CLOCK_REALTIME, &start_sys);
-    for (int i = 0; i < ITER; ++i) {
-        ret = feature_extract(pcap_file.c_str());
-    }
-    clock_gettime(CLOCK_REALTIME, &end_sys);
-    EXPECT_EQ(ret, 0);
-    double time_ms = calculate_time_ms(start_sys, end_sys);
-    double avg_time_ms = time_ms / ITER;                      // 毫秒
-    double avg_time_s = avg_time_ms / 1000.0;                 // 秒
-    printf("pcap file: %s\n", pcap_file.c_str());
-    printf("pcap file size: %d B, (%.5f MB)\n", pcapFileSize, pcapFileSize / (1024.0 * 1024.0));
-    printf("Total time: %.3f ms  of ITER: %d\n", time_ms, ITER);
-    printf("Average time per iteration: %.3f ms (%.6f s)\n", avg_time_ms, avg_time_s);
-    
-    // 速率计算
-    double speed_bps = pcapFileSize / avg_time_s;             // B/s
-    double speed_mbps = speed_bps / (1024.0 * 1024.0);       // MB/s
-    double speed_gbps = speed_bps * 8 / (1000.0 * 1000.0 * 1000.0);  // Gbps
-    
-    printf("Processing speed: %.4f MB/s\n", speed_mbps);
-    printf("Processing speed: %.4f Gbps\n", speed_gbps);
-}

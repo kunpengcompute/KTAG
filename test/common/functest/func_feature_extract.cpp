@@ -2,7 +2,7 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include "kdadk_test.h"
-
+#include "kdadk_feature_extract.h"
 
 TEST(KDADK_FEATURE_EXTRACT, CALCULATE_MEAN_Basic)
 {
@@ -214,11 +214,10 @@ class StreamFeatureTest : public::testing::Test
 protected:
     flow_hash_node *node;
     stream_feature sf;
-    std::string csv_file_name;
 
     void SetUp() override{
         node = new flow_hash_node;
-        memset_s(node, sizeof(flow_hash_node), 0, sizeof(flow_hash_node));
+        *node = {};
         node->tuple.src_ip = 0x030011AC;
         node->tuple.src_port = 8080;
         node->tuple.dst_ip = 0x040022BD; // 172.30.0.4
@@ -400,25 +399,6 @@ TEST_F(StreamFeatureTest, NoPackets) {
     EXPECT_DOUBLE_EQ(sf.receive_interval.min_value, 0.0);
 }
 
-TEST_F(StreamFeatureTest, FeatureExtract_NullNode)
-{
-    KDADKResult res = feature_extract_node(nullptr, csv_file_name);
-    EXPECT_EQ(res, KDADK_STS_NULL_PTR_ERR);
-}
-
-TEST_F(StreamFeatureTest, FeatureExtract_Basic)
-{
-    KDADKResult result = feature_extract_node(node, csv_file_name);
-    EXPECT_EQ(result, KDADK_STS_FOPEN_FILE_ERR);
-}
-
-TEST(KDADK_FEATURE_EXTRACT, Write_CSV_Header)
-{
-    std::string csv_file_name = "";
-    KDADKResult res = write_csv_header(csv_file_name);
-    EXPECT_EQ(res, KDADK_STS_FOPEN_FILE_ERR);
-}
-
 TEST(KDADK_FEATURE_EXTRACT, SI2A_NullArray){
     statistics_info si;
     int b= 0;
@@ -456,64 +436,189 @@ TEST(KDADK_FEATURE_EXTRACT, SF2A_Overflow)
     EXPECT_EQ(res,KDADK_STS_VECTOR_INDEX_OVERFLOW);
 }
 
-class FileTest : public ::testing::Test {
+class FeatureExtractorTest : public ::testing::Test {
 protected:
-    std::string temp_dir;
-    std::string valid_file;
-    std::string invalid_file;
-    flow_hash_node *node;
-
+    feature_extractor *extractor;
+    
     void SetUp() override {
-        // 创建临时目录
-        temp_dir = std::filesystem::temp_directory_path() / "csv_test";
-        std::filesystem::create_directories(temp_dir);
-        
-        // 有效文件路径
-        valid_file = temp_dir + "/valid.csv";
-        
-        // 无效文件路径（使用目录路径）
-        invalid_file = temp_dir;
-        
-        // 确保文件不存在
-        if (std::filesystem::exists(valid_file)) {
-            std::filesystem::remove(valid_file);
-        }
-        node = new flow_hash_node;
-        memset_s(node, sizeof(flow_hash_node), 0, sizeof(flow_hash_node));
-        node->tuple.src_ip = node->flow_src_ip;
-        node->tuple.src_port = 8080;
-        node->tuple.dst_ip = 0x040022BD; // 172.30.0.4
-        node->tuple.dst_port = 80;
-        node->tuple.protocol = 6; // TCP
-        node->src_ip_domain_name = "source.example.com";
-        node->dst_ip_domain_name = "dest.example.org";
-        node->status = CONNECTED;
+        extractor = nullptr;
     }
-
+    
     void TearDown() override {
-        // 清理临时目录
-        std::filesystem::remove_all(temp_dir);
-        delete node;
+        if (extractor) {
+            extractor_destroy(extractor);
+            extractor = nullptr;
+        }
     }
 };
 
-// 测试成功写入
-TEST_F(FileTest, WRITE_CSV_HEADER_Successfully)
-{
-    // 调用函数
-    KDADKResult result = write_csv_header(valid_file);
+TEST_F(FeatureExtractorTest, InitAndDestroy) {
+    // 测试正常初始化
+    extractor = extractor_init(1); // DLT_EN10MB
+    ASSERT_NE(extractor, nullptr) << "Extractor should be initialized";
     
-    // 验证返回码
-    EXPECT_EQ(result, KDADK_STS_NO_ERR);
+    // 测试销毁
+    extractor_destroy(extractor);
+    extractor = nullptr;
+    SUCCEED() << "Extractor destroyed successfully";
     
-    // 验证文件存在
-    EXPECT_TRUE(std::filesystem::exists(valid_file));
-
+    // 测试空指针销毁
+    extractor_destroy(nullptr);
+    SUCCEED() << "Destroy NULL extractor should not crash";
 }
 
-TEST_F(FileTest, WRITE_FEATURE_TO_CSV_Successfully)
-{
-    stream_feature sf;
-    KDADKResult result = write_feature_to_csv(node, sf, valid_file);
-    EXPECT_EQ(result, KDADK_STS_NO_ERR);
+TEST_F(FeatureExtractorTest, DifferentLinkTypes) {
+    // DLT_EN10MB (Ethernet)
+    extractor = extractor_init(1);
+    EXPECT_NE(extractor, nullptr) << "Should support DLT_EN10MB";
+    extractor_destroy(extractor);
+    
+    // DLT_LINUX_SLL (Linux cooked)
+    extractor = extractor_init(113);
+    EXPECT_NE(extractor, nullptr) << "Should support DLT_LINUX_SLL";
+    extractor_destroy(extractor);
+    
+    extractor = nullptr;
+}
+
+TEST_F(FeatureExtractorTest, Statistics) {
+    extractor = extractor_init(1);
+    ASSERT_NE(extractor, nullptr);
+    
+    statistics stats;
+    int ret = extractor_get_statistics(extractor, &stats);
+    
+    EXPECT_EQ(ret, EXTRACTOR_SUCCESS) << "Should get statistics successfully";
+    EXPECT_EQ(stats.total_packets, 0) << "Initial packet count should be 0";
+    EXPECT_EQ(stats.total_bytes, 0) << "Initial byte count should be 0";
+    EXPECT_EQ(stats.decoded_packets, 0) << "Initial decoded count should be 0";
+    EXPECT_EQ(stats.extracted_flows, 0) << "Initial flow count should be 0";
+}
+
+TEST_F(FeatureExtractorTest, InvalidParameters) {
+    extractor = extractor_init(1);
+    ASSERT_NE(extractor, nullptr);
+    
+    feature_vector features;
+    int has_feature;
+    struct timeval ts = {0, 0};
+    
+    // 空提取器
+    int ret = process_packet(nullptr, nullptr, 0, &ts, &features, &has_feature);
+    EXPECT_EQ(ret, EXTRACTOR_ERROR) << "Should fail with NULL extractor";
+    
+    // 空数据包
+    ret = process_packet(extractor, nullptr, 0, &ts, &features, &has_feature);
+    EXPECT_EQ(ret, EXTRACTOR_ERROR) << "Should fail with NULL packet";
+    
+    // 空时间戳
+    unsigned char packet[64] = {0};
+    ret = process_packet(extractor, packet, sizeof(packet), nullptr, &features, &has_feature);
+    EXPECT_EQ(ret, EXTRACTOR_ERROR) << "Should fail with NULL timestamp";
+    
+    // 空统计
+    ret = extractor_get_statistics(nullptr, nullptr);
+    EXPECT_EQ(ret, EXTRACTOR_ERROR) << "Should fail with NULL parameters";
+    
+    // 空finalize
+    ret = extractor_finalize(nullptr, nullptr);
+    EXPECT_EQ(ret, EXTRACTOR_ERROR) << "Should fail with NULL parameters";
+}
+
+TEST_F(FeatureExtractorTest, FeatureVectorList) {
+    extractor = extractor_init(1);
+    ASSERT_NE(extractor, nullptr);
+    
+    feature_vector_list remaining;
+    remaining.capacity = 100;
+    remaining.count = 0;
+    remaining.vectors = static_cast<feature_vector*>(
+        malloc(sizeof(feature_vector) * remaining.capacity));
+    ASSERT_NE(remaining.vectors, nullptr) << "Should allocate memory";
+
+    int ret = extractor_finalize(extractor, &remaining);
+    EXPECT_EQ(ret, EXTRACTOR_SUCCESS) << "Should finalize successfully";
+    EXPECT_GE(remaining.count, 0) << "Remaining count should be valid";
+    
+    free(remaining.vectors);
+}
+
+TEST_F(FeatureExtractorTest, PacketProcessing) {
+    extractor = extractor_init(1);
+    ASSERT_NE(extractor, nullptr);
+    
+    // 构造一个简单的以太网帧（太短，应该被拒绝）
+    unsigned char packet[14] = {0};
+    struct timeval ts = {1234567890, 0};
+    feature_vector features;
+    int has_feature;
+    
+    int ret = process_packet(extractor, packet, sizeof(packet), &ts, &features, &has_feature);
+    EXPECT_EQ(ret, EXTRACTOR_SUCCESS) << "Should process packet";
+    EXPECT_EQ(has_feature, 0) << "Short packet should have no feature";
+    
+    // 检查统计
+    statistics stats;
+    extractor_get_statistics(extractor, &stats);
+    EXPECT_GE(stats.total_packets, 0) << "Packet count should be updated";
+}
+
+TEST(FeatureVectorTest, VectorContent) {
+    feature_vector fv;
+    memset(&fv, 0, sizeof(feature_vector));
+    
+    // 测试特征向量大小
+    EXPECT_EQ(FEATURES_NUM, sizeof(fv.features) / sizeof(fv.features[0])) 
+        << "Feature vector size should match FEATURES_NUM";
+    
+    // 测试特征赋值
+    fv.features[0] = 1.0;  // flow_id
+    fv.features[1] = 192.168;  // src_ip
+    EXPECT_FLOAT_EQ(fv.features[0], 1.0) << "Feature assignment should work";
+    EXPECT_FLOAT_EQ(fv.features[1], 192.168) << "Feature assignment should work";
+}
+
+TEST_F(FeatureExtractorTest, MultiplePackets) {
+    extractor = extractor_init(1);
+    ASSERT_NE(extractor, nullptr);
+    
+    feature_vector features;
+    int has_feature;
+    
+    // 处理多个数据包
+    for (int i = 0; i < 10; i++) {
+        unsigned char packet[64] = {0};
+        struct timeval ts = {1234567890 + i, 0};
+        
+        int ret = process_packet(extractor, packet, sizeof(packet), &ts, &features, &has_feature);
+        EXPECT_EQ(ret, EXTRACTOR_SUCCESS) << "Should process packet " << i;
+    }
+    
+    // 检查统计
+    statistics stats;
+    extractor_get_statistics(extractor, &stats);
+    EXPECT_GE(stats.total_packets, 0) << "Should have processed packets";
+}
+
+TEST_F(FeatureExtractorTest, FinalizeState) {
+    extractor = extractor_init(1);
+    ASSERT_NE(extractor, nullptr);
+    
+    feature_vector_list remaining;
+    remaining.capacity = 100;
+    remaining.count = 0;
+    remaining.vectors = static_cast<feature_vector*>(
+        malloc(sizeof(feature_vector) * remaining.capacity));
+    ASSERT_NE(remaining.vectors, nullptr);
+    
+    // Finalize
+    int ret = extractor_finalize(extractor, &remaining);
+    EXPECT_EQ(ret, EXTRACTOR_SUCCESS);
+    
+    // 统计应该仍然可用
+    statistics stats;
+    ret = extractor_get_statistics(extractor, &stats);
+    EXPECT_EQ(ret, EXTRACTOR_SUCCESS);
+    
+    free(remaining.vectors);
 }

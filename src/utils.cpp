@@ -108,45 +108,46 @@ Config load_config_common(const string &config_path, bool is_online)
     }
 
     if (is_online) {
-        if (!yaml_config["columns_to_remove"]) {
-            throw runtime_error("YAML 缺少必需字段 'columns_to_remove'");
-        }
+        if (yaml_config["columns_to_remove"]) {
+            if (!yaml_config["columns_to_remove"].IsSequence()) {
+                throw runtime_error("YAML 'columns_to_remove' 必须是数组类型");
+            }
 
-        if (!yaml_config["columns_to_remove"].IsSequence()) {
-            throw runtime_error("YAML 'columns_to_remove' 必须是数组类型");
-        }
-
-        for (const auto &column : yaml_config["columns_to_remove"]) {
-            try {
-                int value = column.as<int>();
-                if (value < 0 || value > 355) {
-                    throw runtime_error("YAML 'columns_to_remove' 中的元素必须是0-355之间的整数，当前值: " + to_string(value));
+            for (const auto &column : yaml_config["columns_to_remove"]) {
+                try {
+                    int value = column.as<int>();
+                    if (value < 0 || value > 355) {
+                        throw runtime_error("YAML 'columns_to_remove' 中的元素必须是0-355之间的整数，当前值: " + to_string(value));
+                    }
+                    config.columns_to_remove.push_back(value);
+                } catch (const YAML::Exception &e) {
+                    throw runtime_error("YAML 'columns_to_remove' 中的元素格式错误 - " + string(e.what()));
                 }
-                config.columns_to_remove.push_back(value);
+            }
+        } else {
+            config.columns_to_remove.clear();  // 或者不操作，如果默认已经是空的
+        }
+
+        if (yaml_config["filter_packets"]) {
+            if (yaml_config["filter_packets"].IsNull()) {
+                throw runtime_error("YAML 'filter_packets' 不能为空");
+            }
+            
+            try {
+                if (!yaml_config["filter_packets"].IsScalar()) {
+                    throw runtime_error("YAML 'filter_packets' 必须是标量类型");
+                }
+
+                config.filter_packets = yaml_config["filter_packets"].as<int>();
+
+                if (config.filter_packets < 0) {
+                    throw runtime_error("YAML 'filter_packets' 必须为非负整数，当前值: " + to_string(config.filter_packets));
+                }
             } catch (const YAML::Exception &e) {
-                throw runtime_error("YAML 'columns_to_remove' 中的元素格式错误 - " + string(e.what()));
+                throw runtime_error("YAML 'filter_packets' 格式错误 - " + string(e.what()));
             }
-        }
-        if (!yaml_config["filter_packets"]) {
-            throw runtime_error("YAML 缺少必需字段 'filter_packets'");
-        }
-        if (yaml_config["filter_packets"].IsNull()) {
-            throw runtime_error("YAML 'filter_packets' 不能为空");
-        }
-        try {
-            if (!yaml_config["filter_packets"].IsScalar()) {
-                throw runtime_error("YAML 'filter_packets' 必须是标量类型");
-            }
-
-            config.filter_packets = yaml_config["filter_packets"].as<int>();
-
-            if (config.filter_packets < 0) {
-                throw runtime_error("YAML 'filter_packets' 必须为整数，当前值: " + to_string(config.filter_packets));
-            }
-        } catch (const YAML::BadConversion &e) {
-            throw runtime_error("YAML 'filter_packets' 类型错误，必须是整数类型");
-        } catch (const YAML::Exception &e) {
-            throw runtime_error("YAML 'filter_packets' 格式错误 - " + string(e.what()));
+        } else {
+            config.filter_packets = 0;
         }
     }
 
