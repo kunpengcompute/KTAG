@@ -4,9 +4,8 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #ifndef FEATURE_EXTRACT_H
 #define FEATURE_EXTRACT_H
 #include <math.h>
-#include "securec.h"
 #include "kdadk.h"
-#define CSV_FILE_NAME "testResult.csv"
+#define RAWBOW_MAX_LEN 4096
 const int HISTOGRAM_NUMS = 16;          // 统计信息-直方图位数
 const int RAW_BOW_HISTOGRAM_NUMS = 32;  // 词袋信息-直方图位数
 const int NETWORK_TUPLE_CNT = 5;        // 五元组特征
@@ -28,7 +27,7 @@ const int FEATURE_MAX_SIZE = (NETWORK_TUPLE_CNT +
                               RAW_BOW_HISTOGRAM_NUMS);
 
 struct statistics_info {
-double min_value;
+    double min_value;
     double max_value;
     double mean_value;
     double var_value;
@@ -59,16 +58,16 @@ struct stream_feature {
     double raw_bow_crc_result[RAW_BOW_HISTOGRAM_NUMS];
 };
 
-KDADKResult write_csv_header(const std::string &csv_file_name);
-KDADKResult feature_extract_node(flow_hash_node *node, const std::string &csv_file_name);
+KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
+                                   char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len);
 double calculate_mean(const std::vector<uint32_t> &nums);
 double calculate_var(const std::vector<uint32_t> &nums, double mean);
 void calculate_hist(const std::vector<uint32_t> &nums, double min_val, double max_val, double *histogram,
-    int histogram_size, bool isTimeInterval = false);
+                    int histogram_size, bool isTimeInterval = false);
 void calculate_hist_abs(const std::vector<uint32_t> &nums, double max_val, double *histogram, int histogram_size,
-    bool isTimeInterval = false);
+                        bool isTimeInterval = false);
 void calculate_hist_nor(const std::vector<uint32_t> &nums, double mean_val, double var_val, double *histogram,
-    int histogram_size, bool isTimeInterval = false);
+                        int histogram_size, bool isTimeInterval = false);
 
 void cal_diffs(const std::vector<struct timeval> &ts, std::vector<uint32_t> &time_diff);
 void calculate_crc(flow_hash_node *node, double *raw_bow_crc_result, int raw_bow_size);
@@ -77,6 +76,5 @@ KDADKResult cal_statistics_info(std::vector<uint32_t> &array, statistics_info &a
 KDADKResult cal_stream_feature(flow_hash_node *node, stream_feature &node_sf);
 KDADKResult statisticsInfo2Array(const statistics_info &data, double *array, int size, int &begin);
 KDADKResult streamFeatur2Array(const stream_feature &data, double *array, int size);
-KDADKResult write_feature_to_csv(flow_hash_node *node, const stream_feature &data, const std::string &file_name);
 
 #endif

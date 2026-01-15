@@ -356,7 +356,7 @@ class DecodeTcpTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // 初始化TCP头部
-        memset_s(&tcp_hdr, sizeof(tcp_hdr), 0, sizeof(tcp_hdr));
+        tcp_hdr = {};
         tcp_hdr.th_off = 5; // 标准TCP头部长度 (5 * 4 = 20字节)
         
         // 初始化数据包信息
@@ -368,7 +368,7 @@ protected:
     // 创建完整的数据包
     std::vector<u_char> create_packet(bool include_payload = true) {
         std::vector<u_char> packet(sizeof(tcp_hdr));
-        memcpy_s(packet.data(),sizeof(tcp_hdr), &tcp_hdr, sizeof(tcp_hdr));
+        memcpy(packet.data(), &tcp_hdr, sizeof(tcp_hdr));
         
         if (include_payload) {
             packet.resize(info.packet_size);
@@ -432,10 +432,10 @@ class DecodeUdpTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // 初始化UDP头部
-        memset_s(&udp_hdr,sizeof(udp_hdr), 0, sizeof(udp_hdr));
+        udp_hdr = {};
         
         // 初始化DNS头部
-        memset_s(&dns_hdr,sizeof(dns_hdr), 0, sizeof(dns_hdr));
+        dns_hdr = {};
         dns_hdr.ancount = htons(0);
         
         // 初始化数据包信息
@@ -461,13 +461,13 @@ protected:
         
         // UDP头部
         packet.resize(sizeof(udp_hdr));
-        memcpy_s(packet.data(), sizeof(udp_hdr), &udp_hdr, sizeof(udp_hdr));
+        memcpy(packet.data(), &udp_hdr, sizeof(udp_hdr));
         
         // DNS头部
         dns_hdr.ancount = htons(ancount);
         size_t dns_pos = packet.size();
         packet.resize(packet.size() + sizeof(dns_hdr));
-        memcpy_s(packet.data() + dns_pos,sizeof(dns_hdr), &dns_hdr, sizeof(dns_hdr));
+        memcpy(packet.data() + dns_pos, &dns_hdr, sizeof(dns_hdr));
         
         // 问题部分 (域名)
         size_t q_pos = packet.size();
@@ -539,13 +539,13 @@ protected:
         
         // UDP头部
         packet.resize(sizeof(udp_hdr));
-        memcpy_s(packet.data(),sizeof(udp_hdr), &udp_hdr, sizeof(udp_hdr));
+        memcpy(packet.data(), &udp_hdr, sizeof(udp_hdr));
         
         // DNS头部
         dns_hdr.ancount = htons(ancount);
         size_t dns_pos = packet.size();
         packet.resize(packet.size() + sizeof(dns_hdr));
-        memcpy_s(packet.data() + dns_pos,sizeof(dns_hdr), &dns_hdr, sizeof(dns_hdr));
+        memcpy(packet.data() + dns_pos, &dns_hdr, sizeof(dns_hdr));
         
         // 问题部分 (域名)
         size_t q_pos = packet.size();
@@ -630,7 +630,7 @@ TEST_F(DecodeUdpTest, DecodeUdp_BasicUdpDecoding) {
     udp_hdr.uh_dport = htons(80);
     
     std::vector<u_char> packet(sizeof(udp_hdr));
-    memcpy_s(packet.data(),sizeof(udp_hdr), &udp_hdr, sizeof(udp_hdr));
+    memcpy(packet.data(), &udp_hdr, sizeof(udp_hdr));
     info.packet_size = packet.size();
     
     auto result = decode_udp(packet.data(), &info, domain_table);
@@ -711,6 +711,7 @@ TEST(KDADK_DECODE, DecodeSll_NotSupport)
     packet_test *p_test = p_info.packet_ret;
     sll_header *sll_hdr = new sll_header;
     sll_hdr->sll_protocol = htons(ETHERTYPE_IP);
+    std::cout << "sll_protocol: " << ntohs(sll_hdr->sll_protocol) << std::endl;
     const u_char *packet = reinterpret_cast<const u_char *>(sll_hdr);
     EXPECT_EQ(KDADK_STS_NOT_SUPPORT, decode_sll(packet, p_test->info, p_test->domain_name_table));
 }

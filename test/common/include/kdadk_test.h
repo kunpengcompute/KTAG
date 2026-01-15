@@ -14,7 +14,6 @@
 #include <dlfcn.h>
 #include <gtest/gtest.h>
 #include "process_feature.h"
-#include <time.h>
 #include <math.h>
 #include <filesystem>
 #include "domain_name_hash.h"
@@ -26,7 +25,6 @@
 #include <netinet/udp.h>
 #include <netinet/ip.h>
 #include <net/ethernet.h>
-#include <arpa/inet.h>
 #include "kdadk.h"
 #include <random>
 #include <ctime>
@@ -35,7 +33,6 @@
 #include <cstring>
 #include <libgen.h>
 #include <linux/limits.h>
-#include "onnx_inference.h"
 
 #define NUM_TESTS 1000000
 
@@ -154,7 +151,7 @@ static packet_test packet_handler_get(u_char *user_data, const struct pcap_pkthd
     return packet_ret;
 }
 
-static pcap_info get_packet()
+static inline pcap_info get_packet()
 {   
     flow_hash *hash_table = nullptr;
     domain_name_hash *domain_name_table = nullptr;

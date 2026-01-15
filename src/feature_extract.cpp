@@ -7,11 +7,11 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include <cmath>
 #include <cstdio>
 #include <unordered_set>
-#include <string>
+#include <cstring>
 #include "feature_extract.h"
 KDADKResult statisticsInfo2Array(const statistics_info &data, double *array, int size, int &begin)
 {
-if (array == nullptr) {
+    if (array == nullptr) {
         return KDADK_STS_NULL_PTR_ERR;
     }
 
@@ -73,83 +73,6 @@ KDADKResult streamFeatur2Array(const stream_feature &data, double *array, int si
     return KDADK_STS_NO_ERR;
 }
 
-KDADKResult write_csv_header(const std::string &csv_file_name)
-{
-    FILE *file = fopen(csv_file_name.c_str(), "a");
-    if (file == nullptr) {
-        return KDADK_STS_FOPEN_FILE_ERR;
-    }
-
-    // 五元组
-    int tuple_num = 5;
-    int direct_num = 2;
-    int type_num = 3;
-    const std::string tupleHeader[5] = {"src_ip", "dst_ip", "src_port", "dst_port", "protocol"};
-    const std::string direct[2] = {"send", "receive"};
-    const std::string type[3] = {"hdr", "pld", "interval"};
-
-    for (int i = 0; i < tuple_num; ++i) {
-        fprintf(file, "%s,", tupleHeader[i].c_str());
-    }
-
-    for (int i = 0; i < direct_num; ++i) {
-        fprintf(file, "%s_byte_nums,", direct[i].c_str());
-        fprintf(file, "%s_packet_nums,", direct[i].c_str());
-        for (int j = 0; j < type_num; ++j) {
-            fprintf(file, "%s_%s_min,", direct[i].c_str(), type[j].c_str());
-            fprintf(file, "%s_%s_max,", direct[i].c_str(), type[j].c_str());
-            fprintf(file, "%s_%s_mean,", direct[i].c_str(), type[j].c_str());
-            fprintf(file, "%s_%s_var,", direct[i].c_str(), type[j].c_str());
-
-            for (int k = 0; k < HISTOGRAM_NUMS; ++k) {
-                fprintf(file, "%s_%s_hist_rel_%d,", direct[i].c_str(), type[j].c_str(), k);
-            }
-
-            for (int k = 0; k < HISTOGRAM_NUMS; ++k) {
-                fprintf(file, "%s_%s_hist_abs_%d,", direct[i].c_str(), type[j].c_str(), k);
-            }
-
-            for (int k = 0; k < HISTOGRAM_NUMS; ++k) {
-                fprintf(file, "%s_%s_hist_nor_%d,", direct[i].c_str(), type[j].c_str(), k);
-            }
-        }
-    }
-
-    for (int i = 0; i < RAW_BOW_HISTOGRAM_NUMS; ++i) {
-        fprintf(file, "raw_bow_crc_hist_%d,", i);
-    }
-    fprintf(file, "raw_bow\n");
-
-    fclose(file);
-    return KDADK_STS_NO_ERR;
-}
-
-KDADKResult write_feature_to_csv(flow_hash_node *node, const stream_feature &data, const std::string &file_name)
-{
-    double array[FEATURE_MAX_SIZE];
-    streamFeatur2Array(data, array, FEATURE_MAX_SIZE);
-
-    FILE *file = fopen(file_name.c_str(), "a");
-    if (file == nullptr) {
-        return KDADK_STS_FOPEN_FILE_ERR;
-    }
-
-    for (int i = 0; i < FEATURE_MAX_SIZE - 1; ++i) {
-        fprintf(file, "%.6f,", array[i]);
-    }
-    std::string combined;
-    for (uint32_t i = 0; i < node->rawbow_cnt; ++i) {
-        if (!combined.empty()) {
-            combined += "_";
-        }
-        combined += node->rawbow[i].c_str();
-    }
-    fprintf(file, "%s\n", combined.c_str());
-
-    fclose(file);
-    return KDADK_STS_NO_ERR;
-}
-
 double calculate_mean(const std::vector<uint32_t> &nums)
 {
     if (nums.empty()) {
@@ -174,7 +97,7 @@ double calculate_var(const std::vector<uint32_t> &nums, double mean)
 }
 
 void calculate_hist(const std::vector<uint32_t> &nums, double min_val, double max_val, double *histogram,
-    int histogram_size, bool isTimeInterval)
+                    int histogram_size, bool isTimeInterval)
 {
     if (histogram == nullptr || histogram_size == 0) {
         return;
@@ -201,8 +124,8 @@ void calculate_hist(const std::vector<uint32_t> &nums, double min_val, double ma
     return;
 }
 
-void calculate_hist_abs(
-    const std::vector<uint32_t> &nums, double max_val, double *histogram, int histogram_size, bool isTimeInterval)
+void calculate_hist_abs(const std::vector<uint32_t> &nums, double max_val, double *histogram, int histogram_size,
+                        bool isTimeInterval)
 {
     if (histogram == nullptr || histogram_size == 0) {
         return;
@@ -230,7 +153,7 @@ void calculate_hist_abs(
 }
 
 void calculate_hist_nor(const std::vector<uint32_t> &nums, double mean_val, double var_val, double *histogram,
-    int histogram_size, bool isTimeInterval)
+                        int histogram_size, bool isTimeInterval)
 {
     if (histogram == nullptr || histogram_size == 0) {
         return;
@@ -287,8 +210,8 @@ void calculate_crc_byte(char &byte, uint16_t &crc)
 }
 
 const std::unordered_set<std::string> KEY_WORDS = {
-    "iqiyi", "tencent", "deepseek", "qq", "bilibili", "bilivideo", "video", "chat", "zijie", "bytedance", "kimi", "mgtv", "hitv", "baidu", "yiyan",
-    "youku", "alicdn", "taobao", "iku", "hunyuan", "yuanbao"
+    "iqiyi", "tencent", "deepseek", "qq",    "bilibili", "bilivideo", "video",  "chat", "zijie",   "bytedance", "kimi",
+    "mgtv",  "hitv",    "baidu",    "yiyan", "youku",    "alicdn",    "taobao", "iku",  "hunyuan", "yuanbao"
 };
 
 void calculate_crc(flow_hash_node *node, double *raw_bow_crc_result, int raw_bow_size)
@@ -342,7 +265,7 @@ KDADKResult cal_statistics_info(std::vector<uint32_t> &array, statistics_info &a
 
         cur_num = static_cast<double>(array[i]);
         sum += cur_num;
-        sum_sq +=  cur_num * cur_num;
+        sum_sq += cur_num * cur_num;
     }
     array_si.mean_value = sum / array.size();
     if (array.size() == 1) {
@@ -361,8 +284,8 @@ KDADKResult cal_statistics_info(std::vector<uint32_t> &array, statistics_info &a
 
     calculate_hist(array, array_si.min_value, array_si.max_value, array_si.hist_array, HISTOGRAM_NUMS, isTimeInterval);
     calculate_hist_abs(array, array_si.max_value, array_si.hist_array_abs, HISTOGRAM_NUMS, isTimeInterval);
-    calculate_hist_nor(
-        array, array_si.mean_value, array_si.var_value, array_si.hist_array_nor, HISTOGRAM_NUMS, isTimeInterval);
+    calculate_hist_nor(array, array_si.mean_value, array_si.var_value, array_si.hist_array_nor, HISTOGRAM_NUMS,
+                       isTimeInterval);
     return KDADK_STS_NO_ERR;
 }
 
@@ -372,7 +295,7 @@ KDADKResult cal_stream_feature(flow_hash_node *node, stream_feature &node_sf)
         return KDADK_STS_PARAMETER_ERR;
     }
 
-    memset_s(&node_sf, sizeof(stream_feature), 0, sizeof(stream_feature));
+    memset(&node_sf, 0, sizeof(stream_feature));
 
     node_sf.src_ip = node->tuple.src_ip;
     node_sf.src_port = node->tuple.src_port;
@@ -406,18 +329,65 @@ KDADKResult cal_stream_feature(flow_hash_node *node, stream_feature &node_sf)
     return KDADK_STS_NO_ERR;
 }
 
-KDADKResult feature_extract_node(flow_hash_node *node, const std::string &csv_file_name)
+KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
+                                     char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len)
 {
-    if (node == nullptr) {
+    if (!node || !feature_vector || !rawbow || !rawbow_len) {
         return KDADK_STS_NULL_PTR_ERR;
     }
 
-    stream_feature node_sf;
-    KDADKResult ret = cal_stream_feature(node, node_sf);
-    if (ret != KDADK_STS_NO_ERR) {
-        return ret;
-    }
+    memset(feature_vector, 0, sizeof(float) * FEATURE_MAX_SIZE);
+    memset(rawbow, 0, RAWBOW_MAX_LEN);
+    *rawbow_len = 0;
 
-    ret = write_feature_to_csv(node, node_sf, csv_file_name);
-    return ret;
+    try {
+        stream_feature node_sf;
+        KDADKResult ret = cal_stream_feature(node, node_sf);  // 改这里
+        if (ret != KDADK_STS_NO_ERR) {
+            return ret;
+        }
+        
+        double array[FEATURE_MAX_SIZE];
+        streamFeatur2Array(node_sf, array, FEATURE_MAX_SIZE);  // 改这里
+
+        for (int i = 0; i < FEATURE_MAX_SIZE; i++) {
+            feature_vector[i] = static_cast<float>(array[i]);
+        }
+
+        if (node->rawbow_cnt == 0) {
+            rawbow[0] = '\0';
+            *rawbow_len = 0;
+            return KDADK_STS_NO_ERR;
+        }
+
+        size_t offset = 0;
+        for (uint32_t i = 0; i < node->rawbow_cnt; i++) {
+            if (i > 0) {
+                if (offset + 1 >= RAWBOW_MAX_LEN) break;
+                rawbow[offset++] = '_';
+            }
+            
+            const char *str = node->rawbow[i].c_str();
+            size_t str_len = strlen(str);
+            
+            if (offset + str_len >= RAWBOW_MAX_LEN) {
+                str_len = RAWBOW_MAX_LEN - offset - 1;
+                if (str_len == 0) break;
+            }
+            
+            memcpy(rawbow + offset, str, str_len);
+            offset += str_len;
+        }
+        
+        rawbow[offset] = '\0';
+        *rawbow_len = offset;
+
+        return KDADK_STS_NO_ERR;
+        
+    } catch (const std::exception &e) {
+        memset(feature_vector, 0, sizeof(float) * FEATURE_MAX_SIZE);
+        memset(rawbow, 0, RAWBOW_MAX_LEN);
+        *rawbow_len = 0;
+        return KDADK_STS_UNKNOWN_ERR;
+    }
 }
