@@ -200,6 +200,7 @@ static int finalize_internal(feature_extractor *extractor, feature_vector_list *
 
                 if (feature_list_add_internal(features, &temp_fv) != EXTRACTOR_SUCCESS) {
                     fprintf(stderr, "Warning: Stopped processing remaining flows due to capacity limit\n");
+                    extractor->hash_table->buckets[i].nodes = node;
                     goto cleanup;
                 }
 
@@ -210,6 +211,7 @@ static int finalize_internal(feature_extractor *extractor, feature_vector_list *
 
                     if (rawbow_list_add_internal(rawbows, &temp_rb) != EXTRACTOR_SUCCESS) {
                         fprintf(stderr, "Warning: Stopped processing remaining flows due to capacity limit\n");
+                        extractor->hash_table->buckets[i].nodes = node;
                         goto cleanup;
                     }
                 }
