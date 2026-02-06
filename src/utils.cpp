@@ -34,7 +34,7 @@ fs::path get_executable_path()
 #endif
 }
 
-fs::path resolve_path(const std::string &path_str, const std::string &base_dir = "", int parent_levels = 1)
+fs::path resolve_path(const std::string &path_str, const std::string &base_dir = "", int parent_levels = 2)
 {
     fs::path path(path_str);
     if (path.is_absolute()) {
