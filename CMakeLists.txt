@@ -1,10 +1,6 @@
 cmake_minimum_required(VERSION 3.16.3)
 project(KDADK_APPID LANGUAGES C CXX ASM)
 
-if(NOT EXISTS ${PROJECT_SOURCE_DIR}/util/libboundscheck/lib/)
-execute_process(COMMAND make -C ${PROJECT_SOURCE_DIR}/util/libboundscheck/src lib WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-endif()
-
 # ----------------------------------------------------------------------------
 # inclue required cmake files:
 # ----------------------------------------------------------------------------
