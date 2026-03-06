@@ -40,9 +40,7 @@ LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
 				-lKDADK_feature_extract \
 				-lKDADK_inference \
 				-L$(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib/ \
-				-lonnxruntime \
-				-Wl,-rpath,$(KDADK_APPID_modules_DIR)/output/ \
-				-Wl,-rpath,$(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib/
+				-lonnxruntime
 
 LD_LIBRARIES += -pthread -lgtest -lgtest_main -lgmock -lgmock_main -lpcap
 
@@ -86,7 +84,7 @@ endif
 
 all : $(PROGRAM)
 run:
-	env LD_LIBRARY_PATH=$(KDADK_APPID_modules_DIR)/output/:$(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_functest --gtest_filter=$(FILTER)
+	env LD_LIBRARY_PATH=$(KDADK_APPID_modules_DIR)/output/:$(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib:/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_functest --gtest_filter=$(FILTER)
 rrun:
 	env LD_LIBRARY_PATH=/usr/local/ksl/lib/:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_functest --gtest_filter=$(FILTER)
 

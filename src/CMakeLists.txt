@@ -88,7 +88,6 @@ target_include_directories(KDADK_inference PRIVATE
 set_target_properties(KDADK_inference PROPERTIES
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
-    LINK_FLAGS "-Wl,-rpath,${ONNXRUNTIME_LIB_DIR}:${YAML_CPP_LIB_DIR}:/usr/local/lib64:/usr/lib64"
 )
 
 # ============= 生成动态库(可选) =============
@@ -113,7 +112,6 @@ if(ENABLE_BUILD_LIB)
     set_target_properties(kdadk_appidlib PROPERTIES
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED ON
-        LINK_FLAGS "-Wl,-rpath,${ONNXRUNTIME_LIB_DIR}:${YAML_CPP_LIB_DIR}:/usr/local/lib64:/usr/lib64:\$ORIGIN"
     )
 endif()
 
