@@ -107,7 +107,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 使用 LibFuzzer 运行测试：
 
 ```bash
-./kdadk_fuzzer -runs=30000000 -timeout=12600
+./kdadk_fuzzer -runs=30000000 -max_total_time=12600
 ```
 
 ### 5.2 运行选项
@@ -117,6 +117,6 @@ LibFuzzer 支持多种运行选项，常用的选项包括：
 | 选项 | 描述 | 默认值 |
 |------|------|--------|
 | `-max_len` | 最大输入长度 | 4096 |
-| `-timeout` | 单个测试用例的超时时间（秒） | 10 |
+| `-max_total_time` | 单个测试用例的超时时间（秒） | 10 |
 | `-runs` | 运行的测试用例数量 | 无限 |
 
