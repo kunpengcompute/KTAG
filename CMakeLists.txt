@@ -17,6 +17,10 @@ string(TIMESTAMP BUILDDATE "%Y.%m.%d")
 set(KDADK_APPID_VERSION_BUILDDATE \"${BUILDDATE}\")  # Last build time
 set(KDADK_APPID_LIBVERSION "${KDADK_APPID_VERSION_INFO}")
 
+# 为库文件添加覆盖率编译选项
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage")
+
 configure_file(
         "${PROJECT_SOURCE_DIR}/kdadk_appidver.h.in"
         "${PROJECT_SOURCE_DIR}/kdadk_appidver.h"
