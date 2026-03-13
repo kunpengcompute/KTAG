@@ -120,3 +120,75 @@ LibFuzzer 支持多种运行选项，常用的选项包括：
 | `-max_total_time` | 单个测试用例的超时时间（秒） | 10 |
 | `-runs` | 运行的测试用例数量 | 无限 |
 
+## 6. 查看覆盖率
+
+由于 Fuzz 测试使用 Clang 编译，而主库使用 GCC 编译，两者生成的覆盖率数据格式不同，需要进行合并才能得到完整的覆盖率报告。
+
+### 6.1 生成 Clang 覆盖率数据
+
+1. **运行 Fuzz 测试**：
+   ```bash
+   ./kdadk_fuzzer -runs=10000
+   ```
+
+2. **合并 .profraw 文件**：
+   ```bash
+   llvm-profdata merge -sparse default.profraw -o kdadk.profdata
+   ```
+
+3. **生成 lcov 格式的覆盖率数据**：
+   ```bash
+   llvm-cov export -format=lcov ./kdadk_fuzzer --instr-profile=kdadk.profdata > clang_coverage.info
+   ```
+
+### 6.2 生成 GCC 覆盖率数据
+
+1. **生成 lcov 格式的覆盖率数据**
+   ```bash
+   cd KDADK-APPID/build
+   lcov --capture --directory . --output-file gcc_coverage.info
+   ```
+
+### 6.3 合并覆盖率数据
+
+1. **合并两种格式的覆盖率数据**：
+   ```bash
+   cp ../test/fuzz/build/clang_coverage.info ./
+   lcov -a gcc_coverage.info -a clang_coverage.info -o combined_coverage.info
+   ```
+
+2. **生成 HTML 覆盖率报告**：
+   ```bash
+   genhtml combined_coverage.info --output-dir=coverage_report --show-details
+   ```
+
+### 6.4 查看覆盖率报告
+
+打开 `coverage_report/index.html` 文件，在浏览器中查看详细的覆盖率报告。报告将显示整个代码库的覆盖率情况，包括：
+
+- **行覆盖率**：被执行的代码行数占总代码行数的百分比
+- **函数覆盖率**：被执行的函数数占总函数数的百分比
+- **分支覆盖率**：被执行的分支数占总分支数的百分比
+
+通过分析覆盖率报告，你可以：
+1. 识别未被测试覆盖的代码区域
+2. 了解测试的有效性
+3. 发现潜在的代码问题
+
+## 7. 故障排除
+
+### 7.1 常见问题
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| Clang 编译错误 | 缺少 LibFuzzer 支持 | 确保 Clang 版本支持 LibFuzzer（Clang 6+） |
+| 覆盖率数据合并失败 | 缺少 lcov 工具 | 安装 lcov：`sudo apt install lcov` |
+| 报告生成失败 | 路径问题 | 确保所有路径正确，文件存在 |
+
+### 7.2 调试技巧
+
+1. **检查编译器版本**：确保 Clang 和 GCC 版本支持所需的功能
+2. **验证覆盖率选项**：确保编译时添加了正确的覆盖率选项
+3. **检查文件路径**：确保所有文件路径正确，特别是模型和配置文件的路径
+4. **查看错误信息**：仔细分析编译和运行时的错误信息，定位问题所在
+

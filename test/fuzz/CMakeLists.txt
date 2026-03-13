@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(kdadk_fuzz_test)
 
+set(CMAKE_CXX_COMPILER clang++)
+set(CMAKE_C_COMPILER clang)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -63,13 +66,13 @@ endif()
 
 # 构建LibFuzzer目标
 add_executable(kdadk_fuzzer kdadk_fuzzer.cpp)
-target_compile_options(kdadk_fuzzer PRIVATE -fsanitize=fuzzer,address -fprofile-arcs -ftest-coverage -g)
+target_compile_options(kdadk_fuzzer PRIVATE -fsanitize=fuzzer,address -fprofile-instr-generate -fcoverage-mapping -g)
 if(KDADK_FEATURE_LIBRARY AND KDADK_INFERENCE_LIBRARY)
-    target_link_libraries(kdadk_fuzzer PRIVATE -fsanitize=fuzzer,address -fprofile-arcs -ftest-coverage -lgcov ${KDADK_FEATURE_LIBRARY} ${KDADK_INFERENCE_LIBRARY} ${YAML_CPP_LIB})
+    target_link_libraries(kdadk_fuzzer PRIVATE -fsanitize=fuzzer,address -fprofile-instr-generate -fcoverage-mapping ${KDADK_FEATURE_LIBRARY} ${KDADK_INFERENCE_LIBRARY} ${YAML_CPP_LIB})
     if(ONNX_RUNTIME_LIBRARY)
         target_link_libraries(kdadk_fuzzer PRIVATE ${ONNX_RUNTIME_LIBRARY})
     endif()
 else()
-    target_link_libraries(kdadk_fuzzer PRIVATE -fsanitize=fuzzer,address -fprofile-arcs -ftest-coverage -lgcov)
+    target_link_libraries(kdadk_fuzzer PRIVATE -fsanitize=fuzzer,address -fprofile-instr-generate -fcoverage-mapping)
 endif()
 message(STATUS "Building LibFuzzer test")
