@@ -7,7 +7,10 @@ fs::path get_executable_path()
 {
 #ifdef _WIN32
     char buffer[MAX_PATH];
-    GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    DWORD length = GetModuleFileNameA(NULL, buffer, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+        throw std::runtime_error("无法获取可执行文件路径");
+    }
     return fs::path(buffer).parent_path();
 
 #elif __linux__
@@ -181,7 +184,13 @@ vector<int> process_prediction_output(vector<Ort::Value> &output_tensors)
         throw runtime_error("ONNX推理：第一个输出节点不是张量类型，无法解析标签");
     }
     int64_t *label_data = output_tensors[0].GetTensorMutableData<int64_t>();
+    if (label_data == nullptr) {
+        throw runtime_error("ONNX推理：获取张量数据指针失败，数据为空");
+    }
     size_t label_count = output_tensors[0].GetTensorTypeAndShapeInfo().GetElementCount();
+    if (label_count == 0) {
+        return predictions;
+    }
     predictions.assign(label_data, label_data + label_count);
 
     return predictions;

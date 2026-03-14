@@ -129,14 +129,23 @@ KDADKResult parse_tls_sni(
         return KDADK_STS_DECODE_TLS_ERROR;
     }
     if (ext_type == TLS_EXTENSION_TYPE) {
-        if (extensions_cur + TLS_EXTENSION_SERVER_NAME_LIST_LENGTH < extensions_end) {
+        if (extensions_cur + TLS_EXTENSION_SERVER_NAME_LIST_LENGTH + TLS_EXTENSION_SERVER_NAME_TYPE_AND_LENGTH < extensions_end) {
             extensions_cur += TLS_EXTENSION_SERVER_NAME_LIST_LENGTH;
             size_t sni_start = extensions_cur;
+            if (sni_start >= sv.size()) {
+                return KDADK_STS_DECODE_TLS_ERROR;
+            }
             uint8_t name_type = sv[sni_start];
+            if (sni_start + 1 + sizeof(uint16_t) >= sv.size()) {
+                return KDADK_STS_DECODE_TLS_ERROR;
+            }
             uint16_t name_len = ntohs(*((uint16_t *)(sv.data() + sni_start + 1)));
             sni_start += TLS_EXTENSION_SERVER_NAME_TYPE_AND_LENGTH;
 
             if (name_type == TLS_SNI_NAME_TYPE && name_len > 0) {
+                if (sni_start + name_len > sv.size()) {
+                    return KDADK_STS_DECODE_TLS_ERROR;
+                }
                 std::string sni_str(sv.data() + sni_start, name_len);
                 info->tls_info.sni = sni_str;
             }
@@ -153,21 +162,26 @@ size_t parse_tls_cipher_suits(size_t msg_start, packet_info *info, const std::st
     }
     size_t msg_body_start = msg_start;
     if (msg_body_start + TLS_CIPHER_SUITS_LENGTH >= sv.size()) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return msg_start;
     }
     uint16_t cipher_suites_len = ntohs(*(uint16_t *)(sv.data() + msg_body_start));
+    if (cipher_suites_len > sv.size() - msg_body_start - TLS_CIPHER_SUITS_LENGTH) {
+        cipher_suites_len = sv.size() - msg_body_start - TLS_CIPHER_SUITS_LENGTH;
+    }
     msg_body_start += TLS_CIPHER_SUITS_LENGTH;
     info->tls_info.cipher_suites_length = cipher_suites_len;
 
     size_t cipher_suites_count = cipher_suites_len / 2;
     for (size_t i = 0; i < cipher_suites_count; ++i) {
         if (msg_body_start + (i << 1) + 1 >= sv.size()) {
-            return msg_body_start;
+            break;
         }
         uint8_t high_byte = sv[msg_body_start + (i << 1)];
         uint8_t low_byte = sv[msg_body_start + (i << 1) + 1];
         uint16_t cipher_suite = (high_byte << 8) | low_byte;
-        info->tls_info.cipher_suites[i] = cipher_suite;
+        if (i < 256) {
+            info->tls_info.cipher_suites[i] = cipher_suite;
+        }
     }
     msg_body_start += cipher_suites_len;
 
@@ -229,10 +243,16 @@ KDADKResult parse_tls(const u_char *data, packet_info *info, uint32_t len)
     }
 
     std::string_view sv((char *)data, len);
+    if (sv.size() < TLS_RECODE_MIN_LENGTH + sizeof(uint16_t)) {
+        return KDADK_STS_INVALID_PCAP_PACKET;
+    }
     size_t handshake_start = TLS_RECODE_MIN_LENGTH;
     uint16_t record_len = ntohs(*(uint16_t *)(sv.data() + 3));
+    if (handshake_start + record_len > sv.size()) {
+        record_len = sv.size() - handshake_start;
+    }
     size_t handshake_end = handshake_start + record_len;
-    if (handshake_end == sv.size()) {
+    if (handshake_end <= sv.size() && handshake_end > handshake_start) {
         uint8_t msg_type = sv[handshake_start];
         if (msg_type == TLS_CLIENTHELLO_TYPE) {  // ClientHello 消息
             return parse_tls_client_hello(handshake_start, handshake_end, info, sv);
@@ -282,18 +302,41 @@ KDADKResult decode_tcp(const u_char *packet, packet_info *info)
     return KDADK_STS_NO_ERR;
 }
 
-std::string parse_domain(const u_char *data, size_t &pos)
+std::string parse_domain(const u_char *data, size_t &pos, size_t data_len)
 {
     std::string domain("");
     if (data == nullptr) {
         return domain;
     }
 
+    if (pos >= data_len) {
+        return domain;
+    }
+
     uint8_t length = data[pos];
+    int loop_count = 0;
+    const int MAX_DNS_LABEL_LEN = 63;
+
     while (length != 0) {
+        if (++loop_count > MAX_DNS_LABEL_LEN * 128) {
+            return "";
+        }
+
+        if (pos + length + 1 > data_len) {
+            return "";
+        }
+
+        if (length > MAX_DNS_LABEL_LEN) {
+            return "";
+        }
+
         domain += std::string(reinterpret_cast<const char *>(data + pos + 1), length);
         domain += ".";
         pos += length + 1;
+
+        if (pos >= data_len) {
+            return "";
+        }
         length = data[pos];
     }
     pos += 1;
@@ -318,26 +361,46 @@ KDADKResult decode_udp(const u_char *packet, packet_info *info, domain_name_hash
 
     if (udp_header->uh_sport == htons(DNS_PROTOCOL_PORT) || udp_header->uh_dport == htons(DNS_PROTOCOL_PORT)) {
         size_t dns_pos = sizeof(struct udphdr);
+        if (dns_pos + sizeof(dns_header) > info->packet_size) {
+            return KDADK_STS_INVALID_PCAP_PACKET;
+        }
         dns_header *dns = (dns_header *)(packet + dns_pos);
 
         size_t question_pos = dns_pos + sizeof(dns_header);
-        std::string domain = parse_domain(packet, question_pos);
+        std::string domain = parse_domain(packet, question_pos, info->packet_size);
+
+        uint16_t ancount = ntohs(dns->ancount);
+        if (ancount > 1024) {
+            ancount = 1024;
+        }
 
         size_t answer_pos = question_pos + 6;
-        for (int i = 0; i < ntohs(dns->ancount); i++) {
+        for (uint32_t i = 0; i < ancount; i++) {
+            if (answer_pos + sizeof(dns_resource_record) > info->packet_size) {
+                break;
+            }
             dns_resource_record *rr = (dns_resource_record *)(packet + answer_pos);
-            answer_pos += (sizeof(dns_resource_record) + ntohs(rr->len));
+            uint16_t rr_len = ntohs(rr->len);
+            if (answer_pos + sizeof(dns_resource_record) + rr_len > info->packet_size) {
+                break;
+            }
+
+            answer_pos += (sizeof(dns_resource_record) + rr_len);
 
             if (ntohs(rr->type) == DNS_RESPOND_IPV4_TYPE) {
-                struct in_addr ipv4_addr;
-                memcpy(&ipv4_addr, rr->data, sizeof(struct in_addr));
+                if (rr_len >= sizeof(struct in_addr)) {
+                    struct in_addr ipv4_addr;
+                    memcpy(&ipv4_addr, rr->data, sizeof(struct in_addr));
 
-                domain_name_table_add(domain_name_table, ipv4_addr.s_addr, domain);
+                    domain_name_table_add(domain_name_table, ipv4_addr.s_addr, domain);
+                }
             } else if (ntohs(rr->type) == DNS_RESPOND_IPV6_TYPE) {
-                struct in6_addr ipv6_addr;
-                memcpy(&ipv6_addr, rr->data, sizeof(struct in6_addr));
-                char ipv6_str[INET6_ADDRSTRLEN];
-                inet_ntop(AF_INET6, &ipv6_addr, ipv6_str, sizeof(ipv6_str));
+                if (rr_len >= sizeof(struct in6_addr)) {
+                    struct in6_addr ipv6_addr;
+                    memcpy(&ipv6_addr, rr->data, sizeof(struct in6_addr));
+                    char ipv6_str[INET6_ADDRSTRLEN];
+                    inet_ntop(AF_INET6, &ipv6_addr, ipv6_str, sizeof(ipv6_str));
+                }
             }
         }
     }
@@ -360,7 +423,6 @@ KDADKResult decode_ipv4(const u_char *packet, packet_info *info, domain_name_has
     } else if (ip_header->ip_p == IPPROTO_UDP) {
         return decode_udp(packet + (ip_header->ip_hl * UNIT_BYTES_FOUR), info, domain_name_table);
     } else {
-        // printf("only tcp and udp are supported, the proto is %d\n", ip_header->ip_p);
         return KDADK_STS_NOT_SUPPORT;
     }
     return KDADK_STS_NO_ERR;
@@ -373,7 +435,6 @@ KDADKResult decode_ethernet(const u_char *packet, packet_info *info, domain_name
     }
     const struct ether_header *eth = reinterpret_cast<const struct ether_header *>(packet);
     if (ntohs(eth->ether_type) != ETHERTYPE_IP) {
-        // printf("The packet is not IPv4, can't be decoded, the ether_type is Ox%04x\n", ntohs(eth->ether_type));
         return KDADK_STS_NOT_SUPPORT;
     }
     info->header_len += ETHERNET_HEADER_LEN;
@@ -387,7 +448,6 @@ KDADKResult decode_sll(const u_char *packet, packet_info *info, domain_name_hash
     }
     sll_header *sll_hdr = (sll_header *)packet;
     if (ntohs(sll_hdr->sll_protocol) != ETHERTYPE_IP) {
-        // printf("The packet is not IPv4, can't be decoded, the ether_type is Ox%04x\n", ntohs(sll_hdr->sll_protocol));
         return KDADK_STS_NOT_SUPPORT;
     }
     info->header_len += SLL_HEADER_LEN;

@@ -86,7 +86,7 @@ KDADKResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end,
                                    const std::string_view &sv);
 KDADKResult parse_tls(const u_char *data, packet_info *info, uint32_t len);
 KDADKResult decode_tcp(const u_char *packet, packet_info *info);
-std::string parse_domain(const u_char *data, size_t &pos);
+std::string parse_domain(const u_char *data, size_t &pos, size_t data_len);
 KDADKResult decode_udp(const u_char *packet, packet_info *info, domain_name_hash *domain_name_table);
 KDADKResult decode_ipv4(const u_char *packet, packet_info *info, domain_name_hash *domain_name_table);
 KDADKResult decode_ethernet(const u_char *packet, packet_info *info, domain_name_hash *domain_name_table);

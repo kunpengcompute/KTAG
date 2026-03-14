@@ -5,6 +5,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <new>
 #include <vector>
 #include <algorithm>
 #include <stdexcept>
@@ -51,14 +52,29 @@ inference_engine *inference_init(const inference_config *config)
 
         // 保存配置参数
         engine->model_path = strdup(cfg.model_path.c_str());
+        if (!engine->model_path) {
+            throw runtime_error("Failed to allocate memory for model_path");
+        }
         engine->scaler_path = strdup(cfg.scaler_path.c_str());
+        if (!engine->scaler_path) {
+            free(engine->model_path);
+            throw runtime_error("Failed to allocate memory for scaler_path");
+        }
         engine->filter_packets = cfg.filter_packets;
         engine->onnx_log_level = strdup(cfg.onnx_log_level.c_str());
+        if (!engine->onnx_log_level) {
+            free(engine->model_path);
+            free(engine->scaler_path);
+            throw runtime_error("Failed to allocate memory for onnx_log_level");
+        }
         printf("filter_packets: %d\n", engine->filter_packets);
         engine->columns_to_remove_count = cfg.columns_to_remove.size();
         if (engine->columns_to_remove_count > 0) {
             engine->columns_to_remove = static_cast<int *>(malloc(sizeof(int) * engine->columns_to_remove_count));
             if (!engine->columns_to_remove) {
+                free(engine->model_path);
+                free(engine->scaler_path);
+                free(engine->onnx_log_level);
                 throw runtime_error("Failed to allocate memory for columns_to_remove");
             }
             for (size_t i = 0; i < cfg.columns_to_remove.size(); i++) {
@@ -73,24 +89,70 @@ inference_engine *inference_init(const inference_config *config)
         }
         // 2. 加载ONNX模型
         printf("Loading ONNX model: %s\n", engine->model_path);
-        engine->session = new ort_session();
-        engine->session->env = new Ort::Env(get_onnx_log_level(engine->onnx_log_level), "Online_Inference");
+        engine->session = new (std::nothrow) ort_session();
+        if (!engine->session) {
+            free(engine->model_path);
+            free(engine->scaler_path);
+            free(engine->onnx_log_level);
+            free(engine->columns_to_remove);
+            throw runtime_error("Failed to allocate memory for ort_session");
+        }
+        engine->session->env = new (std::nothrow) Ort::Env(get_onnx_log_level(engine->onnx_log_level), "Online_Inference");
+        if (!engine->session->env) {
+            delete engine->session;
+            free(engine->model_path);
+            free(engine->scaler_path);
+            free(engine->onnx_log_level);
+            free(engine->columns_to_remove);
+            throw runtime_error("Failed to allocate memory for Ort::Env");
+        }
 
         Ort::SessionOptions session_options;
         session_options.SetIntraOpNumThreads(4);
         session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
-        engine->session->session = new Ort::Session(*engine->session->env, engine->model_path, session_options);
+        engine->session->session = new (std::nothrow) Ort::Session(*engine->session->env, engine->model_path, session_options);
+        if (!engine->session->session) {
+            delete engine->session;
+            free(engine->model_path);
+            free(engine->scaler_path);
+            free(engine->onnx_log_level);
+            free(engine->columns_to_remove);
+            throw runtime_error("Failed to create ONNX session");
+        }
 
         // 3. 加载标准化器
         printf("Loading scaler: %s\n", engine->scaler_path);
-        engine->scaler = new standard_scaler();
+        engine->scaler = new (std::nothrow) standard_scaler();
+        if (!engine->scaler) {
+            delete engine->session;
+            free(engine->model_path);
+            free(engine->scaler_path);
+            free(engine->onnx_log_level);
+            free(engine->columns_to_remove);
+            throw runtime_error("Failed to allocate memory for standard_scaler");
+        }
         if (!engine->scaler->scaler.load(engine->scaler_path)) {
+            delete engine->scaler;
+            delete engine->session;
+            free(engine->model_path);
+            free(engine->scaler_path);
+            free(engine->onnx_log_level);
+            free(engine->columns_to_remove);
             throw runtime_error("Failed to load scaler from: " + string(engine->scaler_path));
         }
 
         // 4. 保存配置
         engine->config.config_file = strdup(config->config_file);
+        if (!engine->config.config_file) {
+            delete engine->scaler;
+            delete engine->session;
+            free(engine->model_path);
+            free(engine->scaler_path);
+            free(engine->onnx_log_level);
+            free(engine->columns_to_remove);
+            throw runtime_error("Failed to allocate memory for config_file");
+        }
         engine->initialized = 1;
 
         printf("Inference engine initialized successfully\n");
@@ -99,14 +161,27 @@ inference_engine *inference_init(const inference_config *config)
     } catch (const exception &e) {
         fprintf(stderr, "Error initializing inference engine: %s\n", e.what());
 
-        // 清理已分配的资源
-        if (engine->scaler)
-            delete engine->scaler;
-        if (engine->session)
-            delete engine->session;
-        free(engine->model_path);
-        free(engine->scaler_path);
-        free(engine);
+        if (engine) {
+            if (engine->columns_to_remove) {
+                free(engine->columns_to_remove);
+            }
+            if (engine->session) {
+                delete engine->session;
+            }
+            if (engine->scaler) {
+                delete engine->scaler;
+            }
+            if (engine->model_path) {
+                free(engine->model_path);
+            }
+            if (engine->scaler_path) {
+                free(engine->scaler_path);
+            }
+            if (engine->onnx_log_level) {
+                free(engine->onnx_log_level);
+            }
+            free(engine);
+        }
 
         return NULL;
     }
@@ -191,17 +266,38 @@ void inference_destroy(inference_engine *engine)
 
     if (engine->scaler) {
         delete engine->scaler;
+        engine->scaler = nullptr;
     }
 
     if (engine->session) {
         delete engine->session;
+        engine->session = nullptr;
     }
 
-    free(engine->model_path);
-    free(engine->scaler_path);
-    free(engine->onnx_log_level);
-    free(engine->columns_to_remove);
-    free((void *)engine->config.config_file);
+    if (engine->model_path) {
+        free(engine->model_path);
+        engine->model_path = nullptr;
+    }
+
+    if (engine->scaler_path) {
+        free(engine->scaler_path);
+        engine->scaler_path = nullptr;
+    }
+
+    if (engine->onnx_log_level) {
+        free(engine->onnx_log_level);
+        engine->onnx_log_level = nullptr;
+    }
+
+    if (engine->columns_to_remove) {
+        free(engine->columns_to_remove);
+        engine->columns_to_remove = nullptr;
+    }
+
+    if (engine->config.config_file) {
+        free((void *)engine->config.config_file);
+        engine->config.config_file = nullptr;
+    }
 
     free(engine);
 

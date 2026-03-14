@@ -4,6 +4,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include "flow_hash.h"
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include <netinet/ip.h>
 #include <unordered_set>
 #include <algorithm>
@@ -25,6 +26,9 @@ uint32_t ip_addr;
 
 void transfer_tuple_to_hash_key(const Tuple *tuple, flow_hash_key *key)
 {
+    if (tuple == nullptr || key == nullptr) {
+        return;
+    }
     if (tuple->src_ip <= tuple->dst_ip) {
         key->ip_addr = tuple->src_ip;
         key->ip_addr1 = tuple->dst_ip;
@@ -75,6 +79,7 @@ KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
     malloc_size += ALIGN(sizeof(flow_hash_bucket) * buckets);
     malloc_result = posix_memalign(reinterpret_cast<void **>(&malloc_ptr), ALIGN_SIZE, malloc_size);
     if (malloc_result || malloc_ptr == nullptr) {
+        free(table);
         return KDADK_STS_MALLOC_FAILED;
     }
     memset(malloc_ptr, 0, malloc_size);
@@ -158,6 +163,10 @@ flow_hash_node *hash_table_add(flow_hash *hash_table, const packet_info *info)
         return nullptr;
     }
 
+    if (hash_table->buckets == nullptr) {
+        return nullptr;
+    }
+
     transfer_tuple_to_hash_key(&info->tuple, &key);
     hash = hash_table->hash_func((uint8_t *)&key);
     bucket_idx = hash % hash_table->bucket_num;
@@ -174,8 +183,9 @@ flow_hash_node *hash_table_add(flow_hash *hash_table, const packet_info *info)
     }
 
     // 若 流哈希表中不存在 该五元组，则新建节点并加入，同时设置 该流的src_ip为流的首个packet的src_ip
-    node = new flow_hash_node{};
+    node = new (std::nothrow) flow_hash_node{};
     if (node == nullptr) {
+        pthread_rwlock_unlock(&hash_table->buckets[bucket_idx].rwlock);
         return nullptr;
     }
 
@@ -203,11 +213,11 @@ KDADKResult hash_table_destroy(flow_hash *hash_table)
         return KDADK_STS_NULL_PTR_ERR;
 
     /* free all rwlock of hash_bucket. */
-    for (i = 0; i < hash_table->bucket_num; i++) {
-        (void)pthread_rwlock_destroy(&hash_table->buckets[i].rwlock);
-    }
+    if (hash_table->buckets != nullptr) {
+        for (i = 0; i < hash_table->bucket_num; i++) {
+            (void)pthread_rwlock_destroy(&hash_table->buckets[i].rwlock);
+        }
 
-    if (hash_table->buckets) {
         free(hash_table->buckets);
         hash_table->buckets = nullptr;
     }

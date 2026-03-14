@@ -2,6 +2,47 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 #include "kdadk_feature_extract.h"
+#include <cstdlib>
+#include <cstring>
+
+namespace {
+void free_flow_hash_node(flow_hash_node *node)
+{
+    if (node == nullptr) {
+        return;
+    }
+    node->raw_data.header_len.clear();
+    node->raw_data.header_len.shrink_to_fit();
+    node->raw_data.payload_len.clear();
+    node->raw_data.payload_len.shrink_to_fit();
+    node->raw_data.ts.clear();
+    node->raw_data.ts.shrink_to_fit();
+    node->raw_data.http_uris.clear();
+    node->raw_data.http_hosts.clear();
+    node->raw_data.http_urls.clear();
+    node->raw_data.tls_infos.clear();
+
+    node->reverse_raw_data.header_len.clear();
+    node->reverse_raw_data.header_len.shrink_to_fit();
+    node->reverse_raw_data.payload_len.clear();
+    node->reverse_raw_data.payload_len.shrink_to_fit();
+    node->reverse_raw_data.ts.clear();
+    node->reverse_raw_data.ts.shrink_to_fit();
+    node->reverse_raw_data.http_uris.clear();
+    node->reverse_raw_data.http_hosts.clear();
+    node->reverse_raw_data.http_urls.clear();
+    node->reverse_raw_data.tls_infos.clear();
+
+    node->src_ip_domain_name.clear();
+    node->dst_ip_domain_name.clear();
+
+    for (uint32_t i = 0; i < MAX_RAWBOW_CNT; i++) {
+        node->rawbow[i].clear();
+    }
+
+    delete node;
+}
+}
 
 static int feature_list_add_internal(feature_vector_list *list, const feature_vector *fv)
 {
@@ -135,7 +176,7 @@ static int process_packet_internal(feature_extractor *extractor, const unsigned 
             extractor->stats.extracted_flows++;
         }
 
-        free(node);
+        free_flow_hash_node(node);
     }
 
     return EXTRACTOR_SUCCESS;
@@ -221,7 +262,7 @@ static int finalize_internal(feature_extractor *extractor, feature_vector_list *
 
             flow_hash_node *current = node;
             node = node->link_next;
-            free(current);
+            free_flow_hash_node(current);
         }
 
         extractor->hash_table->buckets[i].nodes = NULL;
@@ -235,7 +276,7 @@ cleanup:
         while (node) {
             flow_hash_node *current = node;
             node = node->link_next;
-            free(current);
+            free_flow_hash_node(current);
         }
         extractor->hash_table->buckets[i].nodes = NULL;
     }
