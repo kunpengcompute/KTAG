@@ -3,26 +3,28 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include <algorithm>
 #include "domain_name_hash.h"
 
 KDADKResult domain_name_table_create(domain_name_hash **domain_name_table)
 {
-if (domain_name_table == nullptr) {
+    if (domain_name_table == nullptr) {
         return KDADK_STS_PARAMETER_ERR;
     }
 
     domain_name_hash *table = nullptr;
-    int malloc_result;
+    int init_result;
 
-    table = new domain_name_hash();
+    table = new (std::nothrow) domain_name_hash();
     if (table == nullptr) {
         return KDADK_STS_MALLOC_FAILED;
     }
     table->table_max_size = DOMAIN_NAME_TABLE_MAX_SIZE;
 
-    malloc_result = pthread_rwlock_init(&table->domain_name_rwlock, nullptr);
-    if (malloc_result) {
+    init_result = pthread_rwlock_init(&table->domain_name_rwlock, nullptr);
+    if (init_result) {
+        delete table;
         return KDADK_STS_INIT_RWLOCK_FAIL;
     }
 

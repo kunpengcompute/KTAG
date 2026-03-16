@@ -489,7 +489,7 @@ TEST_F(FeatureExtractorTest, Statistics) {
     int ret = extractor_get_statistics(extractor, &stats);
     
     EXPECT_EQ(ret, EXTRACTOR_SUCCESS) << "Should get statistics successfully";
-    EXPECT_EQ(stats.total_packets, 0) << "Initial packet count should be 0";
+    EXPECT_EQ(stats.total_packets, 0u) << "Initial packet count should be 0";
     EXPECT_EQ(stats.total_bytes, 0) << "Initial byte count should be 0";
     EXPECT_EQ(stats.decoded_packets, 0) << "Initial decoded count should be 0";
     EXPECT_EQ(stats.extracted_flows, 0) << "Initial flow count should be 0";

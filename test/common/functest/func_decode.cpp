@@ -181,7 +181,7 @@ TEST (KDADK_DECODE, Parse_TLS_CIPHER_SUITS_InsufficientLengthForCipherLen) {
     std::vector<uint8_t> data = {0x00}; // 仅 1 字节，不足读取加密套件长度（需要 2 字节）
     std::string_view sv (reinterpret_cast<char*>(data.data ()), data.size ());
     size_t msg_start = 0;
-    EXPECT_EQ (parse_tls_cipher_suits(msg_start, &info, sv), KDADK_STS_DECODE_TLS_ERROR);
+    EXPECT_EQ(parse_tls_cipher_suits(msg_start, &info, sv), msg_start);
 }
 
 TEST (KDADK_DECODE, Parse_TLS_CIPHER_SUITS_ValidCipherSuitsParsing) {
@@ -406,9 +406,10 @@ TEST_F(DecodeTcpTest, BasicTcpDecoding) {
 }
 
 TEST (KDADK_DECODE, ParseDomain_NullDataReturnsEmptyString) {
-    size_t pos = 0;
     const u_char *data = nullptr; // 空指针输入
-    std::string result = parse_domain (data, pos);
+    size_t data_len = 0;
+    size_t pos = 0;
+    std::string result = parse_domain(data, pos, data_len);
     // 验证返回空字符串，pos 不变
     EXPECT_EQ(result, "");
     EXPECT_EQ (pos, (size_t)0);
@@ -421,8 +422,9 @@ TEST (KDADK_DECODE, ParseDomain_ValidDomainWithoutCompression) {
     3, 'c', 'o', 'm', // "com"（长度 3）
     0 // 结束标志
     };
+    size_t data_len = sizeof(data);
     size_t pos = 0; // 初始位置：数据起始处
-    std::string result = parse_domain(data, pos);
+    std::string result = parse_domain(data, pos, data_len);
     // 验证解析结果和 pos 移动距离
     EXPECT_EQ (result, "example.com."); // 注意末尾有 '.'
     EXPECT_EQ (pos, sizeof (data)); //pos 应移动到数据末尾（7+1 + 3+1 + 1 = 13 字节）

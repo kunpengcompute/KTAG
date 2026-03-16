@@ -186,10 +186,17 @@ void cal_diffs(const std::vector<struct timeval> &ts, std::vector<uint32_t> &tim
     }
 
     for (size_t i = 1; i < ts.size(); ++i) {
+        if (ts[i].tv_usec > 999999 || ts[i - 1].tv_usec > 999999) {
+            continue;
+        }
         int64_t current = ts[i].tv_sec * 1000000LL + ts[i].tv_usec;
         int64_t previous = ts[i - 1].tv_sec * 1000000LL + ts[i - 1].tv_usec;
 
-        uint32_t diff_micro = current - previous;
+        if (current < previous) {
+            continue;
+        }
+
+        uint32_t diff_micro = static_cast<uint32_t>(current - previous);
 
         time_diff[i - 1] = diff_micro;
     }

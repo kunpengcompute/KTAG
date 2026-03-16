@@ -143,7 +143,11 @@ public:
 
     vector<vector<float>> transform(const vector<vector<float>> &data) const
     {
-        if (data.empty() || data[0].size() != mean_.size()) {
+        if (data.empty()) {
+            cout << "输入数据为空" << endl;
+            throw runtime_error("输入数据为空，无法进行预测");
+        }
+        if (data[0].size() != mean_.size()) {
             cout << "输入数据维度" << data[0].size() << " 与标准化器特征数量 " << mean_.size() << " 不匹配" << endl;
             throw runtime_error("输入数据维度与标准化器不匹配");
         }

@@ -51,7 +51,7 @@ typedef struct {
     std::vector<std::string> http_hosts;
     std::vector<std::string> http_urls;
     std::vector<tls> tls_infos;
-    uint32_t total_size;
+    uint64_t total_size;
     uint32_t packets_cnt;
 } flow_raw_data;
 
