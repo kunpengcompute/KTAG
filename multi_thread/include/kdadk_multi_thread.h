@@ -13,6 +13,10 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <vector>
 #include <atomic>
 
+// 前向声明
+template <typename T, size_t Capacity>
+class LockFreeCircularQueue;
+
 // 数据包结构体
 typedef struct {
     u_char *packet;
@@ -34,11 +38,8 @@ typedef struct {
     int thread_id;
     pthread_t thread;
     feature_extractor *extractor;
-    packet_node *queue_head;
-    packet_node *queue_tail;
-    int queue_size;
-    pthread_mutex_t queue_mutex;
-    pthread_cond_t queue_cond;
+    LockFreeCircularQueue<multi_thread_packet_info, 1024> *queue; // 无锁循环队列
+    LockFreeCircularQueue<multi_thread_packet_info, 1024> *recycle_queue; // 回收队列
     std::atomic<bool> running;
     feature_vector_list features;
     rawbow_list rawbows;

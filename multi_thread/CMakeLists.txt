@@ -4,6 +4,9 @@ project(kdadk_multi_thread)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# 添加编译选项，确保生成带有调试信息的动态库
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -rdynamic")
+
 # 包含头文件目录
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
