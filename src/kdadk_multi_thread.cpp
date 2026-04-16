@@ -12,179 +12,151 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <chrono>
 
 // 内存池配置
-#define MAX_POOL_SIZE 10000
-#define POOL_ITEM_COUNT 1024  // 每个线程的预分配池大小
+#define MAX_POOL_SIZE 20000
+#define MAX_PACKET_SIZE 65536 // 最大数据包大小
 
-// 内存池模板类
-template <typename T>
-class MemoryPool {
+// 定义包缓冲区结构体
+typedef struct {
+    u_char data[MAX_PACKET_SIZE];
+} packet_buffer_t;
+
+// 快速内存池模板类 - 线程本地
+template <typename T, size_t MaxSize = MAX_POOL_SIZE>
+class FastMemoryPool {
 private:
-    std::vector<T* > free_blocks;
-    const size_t max_size;
-    const size_t block_size;
+    union Node {
+        T data;
+        Node* next;
+    };
+
+    Node* pool_storage; // 预分配的大块内存
+    Node* free_list;    
+    size_t capacity;
 
 public:
-    MemoryPool(size_t max_pool_size = MAX_POOL_SIZE, size_t size = sizeof(T)) : 
-        max_size(max_pool_size), block_size(size) {}
-    
-    ~MemoryPool() {
-        for (auto block : free_blocks) {
-            free(block);
+    FastMemoryPool() : capacity(MaxSize) {
+        pool_storage = (Node*)malloc(sizeof(Node) * MaxSize);
+        if (!pool_storage) {
+            free_list = nullptr;
+            return;
         }
-    }
-    
-    T* allocate() {
-        if (!free_blocks.empty()) {
-            T* block = free_blocks.back();
-            free_blocks.pop_back();
-            return block;
-        }
-        return (T*)malloc(block_size);
-    }
-    
-    void deallocate(T* block) {
-        if (block) {
-            if (free_blocks.size() < max_size) {
-                free_blocks.push_back(block);
-            } else {
-                free(block);
-            }
-        }
-    }
-};
 
-// 数据包内存池管理类
-class PacketMemoryPool {
-private:
-    static const int BUCKET_COUNT = 6;
-    static const size_t BUCKET_SIZES[BUCKET_COUNT];
-    
-    MemoryPool<u_char>* buckets[BUCKET_COUNT];
-    
-public:
-    PacketMemoryPool() {
-        // 初始化各个桶的内存池
-        for (int i = 0; i < BUCKET_COUNT; i++) {
-            buckets[i] = new MemoryPool<u_char>(MAX_POOL_SIZE, BUCKET_SIZES[i]);
+        // 初始化链表，将所有节点串联起来
+        for (size_t i = 0; i < MaxSize - 1; ++i) {
+            pool_storage[i].next = &pool_storage[i+1];
         }
+        pool_storage[MaxSize - 1].next = nullptr;
+        free_list = pool_storage;
     }
-    
-    ~PacketMemoryPool() {
-        for (int i = 0; i < BUCKET_COUNT; i++) {
-            delete buckets[i];
+
+    ~FastMemoryPool() {
+        if (pool_storage) free(pool_storage);
+    }
+
+    inline T* allocate() {
+        if (free_list != nullptr) {
+            Node* node = free_list;
+            free_list = node->next;
+            return &(node->data);
         }
+        // 如果池子干了，走慢速路径
+        return (T*)malloc(sizeof(T));
     }
-    
-    u_char* allocate(int size) {
-        // 找到合适的桶
-        int bucket_index = get_bucket_index(size);
-        if (bucket_index < BUCKET_COUNT) {
-            // 从对应桶的内存池分配
-            u_char* buffer = buckets[bucket_index]->allocate();
-            return buffer;
+
+    inline void deallocate(T* ptr) {
+        if (__builtin_expect(ptr >= (T*)pool_storage && ptr < (T*)(pool_storage + capacity), 1)) {
+            Node* node = (Node*)ptr;
+            node->next = free_list;
+            free_list = node;
         } else {
-            // 大数据包直接 malloc
-            return (u_char*)malloc(size);
+            // 非池内内存直接释放
+            free(ptr);
         }
-    }
-    
-    void deallocate(u_char* buffer, int size) {
-        if (buffer) {
-            int bucket_index = get_bucket_index(size);
-            if (bucket_index < BUCKET_COUNT) {
-                // 释放到对应桶的内存池
-                buckets[bucket_index]->deallocate(buffer);
-            } else {
-                // 大数据包直接 free
-                free(buffer);
-            }
-        }
-    }
-    
-private:
-    int get_bucket_index(int size) {
-        if (size <= 256) return 0;
-        if (size <= 512) return 1;
-        if (size <= 1024) return 2;
-        if (size <= 2048) return 3;
-        if (size <= 4096) return 4;
-        if (size <= 8192) return 5;
-        return BUCKET_COUNT;
     }
 };
 
-// 桶大小定义
-const size_t PacketMemoryPool::BUCKET_SIZES[PacketMemoryPool::BUCKET_COUNT] = {256, 512, 1024, 2048, 4096, 8192};
+typedef struct {
+    packet_buffer_t packet;      // 数据包 Buffer
+    feature_vector features;     // 特征
+    int has_feature;             // 标志位
+    rawbow raw_payload;          // Rawbow
+} packet_work_item_t;
 
-// 内存池实例
-static PacketMemoryPool packet_memory_pool;
-static MemoryPool<feature_vector> feature_pool;
-static MemoryPool<rawbow> rawbow_pool;
-static MemoryPool<int> has_feature_pool;
+static FastMemoryPool<packet_work_item_t, 20000uL> main_work_pond;
 
 // 无锁循环队列模板类
 template <typename T, size_t Capacity>
 class LockFreeCircularQueue {
+    static_assert((Capacity != 0) && ((Capacity & (Capacity - 1)) == 0), "Capacity must be a power of 2");
+
 private:
-    static const size_t CAPACITY = Capacity;
-    T buffer[CAPACITY];
-    std::atomic<size_t> head;  // 出队位置
-    std::atomic<size_t> tail;  // 入队位置
+    static const size_t MASK = Capacity - 1;
+    T buffer[Capacity];
+
+    // ================= 生产者独占区域 =================
+    // 使用 alignas(64) 将变量强制对其到 64 字节（典型的 CPU Cache Line 大小），彻底消除伪共享
+    alignas(64) std::atomic<size_t> tail{0};  
+    size_t cached_head_for_producer{0}; // 生产者本地缓存的 head（非原子变量，极快）
+
+    // ================= 消费者独占区域 =================
+    alignas(64) std::atomic<size_t> head{0};  
+    size_t cached_tail_for_consumer{0}; // 消费者本地缓存的 tail（非原子变量，极快）
 
 public:
-    LockFreeCircularQueue() : head(0), tail(0) {}
+    LockFreeCircularQueue() = default;
 
-    // 入队操作（多生产者）
+    // 入队操作
     bool enqueue(const T& item) {
         size_t current_tail = tail.load(std::memory_order_relaxed);
-        size_t next_tail = (current_tail + 1) % CAPACITY;
-        
-        // 检查队列是否已满
-        if (next_tail == head.load(std::memory_order_acquire)) {
-            return false;  // 队列满
+        size_t next_tail = (current_tail + 1) & MASK; // 使用 & MASK 替代 % CAPACITY
+
+        // 核心优化：只在本地缓存显示队列已满时，才去读取原子的 head 进行确认
+        if (next_tail == cached_head_for_producer) {
+            cached_head_for_producer = head.load(std::memory_order_acquire);
+            if (next_tail == cached_head_for_producer) {
+                return false;
+            }
         }
         
-        // 存储元素
         buffer[current_tail] = item;
-        
-        // 原子更新 tail 指针
         tail.store(next_tail, std::memory_order_release);
         return true;
     }
 
-    // 出队操作（单消费者）
+    // 出队操作
     bool dequeue(T& item) {
         size_t current_head = head.load(std::memory_order_relaxed);
         
-        // 检查队列是否为空
-        if (current_head == tail.load(std::memory_order_acquire)) {
-            return false;  // 队列空
+        // 核心优化：只在本地缓存显示队列为空时，才去读取原子的 tail 进行确认
+        if (current_head == cached_tail_for_consumer) {
+            cached_tail_for_consumer = tail.load(std::memory_order_acquire);
+            if (current_head == cached_tail_for_consumer) {
+                return false;
+            }
         }
         
-        // 获取元素
         item = buffer[current_head];
-        
-        // 原子更新 head 指针
-        head.store((current_head + 1) % CAPACITY, std::memory_order_release);
+        head.store((current_head + 1) & MASK, std::memory_order_release);
         return true;
     }
 
     // 批量出队
     size_t dequeue_batch(T* items, size_t max_count) {
         size_t current_head = head.load(std::memory_order_relaxed);
-        size_t current_tail = tail.load(std::memory_order_acquire);
         
-        if (current_head == current_tail) {
-            return 0;  // 队列空
+        if (current_head == cached_tail_for_consumer) {
+            cached_tail_for_consumer = tail.load(std::memory_order_acquire);
+            if (current_head == cached_tail_for_consumer) {
+                return 0;
+            }
         }
         
         size_t count = 0;
-        while (current_head != current_tail && count < max_count) {
+        while (current_head != cached_tail_for_consumer && count < max_count) {
             items[count++] = buffer[current_head];
-            current_head = (current_head + 1) % CAPACITY;
+            current_head = (current_head + 1) & MASK;
         }
         
-        // 原子更新 head 指针
         head.store(current_head, std::memory_order_release);
         return count;
     }
@@ -192,168 +164,6 @@ public:
     // 检查队列是否为空
     bool empty() const {
         return head.load(std::memory_order_acquire) == tail.load(std::memory_order_acquire);
-    }
-
-    // 检查队列是否已满
-    bool full() const {
-        size_t current_tail = tail.load(std::memory_order_acquire);
-        size_t next_tail = (current_tail + 1) % CAPACITY;
-        return next_tail == head.load(std::memory_order_acquire);
-    }
-};
-
-// 无锁回收队列模板类
-template <typename T, size_t Capacity>
-class LockFreeRecycleQueue {
-private:
-    static const size_t CAPACITY = Capacity;
-    T* buffer[CAPACITY];
-    std::atomic<size_t> head;
-    std::atomic<size_t> tail;
-
-public:
-    LockFreeRecycleQueue() : head(0), tail(0) {}
-
-    bool push(T* item) {
-        size_t current_tail = tail.load(std::memory_order_relaxed);
-        size_t next_tail = (current_tail + 1) % CAPACITY;
-        
-        if (next_tail == head.load(std::memory_order_acquire)) {
-            return false;  // 队列满
-        }
-        
-        buffer[current_tail] = item;
-        tail.store(next_tail, std::memory_order_release);
-        return true;
-    }
-
-    bool pop(T*& item) {
-        size_t current_head = head.load(std::memory_order_relaxed);
-        
-        if (current_head == tail.load(std::memory_order_acquire)) {
-            return false;  // 队列空
-        }
-        
-        item = buffer[current_head];
-        head.store((current_head + 1) % CAPACITY, std::memory_order_release);
-        return true;
-    }
-
-    bool empty() const {
-        return head.load(std::memory_order_acquire) == tail.load(std::memory_order_acquire);
-    }
-};
-
-// 线程本地内存池类
-class ThreadLocalPool {
-private:
-    struct PoolItem {
-        multi_thread_packet_info info;
-        bool in_use;
-    };
-    
-    std::vector<PoolItem> items;
-    int next_index;
-    LockFreeRecycleQueue<multi_thread_packet_info, POOL_ITEM_COUNT> recycle_queue;
-
-public:
-    ThreadLocalPool() : items(POOL_ITEM_COUNT), next_index(0) {
-        // 预分配内存块
-        for (size_t i = 0; i < POOL_ITEM_COUNT; i++) {
-            // 初始化 info 结构
-            items[i].info.packet = nullptr;
-            items[i].info.features = nullptr;
-            items[i].info.raw_payload = nullptr;
-            items[i].info.has_feature = nullptr;
-            items[i].in_use = false;
-        }
-    }
-    
-    ~ThreadLocalPool() {
-        // 释放所有内存
-        for (size_t i = 0; i < POOL_ITEM_COUNT; i++) {
-            // 只有当指针不为nullptr时才释放
-            if (items[i].info.packet) {
-                free(items[i].info.packet);
-                items[i].info.packet = nullptr;
-            }
-            if (items[i].info.features) {
-                free(items[i].info.features);
-                items[i].info.features = nullptr;
-            }
-            if (items[i].info.raw_payload) {
-                free(items[i].info.raw_payload);
-                items[i].info.raw_payload = nullptr;
-            }
-            if (items[i].info.has_feature) {
-                free(items[i].info.has_feature);
-                items[i].info.has_feature = nullptr;
-            }
-        }
-    }
-    
-    // 分配操作（仅主线程调用）
-    multi_thread_packet_info* allocate() {
-        // 先尝试从回收队列获取
-        multi_thread_packet_info* info = nullptr;
-        if (recycle_queue.pop(info)) {
-            return info;
-        }
-        
-        // 从预分配池获取
-        for (int i = 0; i < POOL_ITEM_COUNT; i++) {
-            int idx = (next_index + i) % POOL_ITEM_COUNT;
-            if (!items[idx].in_use) {
-                items[idx].in_use = true;
-                next_index = (idx + 1) % POOL_ITEM_COUNT;
-                return &items[idx].info;
-            }
-        }
-        
-        // 池满，返回 nullptr
-        return nullptr;
-    }
-    
-    // 回收操作（子线程调用）
-    bool recycle(multi_thread_packet_info* info) {
-        // 释放内部内存
-        if (info->packet) {
-            free(info->packet);
-            info->packet = nullptr;
-        }
-        if (info->features) {
-            free(info->features);
-            info->features = nullptr;
-        }
-        if (info->raw_payload) {
-            free(info->raw_payload);
-            info->raw_payload = nullptr;
-        }
-        if (info->has_feature) {
-            free(info->has_feature);
-            info->has_feature = nullptr;
-        }
-        
-        return recycle_queue.push(info);
-    }
-    
-    // 清理操作（主线程调用）
-    void cleanup() {
-        multi_thread_packet_info* info = nullptr;
-        while (recycle_queue.pop(info)) {
-            // 找到对应的 PoolItem 并标记为未使用
-            for (size_t i = 0; i < POOL_ITEM_COUNT; i++) {
-                if (&items[i].info == info) {
-                    items[i].in_use = false;
-                    // 确保指针已经被设置为nullptr
-                    items[i].info.packet = nullptr;
-                    items[i].info.features = nullptr;
-                    items[i].info.raw_payload = nullptr;
-                    items[i].info.has_feature = nullptr;
-                    break;
-                }
-            }
-        }
     }
 };
 
@@ -422,7 +232,10 @@ static int calc_flow_hash(const u_char *packet, int packet_len, int thread_count
         }
     }
     
-    int thread_id = hash % thread_count;
+    int thread_id = 0;
+    if (thread_count > 0) {
+        thread_id = hash % thread_count;
+    }
     return thread_id;
 }
 
@@ -441,34 +254,40 @@ static void *worker_thread_func(void *arg) {
     }
     
     while (worker->running) {
-        // 单条出队
-        multi_thread_packet_info info;
+        packet_batch batch;
         bool processed = false;
         
-        // 持续处理队列中的数据包，直到队列为空
-        while (worker->queue->dequeue(info)) {
+        // 批量出队：一次拿到一批包
+        while (worker->queue->dequeue(batch)) {
             processed = true;
             
-            // 处理数据包
-            int ret;
-            if (info.raw_payload) {
-                // 处理带有 Rawbow 的数据包
-                ret = process_packet_with_rawbow(worker->extractor, info.packet, info.packet_len, 
-                                            &info.ts, info.features, info.raw_payload, info.has_feature);
-            } else {
-                // 处理普通数据包
-                ret = process_packet(worker->extractor, info.packet, info.packet_len, 
-                                &info.ts, info.features, info.has_feature);
-            }
-            
-            if (ret == EXTRACTOR_SUCCESS && *info.has_feature && worker->features.vectors) {
-                // 保存特征向量和 Rawbow 数据
-                if (worker->features.count >= worker->features.capacity) {
+            // 在子线程本地连续处理这批包
+            for (size_t i = 0; i < batch.count; ++i) {
+                multi_thread_packet_info& info = batch.pkts[i];
+                
+                // 处理数据包
+                int ret;
+                if (info.raw_payload) {
+                    // 处理带有 Rawbow 的数据包
+                    ret = process_packet_with_rawbow(worker->extractor, info.packet, info.packet_len, 
+                                                &info.ts, info.features, info.raw_payload, info.has_feature);
+                } else {
+                    // 处理普通数据包
+                    ret = process_packet(worker->extractor, info.packet, info.packet_len, 
+                                    &info.ts, info.features, info.has_feature);
+                }
+                
+                if (ret == EXTRACTOR_SUCCESS && *info.has_feature && worker->features.vectors) {
+                    // 保存特征向量和 Rawbow 数据
+                    if (worker->features.count >= worker->features.capacity) {
                     // 扩容
                     size_t new_capacity = worker->features.capacity * 2;
-                    feature_vector *new_vectors = (feature_vector *)realloc(
-                        worker->features.vectors, new_capacity * sizeof(feature_vector));
+                    feature_vector *new_vectors = (feature_vector *)malloc(
+                        new_capacity * sizeof(feature_vector));
                     if (new_vectors) {
+                        memcpy(new_vectors, worker->features.vectors, 
+                               worker->features.count * sizeof(feature_vector));
+                        free(worker->features.vectors);
                         worker->features.vectors = new_vectors;
                         worker->features.capacity = new_capacity;
                     } else {
@@ -476,18 +295,21 @@ static void *worker_thread_func(void *arg) {
                         continue;
                     }
                 }
-                if (worker->features.vectors) {
-                    worker->features.vectors[worker->features.count++] = *info.features;
-                }
-                
-                // 保存 Rawbow 数据
-                if (info.raw_payload && worker->rawbows.rawbows) {
+                    if (worker->features.vectors) {
+                        worker->features.vectors[worker->features.count++] = *info.features;
+                    }
+                    
+                    // 保存 Rawbow 数据
+                    if (info.raw_payload && worker->rawbows.rawbows) {
                     if (worker->rawbows.count >= worker->rawbows.capacity) {
                         // 扩容
                         size_t new_capacity = worker->rawbows.capacity * 2;
-                        rawbow *new_rawbows = (rawbow *)realloc(
-                            worker->rawbows.rawbows, new_capacity * sizeof(rawbow));
+                        rawbow *new_rawbows = (rawbow *)malloc(
+                            new_capacity * sizeof(rawbow));
                         if (new_rawbows) {
+                            memcpy(new_rawbows, worker->rawbows.rawbows, 
+                                   worker->rawbows.count * sizeof(rawbow));
+                            free(worker->rawbows.rawbows);
                             worker->rawbows.rawbows = new_rawbows;
                             worker->rawbows.capacity = new_capacity;
                         }
@@ -496,11 +318,11 @@ static void *worker_thread_func(void *arg) {
                         worker->rawbows.rawbows[worker->rawbows.count++] = *info.raw_payload;
                     }
                 }
+                }
             }
             
-            // 将内存通过回收队列返回给主线程
-            while (!worker->recycle_queue->enqueue(info)) {
-                // 如果回收队列满了，短暂yield
+            // 处理完整个 batch 后，把整个 batch 一次性扔回回收队列
+            while (!worker->recycle_queue->enqueue(batch)) {
                 std::this_thread::yield();
             }
         }
@@ -512,57 +334,67 @@ static void *worker_thread_func(void *arg) {
     }
     
     // 处理队列中剩余的数据包
-    multi_thread_packet_info info;
-    while (worker->queue->dequeue(info)) {
-        // 处理数据包
-        int ret;
-        if (info.raw_payload) {
-            // 处理带有 Rawbow 的数据包
-            ret = process_packet_with_rawbow(worker->extractor, info.packet, info.packet_len, 
-                                          &info.ts, info.features, info.raw_payload, info.has_feature);
-        } else {
-            // 处理普通数据包
-            ret = process_packet(worker->extractor, info.packet, info.packet_len, 
-                               &info.ts, info.features, info.has_feature);
-        }
-        
-        if (ret == EXTRACTOR_SUCCESS && *info.has_feature && worker->features.vectors) {
-            // 保存特征向量
-            if (worker->features.count >= worker->features.capacity) {
-                // 扩容
-                size_t new_capacity = worker->features.capacity * 2;
-                feature_vector *new_vectors = (feature_vector *)realloc(
-                    worker->features.vectors, new_capacity * sizeof(feature_vector));
-                if (new_vectors) {
-                    worker->features.vectors = new_vectors;
-                    worker->features.capacity = new_capacity;
-                }
-            }
-            if (worker->features.vectors) {
-                worker->features.vectors[worker->features.count++] = *info.features;
+    packet_batch batch;
+    while (worker->queue->dequeue(batch)) {
+        // 在子线程本地连续处理这批包
+        for (size_t i = 0; i < batch.count; ++i) {
+            multi_thread_packet_info& info = batch.pkts[i];
+            
+            // 处理数据包
+            int ret;
+            if (info.raw_payload) {
+                // 处理带有 Rawbow 的数据包
+                ret = process_packet_with_rawbow(worker->extractor, info.packet, info.packet_len, 
+                                              &info.ts, info.features, info.raw_payload, info.has_feature);
+            } else {
+                // 处理普通数据包
+                ret = process_packet(worker->extractor, info.packet, info.packet_len, 
+                                   &info.ts, info.features, info.has_feature);
             }
             
-            // 保存 Rawbow 数据
-            if (info.raw_payload && worker->rawbows.rawbows) {
-                if (worker->rawbows.count >= worker->rawbows.capacity) {
+            if (ret == EXTRACTOR_SUCCESS && *info.has_feature && worker->features.vectors) {
+                // 保存特征向量
+                if (worker->features.count >= worker->features.capacity) {
                     // 扩容
-                    size_t new_capacity = worker->rawbows.capacity * 2;
-                    rawbow *new_rawbows = (rawbow *)realloc(
-                        worker->rawbows.rawbows, new_capacity * sizeof(rawbow));
-                    if (new_rawbows) {
-                        worker->rawbows.rawbows = new_rawbows;
-                        worker->rawbows.capacity = new_capacity;
+                    size_t new_capacity = worker->features.capacity * 2;
+                    feature_vector *new_vectors = (feature_vector *)malloc(
+                        new_capacity * sizeof(feature_vector));
+                    if (new_vectors) {
+                        memcpy(new_vectors, worker->features.vectors, 
+                               worker->features.count * sizeof(feature_vector));
+                        free(worker->features.vectors);
+                        worker->features.vectors = new_vectors;
+                        worker->features.capacity = new_capacity;
                     }
                 }
-                if (worker->rawbows.rawbows) {
-                    worker->rawbows.rawbows[worker->rawbows.count++] = *info.raw_payload;
+                if (worker->features.vectors) {
+                    worker->features.vectors[worker->features.count++] = *info.features;
+                }
+                
+                // 保存 Rawbow 数据
+                if (info.raw_payload && worker->rawbows.rawbows) {
+                    if (worker->rawbows.count >= worker->rawbows.capacity) {
+                        // 扩容
+                        size_t new_capacity = worker->rawbows.capacity * 2;
+                        rawbow *new_rawbows = (rawbow *)malloc(
+                            new_capacity * sizeof(rawbow));
+                        if (new_rawbows) {
+                            memcpy(new_rawbows, worker->rawbows.rawbows, 
+                                   worker->rawbows.count * sizeof(rawbow));
+                            free(worker->rawbows.rawbows);
+                            worker->rawbows.rawbows = new_rawbows;
+                            worker->rawbows.capacity = new_capacity;
+                        }
+                    }
+                    if (worker->rawbows.rawbows) {
+                        worker->rawbows.rawbows[worker->rawbows.count++] = *info.raw_payload;
+                    }
                 }
             }
         }
         
-        // 将内存通过回收队列返回给主线程
-        while (!worker->recycle_queue->enqueue(info)) {
-            // 如果回收队列满了，短暂yield
+        // 处理完整个 batch 后，把整个 batch 一次性扔回回收队列
+        while (!worker->recycle_queue->enqueue(batch)) {
             std::this_thread::yield();
         }
     }
@@ -574,8 +406,7 @@ static void *worker_thread_func(void *arg) {
 multi_thread_extractor *multi_extractor_init(int thread_count, int dlt) {
     if (thread_count <= 0) {
         thread_count = 4; // 默认4线程
-    }
-    
+    } 
     // 自动决定是否启用共享 domain_name_table
     bool enable_shared_domain_table = (thread_count > 1);
     
@@ -644,7 +475,7 @@ multi_thread_extractor *multi_extractor_init(int thread_count, int dlt) {
         worker->running = false; // 先设置为 false，初始化完成后再设置为 true
         
         // 创建无锁循环队列
-        worker->queue = new LockFreeCircularQueue<multi_thread_packet_info, 1024>();
+        worker->queue = new LockFreeCircularQueue<packet_batch, 256>();
         if (!worker->queue) {
             // 清理已创建的线程
             for (int j = 0; j < i; j++) {
@@ -678,7 +509,7 @@ multi_thread_extractor *multi_extractor_init(int thread_count, int dlt) {
         }
         
         // 创建回收队列
-        worker->recycle_queue = new LockFreeCircularQueue<multi_thread_packet_info, 1024>();
+        worker->recycle_queue = new LockFreeCircularQueue<packet_batch, 256>();
         if (!worker->recycle_queue) {
             // 清理已创建的线程
             for (int j = 0; j < i; j++) {
@@ -810,9 +641,6 @@ multi_thread_extractor *multi_extractor_init(int thread_count, int dlt) {
             free(extractor);
             return NULL;
         }
-        
-        // 无锁队列不需要互斥锁和条件变量
-        
         // 设置运行状态
         worker->running = true;
         
@@ -877,60 +705,85 @@ int multi_process_packet(multi_thread_extractor *extractor, const u_char *packet
     
     // 将回收逻辑封装成一个 Lambda，随时可以调用 
     auto recycle_memory_func = [&]() {
-        multi_thread_packet_info recycled_info;
+        packet_batch recycled_batch;
         for (int i = 0; i < extractor->thread_count; i++) {
-            while (extractor->workers[i].recycle_queue->dequeue(recycled_info)) {
-                if (recycled_info.packet) packet_memory_pool.deallocate(recycled_info.packet, recycled_info.packet_len);
-                if (recycled_info.features) feature_pool.deallocate(recycled_info.features);
-                if (recycled_info.raw_payload) rawbow_pool.deallocate(recycled_info.raw_payload);
-                if (recycled_info.has_feature) has_feature_pool.deallocate(recycled_info.has_feature);
+            // 一次拿回一批垃圾
+            while (extractor->workers[i].recycle_queue->dequeue(recycled_batch)) {
+                // 本地循环清理
+                for (size_t j = 0; j < recycled_batch.count; ++j) {
+                    multi_thread_packet_info& recycled_info = recycled_batch.pkts[j];
+                    if (recycled_info.packet) {
+                        if (recycled_info.packet_len <= MAX_PACKET_SIZE) {
+                            main_work_pond.deallocate((packet_work_item_t*)recycled_info.packet);
+                        } else {
+                            free(recycled_info.packet);
+                        }
+                    }
+                }
             }
         }
     };
 
-    // 先执行一次回收，保证池子里有可用内存
-    recycle_memory_func();
-    
     // 构造数据包信息
     multi_thread_packet_info info;
+    packet_work_item_t* item = main_work_pond.allocate();
+    if (!item) return EXTRACTOR_ERROR;
     
-    // 复制数据包
-    info.packet = packet_memory_pool.allocate(packet_len);
-    if (!info.packet) {
-        return EXTRACTOR_ERROR;
+    // 1. 拷数据包
+    if (packet_len <= MAX_PACKET_SIZE) {
+        memcpy(item->packet.data, packet, packet_len);
+        info.packet = item->packet.data;
+    } else {
+        info.packet = (u_char*)malloc(packet_len);
+        if (!info.packet) {
+            main_work_pond.deallocate(item);
+            return EXTRACTOR_ERROR;
+        }
+        memcpy(info.packet, packet, packet_len);
     }
-    memcpy(info.packet, packet, packet_len);
+    
     info.packet_len = packet_len;
     info.ts = *ts;
     
-    // 分配特征向量内存
-    info.features = feature_pool.allocate();
-    if (!info.features) {
-        packet_memory_pool.deallocate(info.packet, packet_len);
-        return EXTRACTOR_ERROR;
-    }
-    // 初始化特征向量
-    memset(info.features, 0, sizeof(feature_vector));
-    
-    // 分配has_feature内存
-    info.has_feature = has_feature_pool.allocate();
-    if (!info.has_feature) {
-        packet_memory_pool.deallocate(info.packet, packet_len);
-        feature_pool.deallocate(info.features);
-        return EXTRACTOR_ERROR;
-    }
-    *info.has_feature = 0;
-    
-    // Rawbow 指针设为 NULL
-    info.raw_payload = NULL;
-    
-    // 无锁入队
-    while (!worker->queue->enqueue(info)) {
-        // 必须不断拉取回收队列，帮子线程“清垃圾”，打破死锁环，并让出 CPU
+    info.features = &item->features;      // 取大结构体内部成员的地址
+    info.has_feature = &item->has_feature;
+    info.raw_payload = &item->raw_payload;
+
+    // 初始化内部成员
+    item->has_feature = 0;
+
+    // 替换为：批量暂存与提交逻辑
+    worker->staging_batch.pkts[worker->staging_batch.count++] = info;
+
+    // 如果攒够了一批（64个），一次性提交给子线程
+    if (worker->staging_batch.count == BATCH_SIZE) {
         recycle_memory_func();
-        std::this_thread::yield(); // 放弃时间片，等子线程消费
+        
+        int retry_count = 0;
+        while (!worker->queue->enqueue(worker->staging_batch)) {
+            // 队列满时，持续回收直到有空间
+            recycle_memory_func();
+            std::this_thread::yield();
+            retry_count++;
+            if (retry_count > 100) {
+                // 重试次数过多，释放资源并返回错误
+                for (size_t i = 0; i < worker->staging_batch.count; i++) {
+                    multi_thread_packet_info& batch_info = worker->staging_batch.pkts[i];
+                    if (batch_info.packet) {
+                        if (batch_info.packet_len <= MAX_PACKET_SIZE) {
+                            main_work_pond.deallocate((packet_work_item_t*)batch_info.packet);
+                        } else {
+                            free(batch_info.packet);
+                        }
+                    }
+                }
+                worker->staging_batch.count = 0;
+                return EXTRACTOR_ERROR;
+            }
+        }
+        // 提交成功，重置计数器，开始攒下一批
+        worker->staging_batch.count = 0;
     }
-    
     return EXTRACTOR_SUCCESS;
 }
 
@@ -955,81 +808,90 @@ int multi_process_packet_with_rawbow(multi_thread_extractor *extractor, const u_
     
     worker_thread *worker = &extractor->workers[thread_id];
     
-    // 先从回收队列中回收内存
-    multi_thread_packet_info recycled_info;
-    while (worker->recycle_queue->dequeue(recycled_info)) {
-        // 将回收的内存放回内存池
-        if (recycled_info.packet) {
-            packet_memory_pool.deallocate(recycled_info.packet, recycled_info.packet_len);
+    // 将回收逻辑封装成一个 Lambda，随时可以调用 
+    auto recycle_memory_func = [&]() {
+        packet_batch recycled_batch;
+        for (int i = 0; i < extractor->thread_count; i++) {
+            // 一次拿回一批垃圾
+            while (extractor->workers[i].recycle_queue->dequeue(recycled_batch)) {
+                // 本地循环清理
+                for (size_t j = 0; j < recycled_batch.count; ++j) {
+                    multi_thread_packet_info& recycled_info = recycled_batch.pkts[j];
+                    if (recycled_info.packet) {
+                        if (recycled_info.packet_len <= MAX_PACKET_SIZE) {
+                            // 因为 packet 字段在 packet_work_item_t 的最开头
+                            // info.packet 刚好就是整个大结构体的起始地址
+                            main_work_pond.deallocate((packet_work_item_t*)recycled_info.packet);
+                        } else {
+                            free(recycled_info.packet);
+                        }
+                    }
+                }
+            }
         }
-        if (recycled_info.features) {
-            feature_pool.deallocate(recycled_info.features);
-        }
-        if (recycled_info.raw_payload) {
-            rawbow_pool.deallocate(recycled_info.raw_payload);
-        }
-        if (recycled_info.has_feature) {
-            has_feature_pool.deallocate(recycled_info.has_feature);
-        }
-    }
-    
+    };
     // 构造数据包信息
     multi_thread_packet_info info;
     
-    // 复制数据包
-    info.packet = packet_memory_pool.allocate(packet_len);
-    if (!info.packet) {
-        return EXTRACTOR_ERROR;
-    }
-    memcpy(info.packet, packet, packet_len);
-    info.packet_len = packet_len;
-    info.ts = *ts;
+    packet_work_item_t* item = main_work_pond.allocate();
+    if (!item) return EXTRACTOR_ERROR;
     
-    // 分配特征向量内存
-    info.features = feature_pool.allocate();
-    if (!info.features) {
-        packet_memory_pool.deallocate(info.packet, packet_len);
-        return EXTRACTOR_ERROR;
-    }
-    // 初始化特征向量
-    memset(info.features, 0, sizeof(feature_vector));
-    
-    // 分配 Rawbow 内存
-    info.raw_payload = rawbow_pool.allocate();
-    if (!info.raw_payload) {
-        packet_memory_pool.deallocate(info.packet, packet_len);
-        feature_pool.deallocate(info.features);
-        return EXTRACTOR_ERROR;
-    }
-    // 初始化 Rawbow
-    memset(info.raw_payload, 0, sizeof(rawbow));
-    
-    // 分配has_feature内存
-    info.has_feature = has_feature_pool.allocate();
-    if (!info.has_feature) {
-        packet_memory_pool.deallocate(info.packet, packet_len);
-        feature_pool.deallocate(info.features);
-        rawbow_pool.deallocate(info.raw_payload);
-        return EXTRACTOR_ERROR;
-    }
-    *info.has_feature = 0;
-    
-    // 无锁入队
-    int retry_count = 0;
-    while (!worker->queue->enqueue(info)) {
-        // 队列满时，短暂休眠后重试
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
-        retry_count++;
-        if (retry_count > 100) {
-            // 重试次数过多，释放资源并返回错误
-            packet_memory_pool.deallocate(info.packet, packet_len);
-            feature_pool.deallocate(info.features);
-            rawbow_pool.deallocate(info.raw_payload);
-            has_feature_pool.deallocate(info.has_feature);
+    // 1. 拷数据包
+    if (packet_len <= MAX_PACKET_SIZE) {
+        memcpy(item->packet.data, packet, packet_len);
+        info.packet = item->packet.data;
+    } else {
+        info.packet = (u_char*)malloc(packet_len);
+        if (!info.packet) {
+            main_work_pond.deallocate(item);
             return EXTRACTOR_ERROR;
         }
+        memcpy(info.packet, packet, packet_len);
     }
     
+    info.packet_len = packet_len;
+    info.ts = *ts;
+
+    info.features = &item->features;      // 取大结构体内部成员的地址
+    info.has_feature = &item->has_feature;
+    info.raw_payload = &item->raw_payload;
+    
+    // 初始化内部成员
+    item->has_feature = 0;
+    
+    worker->staging_batch.pkts[worker->staging_batch.count++] = info;
+
+    // 如果攒够了一批（64个），一次性提交给子线程
+    if (worker->staging_batch.count == BATCH_SIZE) {
+        recycle_memory_func();
+        
+        int retry_count = 0;
+        while (!worker->queue->enqueue(worker->staging_batch)) {
+            // 队列满时，持续回收直到有空间
+            recycle_memory_func();
+            std::this_thread::yield();
+            retry_count++;
+            if (retry_count > 100) {
+                // 重试次数过多，释放资源并返回错误
+                for (size_t i = 0; i < worker->staging_batch.count; i++) {
+                    multi_thread_packet_info& batch_info = worker->staging_batch.pkts[i];
+                    if (batch_info.packet) {
+                        if (batch_info.packet_len <= MAX_PACKET_SIZE) {
+                            // 因为 packet 字段在 packet_work_item_t 的最开头
+                            // info.packet 刚好就是整个大结构体的起始地址
+                            main_work_pond.deallocate((packet_work_item_t*)batch_info.packet);
+                        } else {
+                            free(batch_info.packet);
+                        }
+                    }
+                }
+                worker->staging_batch.count = 0;
+                return EXTRACTOR_ERROR;
+            }
+        }
+        // 提交成功，重置计数器，开始攒下一批
+        worker->staging_batch.count = 0;
+    }
     return EXTRACTOR_SUCCESS;
 }
 
@@ -1037,6 +899,17 @@ int multi_process_packet_with_rawbow(multi_thread_extractor *extractor, const u_
 int multi_extractor_finalize(multi_thread_extractor *extractor, feature_vector_list *features) {
     if (!extractor || !features) {
         return EXTRACTOR_ERROR;
+    }
+    
+    // 强制推送所有未满的 batch
+    for (int i = 0; i < extractor->thread_count; i++) {
+        worker_thread *worker = &extractor->workers[i];
+        if (worker->staging_batch.count > 0) {
+            while (!worker->queue->enqueue(worker->staging_batch)) {
+                std::this_thread::yield(); // 等待子线程消化
+            }
+            worker->staging_batch.count = 0;
+        }
     }
     
     // 停止所有线程
@@ -1052,9 +925,12 @@ int multi_extractor_finalize(multi_thread_extractor *extractor, feature_vector_l
                 if (extractor->all_features.count >= extractor->all_features.capacity) {
                     // 扩容
                     size_t new_capacity = extractor->all_features.capacity * 2;
-                    feature_vector *new_vectors = (feature_vector *)realloc(
-                        extractor->all_features.vectors, new_capacity * sizeof(feature_vector));
+                    feature_vector *new_vectors = (feature_vector *)malloc(
+                        new_capacity * sizeof(feature_vector));
                     if (new_vectors) {
+                        memcpy(new_vectors, extractor->all_features.vectors, 
+                               extractor->all_features.count * sizeof(feature_vector));
+                        free(extractor->all_features.vectors);
                         extractor->all_features.vectors = new_vectors;
                         extractor->all_features.capacity = new_capacity;
                     } else {
@@ -1083,9 +959,12 @@ int multi_extractor_finalize(multi_thread_extractor *extractor, feature_vector_l
                         if (extractor->all_features.count >= extractor->all_features.capacity) {
                             // 扩容
                             size_t new_capacity = extractor->all_features.capacity * 2;
-                            feature_vector *new_vectors = (feature_vector *)realloc(
-                                extractor->all_features.vectors, new_capacity * sizeof(feature_vector));
+                            feature_vector *new_vectors = (feature_vector *)malloc(
+                                new_capacity * sizeof(feature_vector));
                             if (new_vectors) {
+                                memcpy(new_vectors, extractor->all_features.vectors, 
+                                       extractor->all_features.count * sizeof(feature_vector));
+                                free(extractor->all_features.vectors);
                                 extractor->all_features.vectors = new_vectors;
                                 extractor->all_features.capacity = new_capacity;
                             } else {
@@ -1107,8 +986,7 @@ int multi_extractor_finalize(multi_thread_extractor *extractor, feature_vector_l
         features->count = extractor->all_features.count;
         features->capacity = extractor->all_features.capacity;
         features->vectors = extractor->all_features.vectors;
-        
-        // 注意：这里不释放all_features.vectors，由调用者负责释放
+
         extractor->all_features.vectors = NULL;
         extractor->all_features.count = 0;
         extractor->all_features.capacity = 0;
@@ -1127,6 +1005,17 @@ int multi_extractor_finalize_with_rawbow(multi_thread_extractor *extractor, feat
         return EXTRACTOR_ERROR;
     }
     
+    // 强制推送所有未满的 batch
+    for (int i = 0; i < extractor->thread_count; i++) {
+        worker_thread *worker = &extractor->workers[i];
+        if (worker->staging_batch.count > 0) {
+            while (!worker->queue->enqueue(worker->staging_batch)) {
+                std::this_thread::yield(); // 等待子线程消化
+            }
+            worker->staging_batch.count = 0;
+        }
+    }
+    
     // 停止所有线程
     for (int i = 0; i < extractor->thread_count; i++) {
         worker_thread *worker = &extractor->workers[i];
@@ -1140,9 +1029,12 @@ int multi_extractor_finalize_with_rawbow(multi_thread_extractor *extractor, feat
                 if (extractor->all_features.count >= extractor->all_features.capacity) {
                     // 扩容
                     size_t new_capacity = extractor->all_features.capacity * 2;
-                    feature_vector *new_vectors = (feature_vector *)realloc(
-                        extractor->all_features.vectors, new_capacity * sizeof(feature_vector));
+                    feature_vector *new_vectors = (feature_vector *)malloc(
+                        new_capacity * sizeof(feature_vector));
                     if (new_vectors) {
+                        memcpy(new_vectors, extractor->all_features.vectors, 
+                               extractor->all_features.count * sizeof(feature_vector));
+                        free(extractor->all_features.vectors);
                         extractor->all_features.vectors = new_vectors;
                         extractor->all_features.capacity = new_capacity;
                     } else {
@@ -1159,9 +1051,12 @@ int multi_extractor_finalize_with_rawbow(multi_thread_extractor *extractor, feat
                 if (extractor->all_rawbows.count >= extractor->all_rawbows.capacity) {
                     // 扩容
                     size_t new_capacity = extractor->all_rawbows.capacity * 2;
-                    rawbow *new_rawbows = (rawbow *)realloc(
-                        extractor->all_rawbows.rawbows, new_capacity * sizeof(rawbow));
+                    rawbow *new_rawbows = (rawbow *)malloc(
+                        new_capacity * sizeof(rawbow));
                     if (new_rawbows) {
+                        memcpy(new_rawbows, extractor->all_rawbows.rawbows, 
+                               extractor->all_rawbows.count * sizeof(rawbow));
+                        free(extractor->all_rawbows.rawbows);
                         extractor->all_rawbows.rawbows = new_rawbows;
                         extractor->all_rawbows.capacity = new_capacity;
                     } else {
@@ -1196,9 +1091,12 @@ int multi_extractor_finalize_with_rawbow(multi_thread_extractor *extractor, feat
                         if (extractor->all_features.count >= extractor->all_features.capacity) {
                             // 扩容
                             size_t new_capacity = extractor->all_features.capacity * 2;
-                            feature_vector *new_vectors = (feature_vector *)realloc(
-                                extractor->all_features.vectors, new_capacity * sizeof(feature_vector));
+                            feature_vector *new_vectors = (feature_vector *)malloc(
+                                new_capacity * sizeof(feature_vector));
                             if (new_vectors) {
+                                memcpy(new_vectors, extractor->all_features.vectors, 
+                                       extractor->all_features.count * sizeof(feature_vector));
+                                free(extractor->all_features.vectors);
                                 extractor->all_features.vectors = new_vectors;
                                 extractor->all_features.capacity = new_capacity;
                             } else {
@@ -1216,9 +1114,12 @@ int multi_extractor_finalize_with_rawbow(multi_thread_extractor *extractor, feat
                         if (extractor->all_rawbows.count >= extractor->all_rawbows.capacity) {
                             // 扩容
                             size_t new_capacity = extractor->all_rawbows.capacity * 2;
-                            rawbow *new_rawbows = (rawbow *)realloc(
-                                extractor->all_rawbows.rawbows, new_capacity * sizeof(rawbow));
+                            rawbow *new_rawbows = (rawbow *)malloc(
+                                new_capacity * sizeof(rawbow));
                             if (new_rawbows) {
+                                memcpy(new_rawbows, extractor->all_rawbows.rawbows, 
+                                       extractor->all_rawbows.count * sizeof(rawbow));
+                                free(extractor->all_rawbows.rawbows);
                                 extractor->all_rawbows.rawbows = new_rawbows;
                                 extractor->all_rawbows.capacity = new_capacity;
                             } else {

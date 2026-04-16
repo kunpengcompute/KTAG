@@ -27,6 +27,13 @@ typedef struct {
     int *has_feature;
 } multi_thread_packet_info;
 
+#define BATCH_SIZE 64  // 每 64 个包进行一次跨线程通信
+
+struct packet_batch {
+    multi_thread_packet_info pkts[BATCH_SIZE];
+    size_t count = 0;
+};
+
 // 数据包节点结构体
 typedef struct packet_node_t {
     multi_thread_packet_info info;
@@ -34,12 +41,15 @@ typedef struct packet_node_t {
 } packet_node;
 
 // 工作线程结构体
-typedef struct {
+typedef struct alignas(64) worker_thread {
     int thread_id;
     pthread_t thread;
     feature_extractor *extractor;
-    LockFreeCircularQueue<multi_thread_packet_info, 1024> *queue; // 无锁循环队列
-    LockFreeCircularQueue<multi_thread_packet_info, 1024> *recycle_queue; // 回收队列
+    // 主线程暂存区（满 BATCH_SIZE 后再提交）
+    packet_batch staging_batch;
+    // 队列类型改为传递 batch
+    LockFreeCircularQueue<packet_batch, 256> *queue; // 无锁循环队列
+    LockFreeCircularQueue<packet_batch, 256> *recycle_queue; // 回收队列
     std::atomic<bool> running;
     feature_vector_list features;
     rawbow_list rawbows;
