@@ -57,9 +57,10 @@ add_library(KDADK_feature_extract SHARED
     ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/process_feature.cpp
     ${PROJECT_SOURCE_DIR}/src/kdadk_feature_extract.cpp
+    ${PROJECT_SOURCE_DIR}/src/kdadk_multi_thread.cpp
 )
 
-target_link_libraries(KDADK_feature_extract PRIVATE pcap)
+target_link_libraries(KDADK_feature_extract PRIVATE pcap pthread)
 
 target_include_directories(KDADK_feature_extract PRIVATE
     ${PROJECT_SOURCE_DIR}/

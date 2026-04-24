@@ -3,7 +3,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include "process_feature.h"
 
-const int HASH_BUCKETS = 10000;
 const int CREATE_NODE = 1;
 const int NOT_CREATE_NODE = 0;
 const int UDP_FLOW_LIMIT = 100;

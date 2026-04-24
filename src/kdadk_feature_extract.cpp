@@ -76,7 +76,7 @@ static int rawbow_list_add_internal(rawbow_list *list, const rawbow *rb)
     return EXTRACTOR_SUCCESS;
 }
 
-feature_extractor *extractor_init(int link_type)
+feature_extractor *extractor_init(int link_type, domain_name_hash *shared_domain_table)
 {
     if (link_type != DLT_EN10MB && link_type != DLT_LINUX_SLL) {
         fprintf(stderr, "Error: Unsupported link type %d\n", link_type);
@@ -96,10 +96,16 @@ feature_extractor *extractor_init(int link_type)
         return NULL;
     }
 
-    if (domain_name_table_create(&extractor->domain_name_table) || !extractor->domain_name_table) {
-        hash_table_destroy(extractor->hash_table);
-        free(extractor);
-        return NULL;
+    if (shared_domain_table) {
+        // 使用共享域名表
+        extractor->domain_name_table = shared_domain_table;
+    } else {
+        // 创建新的域名表
+        if (domain_name_table_create(&extractor->domain_name_table) || !extractor->domain_name_table) {
+            hash_table_destroy(extractor->hash_table);
+            free(extractor);
+            return NULL;
+        }
     }
 
     extractor->initialized = 1;
@@ -327,13 +333,15 @@ void extractor_destroy(feature_extractor *extractor)
     if (!extractor) {
         return;
     }
-
+    
     if (extractor->hash_table) {
         hash_table_destroy(extractor->hash_table);
     }
+    
+    // 销毁 domain_name_table（在多线程模式下，会在调用前将其设为 NULL）
     if (extractor->domain_name_table) {
         domain_name_table_destroy(extractor->domain_name_table);
     }
-
+    
     free(extractor);
 }
