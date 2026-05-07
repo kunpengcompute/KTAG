@@ -12,13 +12,39 @@ const int NETWORK_TUPLE_CNT = 5;        // 五元组特征
 const int TOTAL_BYTES_CNT = 1;          // 总字节数特征
 const int TOTAL_PACKET_CNT = 1;         // 总包数特征
 const int STATISTICS_FEATURE_CNT = 4;   // 统计特征 [最大值 & 最小值 & 均值 & 方差]
-const int HISTOGRAM_CLASS_CNT = 3;      // 直方图种类 [相对分布，绝对分布，正态分布]
 const int FEATURE_TYPE_CNT = 3;         // 报文包提取特征种类 [hdr & pld & interval]
 const int DIRECT_CNT = 2;               // 报文发送方向数量 [发送 & 接收]
 const int RAW_BOW = 1;                  // 词袋明文信息一列
 const int KEY_WORD_WEIGHT = 20;         // 关键词的权重系数
 
-// 特征维度: (五元组 + (总字节数 + 总包数 + (最大值 + 最小值 + 均值 + 方差 + 直方图位数 * 3[三种类型的直方图]) * 3[hdr &
+#ifndef ENABLE_HIST_REL
+#define ENABLE_HIST_REL 1
+#endif
+
+#ifndef ENABLE_HIST_NOR
+#define ENABLE_HIST_NOR 1
+#endif
+
+#if ENABLE_HIST_REL
+#define HIST_REL_CNT 1
+#else
+#define HIST_REL_CNT 0
+#endif
+
+#if ENABLE_HIST_NOR
+#define HIST_NOR_CNT 1
+#else
+#define HIST_NOR_CNT 0
+#endif
+
+const int HIST_ABS_CNT = 1;
+const int HISTOGRAM_CLASS_CNT = HIST_REL_CNT + HIST_ABS_CNT + HIST_NOR_CNT;
+#define SEND_PACKET_NUMS_INDEX 7
+#define RECV_PACKET_NUMS_INDEX_BASE 21
+#define HISTOGRAM_INDEX_STRIDE 48
+#define RECV_PACKET_NUMS_INDEX (RECV_PACKET_NUMS_INDEX_BASE + HISTOGRAM_CLASS_CNT * HISTOGRAM_INDEX_STRIDE)
+
+// 特征维度: (五元组 + (总字节数 + 总包数 + (最大值 + 最小值 + 均值 + 方差 + 直方图位数 * HISTOGRAM_CLASS_CNT) * 3[hdr &
 // pld & interval]) * 2[发送&接收] + 词袋直方图位数)
 const int FEATURE_MAX_SIZE = (NETWORK_TUPLE_CNT +
                               (TOTAL_BYTES_CNT + TOTAL_PACKET_CNT +
@@ -31,9 +57,13 @@ struct statistics_info {
     double max_value;
     double mean_value;
     double var_value;
+#if ENABLE_HIST_REL
     double hist_array[HISTOGRAM_NUMS];      // 相对分布 直方图
+#endif
     double hist_array_abs[HISTOGRAM_NUMS];  // 绝对分布 直方图
+#if ENABLE_HIST_NOR
     double hist_array_nor[HISTOGRAM_NUMS];  // 正态分布 直方图
+#endif
 };
 
 struct stream_feature {

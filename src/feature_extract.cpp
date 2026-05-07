@@ -15,7 +15,7 @@ KDADKResult statisticsInfo2Array(const statistics_info &data, double *array, int
         return KDADK_STS_NULL_PTR_ERR;
     }
 
-    if ((begin + 4 + HISTOGRAM_NUMS * 3) >= size) {
+    if ((begin + 4 + HISTOGRAM_NUMS * HISTOGRAM_CLASS_CNT) >= size) {
         return KDADK_STS_VECTOR_INDEX_OVERFLOW;
     }
 
@@ -23,17 +23,21 @@ KDADKResult statisticsInfo2Array(const statistics_info &data, double *array, int
     array[begin++] = data.max_value;
     array[begin++] = data.mean_value;
     array[begin++] = data.var_value;
+#if ENABLE_HIST_REL
     for (int i = 0; i < HISTOGRAM_NUMS; ++i) {
         array[begin++] = data.hist_array[i];
     }
+#endif
 
     for (int i = 0; i < HISTOGRAM_NUMS; ++i) {
         array[begin++] = data.hist_array_abs[i];
     }
 
+#if ENABLE_HIST_NOR
     for (int i = 0; i < HISTOGRAM_NUMS; ++i) {
         array[begin++] = data.hist_array_nor[i];
     }
+#endif
     return KDADK_STS_NO_ERR;
 }
 
@@ -289,10 +293,14 @@ KDADKResult cal_statistics_info(std::vector<uint32_t> &array, statistics_info &a
         array_si.var_value = log2(array_si.var_value + 1);  // 防止方差为0
     }
 
+#if ENABLE_HIST_REL
     calculate_hist(array, array_si.min_value, array_si.max_value, array_si.hist_array, HISTOGRAM_NUMS, isTimeInterval);
+#endif
     calculate_hist_abs(array, array_si.max_value, array_si.hist_array_abs, HISTOGRAM_NUMS, isTimeInterval);
+#if ENABLE_HIST_NOR
     calculate_hist_nor(array, array_si.mean_value, array_si.var_value, array_si.hist_array_nor, HISTOGRAM_NUMS,
                        isTimeInterval);
+#endif
     return KDADK_STS_NO_ERR;
 }
 
