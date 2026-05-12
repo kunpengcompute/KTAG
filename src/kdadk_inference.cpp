@@ -220,7 +220,7 @@ int inference_predict(inference_engine *engine, const feature_vector_list *featu
         for (uint32_t j = 0; j < features->count; j++) {
             const feature_vector *fv = &features->vectors[j];
 
-            if (fv->features[7] + fv->features[165] >= filter_packets) {
+            if (fv->features[SEND_PACKET_NUMS_INDEX] + fv->features[RECV_PACKET_NUMS_INDEX] >= filter_packets) {
                 vector<float> filtered_row;
 
                 for (int k = 0; k < FEATURES_NUM - 1; k++) {

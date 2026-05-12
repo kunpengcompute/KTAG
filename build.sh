@@ -93,6 +93,18 @@ elif [ "$1" == "-sve256" ]; then
 elif [ "$1" == "-coverage" ]; then
     COVERAGE_OPTION="-DENABLE_TEST_COVERAGE=ON"
     kdadk_appid_build
+elif [ "$1" == "-hist-rel" ]; then
+ 	COVERAGE_OPTION="-DENABLE_HIST_REL=ON"
+ 	kdadk_appid_build
+elif [ "$1" == "-hist-nor" ]; then
+ 	COVERAGE_OPTION="-DENABLE_HIST_NOR=ON"
+ 	kdadk_appid_build
+elif [ "$1" == "-hist-all" ]; then
+ 	COVERAGE_OPTION="-DENABLE_HIST_REL=ON -DENABLE_HIST_NOR=ON"
+ 	kdadk_appid_build
+elif [ "$1" == "-hist-none" ]; then
+ 	COVERAGE_OPTION="-DENABLE_HIST_REL=OFF -DENABLE_HIST_NOR=OFF"
+ 	kdadk_appid_build
 elif [ "$1" == "clean" ] ;then
     kdadk_appid_clean
 elif [ "$1" == "install" ] ;then

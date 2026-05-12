@@ -171,21 +171,18 @@ flow_hash_node *hash_table_add(flow_hash *hash_table, const packet_info *info)
     hash = hash_table->hash_func((uint8_t *)&key);
     bucket_idx = hash % hash_table->bucket_num;
 
-    pthread_rwlock_wrlock(&hash_table->buckets[bucket_idx].rwlock);
     node = hash_table->buckets[bucket_idx].nodes;
     node = hash_table_match_node(node, (uint8_t *)&key);
     if (node) {
         if (node->status == CONNECTED) {
             add_packet_to_flow_node(node, info);
         }
-        pthread_rwlock_unlock(&hash_table->buckets[bucket_idx].rwlock);
         return node;
     }
 
     // 若 流哈希表中不存在 该五元组，则新建节点并加入，同时设置 该流的src_ip为流的首个packet的src_ip
     node = new (std::nothrow) flow_hash_node{};
     if (node == nullptr) {
-        pthread_rwlock_unlock(&hash_table->buckets[bucket_idx].rwlock);
         return nullptr;
     }
 
@@ -200,7 +197,6 @@ flow_hash_node *hash_table_add(flow_hash *hash_table, const packet_info *info)
 
     hash_table->buckets[bucket_idx].node_num++;
     add_packet_to_flow_node(node, info);
-    pthread_rwlock_unlock(&hash_table->buckets[bucket_idx].rwlock);
 
     return node;
 }
