@@ -3,11 +3,11 @@
 
 ### 1.1 功能测试
 
-本项目采用Google Test框架对KDADK-APPID中实现的方法函数进行测试，测试用例的数据来自于采集到的pcap流量文件。在进行测试前，需要将pcap流量文件放在KDADK-APPID项目的./test/traces文件夹下供测试时使用。
+本项目采用Google Test框架对KTAG中实现的方法函数进行测试，测试用例的数据来自于采集到的pcap流量文件。在进行测试前，需要将pcap流量文件放在KTAG项目的./test/traces文件夹下供测试时使用。
 
 测试流程：
 
-1. 首先运行KDADK-APPID项目下的build.sh生成动态链接库.so文件供测试使用。
+1. 首先运行KTAG项目下的build.sh生成动态链接库.so文件供测试使用。
 
 ```
 sh build.sh -lib
@@ -35,7 +35,7 @@ make rfunc
 
 测试流程：
 
-1. 首先运行KDADK-APPID项目下的build.sh生成动态链接库.so文件供测试使用。
+1. 首先运行KTAG项目下的build.sh生成动态链接库.so文件供测试使用。
 
 ```
 sh build.sh -lib
@@ -61,7 +61,7 @@ make rperf
 
 ### 1.3 模糊测试（Fuzz Testing）
 
-KDADK-APPID Fuzz 测试是基于 LibFuzzer 框架实现的模糊测试，用于发现库中的潜在崩溃和安全漏洞。通过向库的核心 API 注入随机数据，测试系统在各种输入情况下的行为，确保库的健壮性和安全性。
+KTAG Fuzz 测试是基于 LibFuzzer 框架实现的模糊测试，用于发现库中的潜在崩溃和安全漏洞。通过向库的核心 API 注入随机数据，测试系统在各种输入情况下的行为，确保库的健壮性和安全性。
 
 #### 1.3.1 测试覆盖范围
 
@@ -92,7 +92,7 @@ Fuzz 测试覆盖了以下核心功能模块：
 ##### 1.3.2.1 前提条件
 
 1. **构建 KDADK 库**：
-   - 首先需要构建 KDADK-APPID 库，生成 `KDADK_feature_extract` 和 `KDADK_inference` 库文件
+   - 首先需要构建 KTAG 库，生成 `KDADK_feature_extract` 和 `KDADK_inference` 库文件
 
 2. **依赖项**：
    - GCC 10.3.1+
@@ -160,7 +160,7 @@ LibFuzzer 支持多种运行选项，常用的选项包括：
 
 2. **生成 GCC 覆盖率数据**：
    ```bash
-   cd KDADK-APPID/build
+   cd KTAG/build
    lcov --capture --directory . --output-file gcc_coverage.info
    ```
 
