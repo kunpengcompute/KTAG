@@ -2,17 +2,17 @@
 
 ## 获取项目代码
 
-克隆KDADK-APPID代码仓库到`/opt`目录下（这里以`/opt`目录为例，后续操作均在`/opt`目录下进行，或者可以选择其他自定义目录）：
+克隆KTAG代码仓库到`/opt`目录下（这里以`/opt`目录为例，后续操作均在`/opt`目录下进行，或者可以选择其他自定义目录）：
 
 ```bash
 # 进入到/opt目录下，可修改为自定义目录
 cd /opt
 
-# 克隆KDADK-APPID代码仓库
-git clone https://gitcode.com/boostkit/KDADK-APPID.git
+# 克隆KTAG代码仓库
+git clone https://gitcode.com/boostkit/KTAG.git
 
-# 进入到KDADK-APPID目录下
-cd KDADK-APPID
+# 进入到KTAG目录下
+cd KTAG
 ```
 
 ## 依赖准备
@@ -21,7 +21,7 @@ cd KDADK-APPID
 
 下载源码包[yaml-cpp](https://github.com/jbeder/yaml-cpp/archive/refs/tags/0.8.0.tar.gz)。
 
-将下载好的源码放在`KDADK-APPID/util/`文件夹下，进到`KDADK-APPID/util/yaml-cpp`。
+将下载好的源码放在`KTAG/util/`文件夹下，进到`KTAG/util/yaml-cpp`。
 
 ```bash
 # 进到yaml-cpp目录下
@@ -67,19 +67,19 @@ make install
 
 下载源码包[onnxruntime](https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-aarch64-1.22.0.tgz)。
 
-将下载好的源码放在`KDADK-APPID/util/`文件夹下。
+将下载好的源码放在`KTAG/util/`文件夹下。
 
 ```bash
 # 解压
 tar -xzf onnxruntime-linux-aarch64-1.22.0.tgz
 
 # 设置环境变量
-export ONNXRUNTIME_HOME=/opt/KDADK-APPID/util/onnxruntime-linux-aarch64-1.22.0
+export ONNXRUNTIME_HOME=/opt/KTAG/util/onnxruntime-linux-aarch64-1.22.0
 export LD_LIBRARY_PATH=$ONNXRUNTIME_HOME/lib:$LD_LIBRARY_PATH
 ```
 
 ## 编译指导
-在此目录下`/opt/KDADK-APPID/`执行下述命令
+在此目录下`/opt/KTAG/`执行下述命令
 
 ```
 sh build.sh
