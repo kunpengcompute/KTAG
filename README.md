@@ -3,6 +3,7 @@
 ## 最新消息
 
 \[2026-06-30\]: KDADK-APPID更名为KTAG。
+
 \[2026-03-30\]: 发布KDADK-APPID 1.0.0。更新了特征提取及特征推理接口头文件及软件包。
 
 ## 1. 项目介绍
@@ -27,7 +28,7 @@ KTAG是鲲鹏数据分析开发套件的网络流分类库，包含流汇聚、�
 ```
 
 ## 版本说明
-每个版本的特性变更详细信息，具体请参见[版本说明书](docs/zh/release_notes.md)。
+每个版本的特性变更详细信息，具体请参见《[版本说明书](docs/zh/release_notes.md)》。
 
 ## 4. 环境部署
 KTAG当前适配的处理器和操作系统为鲲鹏920系列处理器，openEuler 22.03操作系统，若您在使用过程中遇到问题，请先检查使用的环境是否在已验证的环境范围内。
@@ -35,8 +36,8 @@ KTAG当前适配的处理器和操作系统为鲲鹏920系列处理器，openEul
 **表2** KTAG已验证环境
 | 操作系统  | CPU类型  |
 | ------------ | ------------ |
-| openEuler 22.03 LTS SP4  | 鲲鹏920新型号处理器  |
-| openEuler 24.03 LTS SP2  | 鲲鹏920新型号处理器  |
+| openEuler 22.03 LTS SP4  | 鲲鹏920新型号处理器。  |
+| openEuler 24.03 LTS SP2  | 鲲鹏920新型号处理器。  |
 
 **表3** 软件要求
 | 软件名称| 版本 |
@@ -46,15 +47,15 @@ KTAG当前适配的处理器和操作系统为鲲鹏920系列处理器，openEul
 | yaml-cpp | 0.8.0 |
 | onnxruntime| 1.22.0|
 
-详细编译方法参考《[编译指南](docs/zh/installation_guide.md#编译指南)》
+详细编译方法参考《[编译指南](docs/zh/installation_guide.md#编译指南)》。
 
 ## 5. 学习文档
 本特性提供以下学习文档可供参考。
 | 文档 | 介绍|
 | -- | -- |
-| [编译指南](docs/zh/installation_guide.md#编译指南) | 提供了项目编译方法 |
-| [用户指南](docs/zh/user_guide.md#用户指南) | 提供了测试框架说明及用法 |
-| [API参考](docs/zh/api_reference.md#api参考) | 提供了特征提取和特征推理的接口说明 |
+| [编译指南](docs/zh/installation_guide.md#编译指南) | 提供了项目编译方法。 |
+| [用户指南](docs/zh/user_guide.md#用户指南) | 提供了测试框架说明及用法。 |
+| [API参考](docs/zh/api_reference.md#api参考) | 提供了特征提取和特征推理的接口说明。 |
 | [版本说明书](docs/zh/release_notes.md#版本说明书) | 提供了版本更新说明。 |
 
 ## 6. 贡献声明
