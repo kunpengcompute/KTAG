@@ -85,7 +85,7 @@ if [ "$1" == "" ] ;then
     COVERAGE_OPTION=""
     kdadk_appid_build
 elif [ "$1" == "-lib" ]; then
-    COVERAGE_OPTION="-DENABLE_BUILD_LIB=ON"
+    COVERAGE_OPTION="-DENABLE_BUILD_LIB=ON -DKDADK_ENABLE_HIDDEN_VISIBILITY=OFF"
     kdadk_appid_build
 elif [ "$1" == "-sve256" ]; then
     COVERAGE_OPTION="-DENABLE_SVE_256=ON"

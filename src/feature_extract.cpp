@@ -9,6 +9,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include <unordered_set>
 #include <cstring>
 #include "feature_extract.h"
+#include "kdadk_export.h"
 KDADKResult statisticsInfo2Array(const statistics_info &data, double *array, int size, int &begin)
 {
     if (array == nullptr) {
@@ -336,7 +337,7 @@ KDADKResult cal_stream_feature(flow_hash_node *node, stream_feature &node_sf)
     return KDADK_STS_NO_ERR;
 }
 
-KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
+KDADK_API KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
                                      char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len)
 {
     if (!node || !feature_vector || !rawbow || !rawbow_len) {

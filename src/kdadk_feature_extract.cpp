@@ -2,6 +2,7 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 #include "kdadk_feature_extract.h"
+#include "kdadk_export.h"
 #include <cstdlib>
 #include <cstring>
 
@@ -76,7 +77,7 @@ static int rawbow_list_add_internal(rawbow_list *list, const rawbow *rb)
     return EXTRACTOR_SUCCESS;
 }
 
-feature_extractor *extractor_init(int link_type)
+KDADK_API feature_extractor *extractor_init(int link_type)
 {
     if (link_type != DLT_EN10MB && link_type != DLT_LINUX_SLL) {
         fprintf(stderr, "Error: Unsupported link type %d\n", link_type);
@@ -182,13 +183,13 @@ static int process_packet_internal(feature_extractor *extractor, const unsigned 
     return EXTRACTOR_SUCCESS;
 }
 
-int process_packet(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
+KDADK_API int process_packet(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
                    const struct timeval *ts, feature_vector *features, int *has_feature)
 {
     return process_packet_internal(extractor, packet, packet_len, ts, features, NULL, has_feature, 0);
 }
 
-int process_packet_with_rawbow(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
+KDADK_API int process_packet_with_rawbow(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
                                const struct timeval *ts, feature_vector *features, rawbow *rawbows, int *has_feature)
 {
     if (!rawbows) {
@@ -284,12 +285,12 @@ cleanup:
     return EXTRACTOR_ERROR;
 }
 
-int extractor_finalize(feature_extractor *extractor, feature_vector_list *features)
+KDADK_API int extractor_finalize(feature_extractor *extractor, feature_vector_list *features)
 {
     return finalize_internal(extractor, features, NULL, 0);
 }
 
-int extractor_finalize_with_rawbow(feature_extractor *extractor, feature_vector_list *features, rawbow_list *rawbows)
+KDADK_API int extractor_finalize_with_rawbow(feature_extractor *extractor, feature_vector_list *features, rawbow_list *rawbows)
 {
     if (!rawbows) {
         return EXTRACTOR_ERROR;
@@ -298,7 +299,7 @@ int extractor_finalize_with_rawbow(feature_extractor *extractor, feature_vector_
     return finalize_internal(extractor, features, rawbows, 1);
 }
 
-int extractor_get_statistics(feature_extractor *extractor, statistics *stats)
+KDADK_API int extractor_get_statistics(feature_extractor *extractor, statistics *stats)
 {
     if (!extractor || !stats) {
         fprintf(stderr, "Error: Invalid extractor or stats pointer\n");
@@ -314,7 +315,7 @@ int extractor_get_statistics(feature_extractor *extractor, statistics *stats)
     }
 }
 
-void extractor_reset_statistics(feature_extractor *extractor)
+KDADK_API void extractor_reset_statistics(feature_extractor *extractor)
 {
     if (!extractor) {
         return;
@@ -322,7 +323,7 @@ void extractor_reset_statistics(feature_extractor *extractor)
     memset(&extractor->stats, 0, sizeof(statistics));
 }
 
-void extractor_destroy(feature_extractor *extractor)
+KDADK_API void extractor_destroy(feature_extractor *extractor)
 {
     if (!extractor) {
         return;
