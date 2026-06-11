@@ -5,6 +5,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #define FEATURE_EXTRACT_H
 #include <math.h>
 #include "kdadk.h"
+#include "kdadk_export.h"
 #define RAWBOW_MAX_LEN 4096
 const int HISTOGRAM_NUMS = 16;          // 统计信息-直方图位数
 const int RAW_BOW_HISTOGRAM_NUMS = 32;  // 词袋信息-直方图位数
@@ -58,7 +59,7 @@ struct stream_feature {
     double raw_bow_crc_result[RAW_BOW_HISTOGRAM_NUMS];
 };
 
-KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
+KDADK_API KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
                                    char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len);
 double calculate_mean(const std::vector<uint32_t> &nums);
 double calculate_var(const std::vector<uint32_t> &nums, double mean);

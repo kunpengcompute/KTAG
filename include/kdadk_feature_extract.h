@@ -11,6 +11,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <string.h>
 #include <netinet/in.h>
 #include "process_feature.h"
+#include "kdadk_export.h"
 
 #define HASH_BUCKETS 65536
 #define DLT_EN10MB 1
@@ -67,13 +68,13 @@ typedef struct {
  * @param link_type 链路层类型
  * @return 特征提取器句柄，失败返回NULL
  */
-feature_extractor *extractor_init(int link_type);
+KDADK_API feature_extractor *extractor_init(int link_type);
 
 /**
  * @brief 销毁特征提取器
  * @param extractor 特征提取器句柄
  */
-void extractor_destroy(feature_extractor *extractor);
+KDADK_API void extractor_destroy(feature_extractor *extractor);
 
 /**
  * @brief 处理单个数据包（仅提取特征向量）
@@ -85,7 +86,7 @@ void extractor_destroy(feature_extractor *extractor);
  * @param has_feature 输出标志，表示是否有特征提取（流结束）
  * @return EXTRACTOR_SUCCESS表示成功，EXTRACTOR_ERROR表示失败
  */
-int process_packet(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
+KDADK_API int process_packet(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
                    const struct timeval *ts, feature_vector *features, int *has_feature);
 
 /**
@@ -99,7 +100,7 @@ int process_packet(feature_extractor *extractor, const unsigned char *packet, ui
  * @param has_feature 输出标志，表示是否有特征提取（流结束）
  * @return EXTRACTOR_SUCCESS表示成功，EXTRACTOR_ERROR表示失败
  */
-int process_packet_with_rawbow(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
+KDADK_API int process_packet_with_rawbow(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
                                const struct timeval *ts, feature_vector *features, rawbow *rawbows, int *has_feature);
 
 /**
@@ -108,7 +109,7 @@ int process_packet_with_rawbow(feature_extractor *extractor, const unsigned char
  * @param features 输出特征向量列表
  * @return EXTRACTOR_SUCCESS表示成功，EXTRACTOR_ERROR表示失败
  */
-int extractor_finalize(feature_extractor *extractor, feature_vector_list *features);
+KDADK_API int extractor_finalize(feature_extractor *extractor, feature_vector_list *features);
 
 /**
  * @brief 处理所有剩余的流（提取特征向量和rawbow）
@@ -117,7 +118,7 @@ int extractor_finalize(feature_extractor *extractor, feature_vector_list *featur
  * @param rawbows 输出rawbow列表
  * @return EXTRACTOR_SUCCESS表示成功，EXTRACTOR_ERROR表示失败
  */
-int extractor_finalize_with_rawbow(feature_extractor *extractor, feature_vector_list *features, rawbow_list *rawbows);
+KDADK_API int extractor_finalize_with_rawbow(feature_extractor *extractor, feature_vector_list *features, rawbow_list *rawbows);
 
 /**
  * @brief 获取统计信息
@@ -125,13 +126,13 @@ int extractor_finalize_with_rawbow(feature_extractor *extractor, feature_vector_
  * @param stats 输出统计信息
  * @return EXTRACTOR_SUCCESS表示成功，EXTRACTOR_ERROR表示失败
  */
-int extractor_get_statistics(feature_extractor *extractor, statistics *stats);
+KDADK_API int extractor_get_statistics(feature_extractor *extractor, statistics *stats);
 
 /**
  * @brief 重置统计信息
  * @param extractor 特征提取器句柄
  */
-void extractor_reset_statistics(feature_extractor *extractor);
+KDADK_API void extractor_reset_statistics(feature_extractor *extractor);
 
 #ifdef __cplusplus
 }

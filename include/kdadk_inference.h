@@ -7,6 +7,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <stdint.h>
 #include "kdadk_feature_extract.h"
 #include "utils.h"
+#include "kdadk_export.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -46,13 +47,13 @@ typedef struct {
  * @param config 推理配置（包含配置文件路径）
  * @return 推理引擎句柄，失败返回NULL
  */
-inference_engine *inference_init(const inference_config *config);
+KDADK_API inference_engine *inference_init(const inference_config *config);
 
 /**
  * @brief 销毁推理引擎
  * @param engine 推理引擎句柄
  */
-void inference_destroy(inference_engine *engine);
+KDADK_API void inference_destroy(inference_engine *engine);
 
 /**
  * @brief 批量推理
@@ -61,7 +62,7 @@ void inference_destroy(inference_engine *engine);
  * @param result 输出推理结果（调用者需要预先分配predictions数组）
  * @return INFERENCE_SUCCESS表示成功，INFERENCE_ERROR表示失败
  */
-int inference_predict(inference_engine *engine, const feature_vector_list *features, inference_result *result);
+KDADK_API int inference_predict(inference_engine *engine, const feature_vector_list *features, inference_result *result);
 
 #ifdef __cplusplus
 }

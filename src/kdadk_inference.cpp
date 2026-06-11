@@ -2,6 +2,7 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 #include "kdadk_inference.h"
+#include "kdadk_export.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +28,7 @@ struct ort_session {
     }
 };
 
-inference_engine *inference_init(const inference_config *config)
+KDADK_API inference_engine *inference_init(const inference_config *config)
 {
     if (!config || !config->config_file) {
         fprintf(stderr, "Error: Invalid config or config_file is NULL\n");
@@ -187,7 +188,7 @@ inference_engine *inference_init(const inference_config *config)
     }
 }
 
-int inference_predict(inference_engine *engine, const feature_vector_list *features, inference_result *result)
+KDADK_API int inference_predict(inference_engine *engine, const feature_vector_list *features, inference_result *result)
 {
     if (!engine || !engine->initialized) {
         fprintf(stderr, "Error: Inference engine not initialized\n");
@@ -258,7 +259,7 @@ int inference_predict(inference_engine *engine, const feature_vector_list *featu
     }
 }
 
-void inference_destroy(inference_engine *engine)
+KDADK_API void inference_destroy(inference_engine *engine)
 {
     if (!engine) {
         return;

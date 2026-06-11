@@ -29,9 +29,18 @@ if ("$ENV{KDADK_APPID_CPU_CHECK_ENABLE}" STREQUAL "N")
     set(KDADK_APPID_CPU_LIMIT 0)
 endif()
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DKDADK_APPID_CPU_LIMIT=${KDADK_APPID_CPU_LIMIT} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O0 -fstack-protector-all -Wl,-z,relro,-z,now,-z,noexecstack -fPIC -s -fcommon")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DKDADK_APPID_CPU_LIMIT=${KDADK_APPID_CPU_LIMIT} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-all -Wl,-z,relro,-z,now,-z,noexecstack -fPIC -s -fcommon")
-set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-all -fPIC -fcommon -march=armv8-a+sve")
+
+option(KDADK_ENABLE_HIDDEN_VISIBILITY
+       "Hide internal symbols via -fvisibility=hidden (default ON; set OFF for test build)" ON)
+
+set(KDADK_VISIBILITY_FLAG "")
+if(KDADK_ENABLE_HIDDEN_VISIBILITY)
+    set(KDADK_VISIBILITY_FLAG "-fvisibility=hidden")
+endif()
+
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DKDADK_APPID_CPU_LIMIT=${KDADK_APPID_CPU_LIMIT} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KDADK_VISIBILITY_FLAG} -Wl,-z,relro,-z,now,-z,noexecstack -fPIC -s -fcommon")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DKDADK_APPID_CPU_LIMIT=${KDADK_APPID_CPU_LIMIT} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KDADK_VISIBILITY_FLAG} -Wl,-z,relro,-z,now,-z,noexecstack -fPIC -s -fcommon")
+set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KDADK_VISIBILITY_FLAG} -fPIC -fcommon -march=armv8-a+sve")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,relro,-z,now,-z,noexecstack -s")
 
 # 添加选项以启用 SVE256 指令集

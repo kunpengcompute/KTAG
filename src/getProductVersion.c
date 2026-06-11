@@ -5,6 +5,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include <stddef.h>
 #include <string.h>
 #include "kdadk_core.h"
+#include "kdadk_export.h"
 #include "kdadk_appidver.h"
 const KDADKLibraryVersion *KDADK_GetLibVersion()
 {
@@ -13,7 +14,7 @@ const KDADKLibraryVersion *KDADK_GetLibVersion()
     return &libVersion;
 }
 
-KDADKResult KDADK_GetProductVersion(KDADKProVersion *packageInfo)
+KDADK_API KDADKResult KDADK_GetProductVersion(KDADKProVersion *packageInfo)
 {
     if (packageInfo == NULL) {
         return KDADK_STS_NULL_PTR_ERR;

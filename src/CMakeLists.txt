@@ -59,6 +59,8 @@ add_library(KDADK_feature_extract SHARED
     ${PROJECT_SOURCE_DIR}/src/kdadk_feature_extract.cpp
 )
 
+target_compile_definitions(KDADK_feature_extract PRIVATE KDADK_BUILDING_DLL)
+
 target_link_libraries(KDADK_feature_extract PRIVATE pcap)
 
 target_include_directories(KDADK_feature_extract PRIVATE
@@ -71,6 +73,8 @@ add_library(KDADK_inference SHARED
     ${PROJECT_SOURCE_DIR}/src/utils.cpp
     ${PROJECT_SOURCE_DIR}/src/kdadk_inference.cpp
 )
+
+target_compile_definitions(KDADK_inference PRIVATE KDADK_BUILDING_DLL)
 
 # 直接使用库文件路径，不使用 -l 链接
 target_link_libraries(KDADK_inference PRIVATE 
@@ -95,6 +99,8 @@ if(ENABLE_BUILD_LIB)
     add_library(kdadk_appidlib SHARED
         ${PROJECT_SOURCE_DIR}/src/getProductVersion.c
     )
+
+    target_compile_definitions(kdadk_appidlib PRIVATE KDADK_BUILDING_DLL)
 
     target_link_libraries(kdadk_appidlib PRIVATE
         pcap

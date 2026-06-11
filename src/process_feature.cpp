@@ -37,7 +37,8 @@ flow_hash_node *process_udp_packet(flow_hash *hash_table, packet_info *info)
     return node;
 }
 
-void process_rawbow(flow_hash *hash_table, packet_info *info, flow_hash_node *node, domain_name_hash *domain_name_table)
+void process_rawbow(flow_hash *hash_table, packet_info *info, flow_hash_node *node,
+                    domain_name_hash *domain_name_table)
 {
     KDADKResult ret;
     if (node->rawbow_cnt < MAX_RAWBOW_CNT) {
