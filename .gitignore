@@ -1,3 +1,30 @@
-.vscode
-output/
-data/
+.vscode/
+
+# Product and CMake build outputs.
+/docs/
+/examples/
+/build/
+/output/
+/result/
+/phase8_validation/
+
+# Python caches.
+__pycache__/
+*.py[cod]
+
+# Test dependencies and generated binaries/objects.
+/test/googletest-release-1.8.0/
+/test/gtest-download/*.zip
+/test/test_tool_bins/gtest/*.a
+/test/fuzz/build/
+/test/common/**/*.o
+/test/common/**/*.o.d
+/test/build/functest/kdadk_appid_functest
+/test/build/perftest/kdadk_appid_perftest
+/test/build/*.csv
+/test/build/*.txt
+/tools/demo/**/*.o
+/tools/demo/**/*.o.d
+
+# Runtime validation output.
+/classification_report.txt

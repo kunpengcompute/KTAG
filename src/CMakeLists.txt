@@ -5,6 +5,30 @@ endif(NOT KDADK_APPID_MODULES_PATH)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# ============= Capture layer =============
+find_package(Threads REQUIRED)
+
+add_library(ktag_capture SHARED
+    ${PROJECT_SOURCE_DIR}/src/capture/capture.cpp
+    ${PROJECT_SOURCE_DIR}/src/capture/packet_buffer.cpp
+    ${PROJECT_SOURCE_DIR}/src/capture/flow_key.cpp
+)
+add_library(KTAG::capture ALIAS ktag_capture)
+
+target_compile_definitions(ktag_capture PRIVATE KTAG_BUILDING_DLL)
+target_link_libraries(ktag_capture PRIVATE pcap Threads::Threads)
+target_include_directories(ktag_capture
+    PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
+    PRIVATE ${PROJECT_SOURCE_DIR}/src/capture
+)
+set_target_properties(ktag_capture PROPERTIES
+    EXPORT_NAME capture
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN"
+)
+
 # ============= ONNX Runtime 配置 =============
 set(ONNXRUNTIME_ROOT "$ENV{ONNXRUNTIME_HOME}" CACHE PATH "Root directory of ONNX Runtime installation")
 if(NOT ONNXRUNTIME_ROOT)
@@ -50,28 +74,124 @@ message(STATUS "Found yaml-cpp library: ${YAML_CPP_LIB}")
 message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 
 # ============= 生成特征提取动态链接库 =============
-add_library(KDADK_feature_extract SHARED
+add_library(ktag_feature SHARED
     ${PROJECT_SOURCE_DIR}/src/decode.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
     ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
-    ${PROJECT_SOURCE_DIR}/src/process_feature.cpp
-    ${PROJECT_SOURCE_DIR}/src/kdadk_feature_extract.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/feature_schema.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/feature_batch.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/legacy_schema.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/provider_registry.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/feature_view.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/feature_pipeline.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/builtin_features.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/domain_store.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/feature_context.cpp
+)
+add_library(KTAG::feature ALIAS ktag_feature)
+
+target_compile_definitions(ktag_feature PRIVATE
+    KTAG_BUILDING_DLL
+    KTAG_FEATURE_INTERNAL_BUILD
+)
+
+target_link_libraries(ktag_feature PRIVATE
+    ktag_capture
+    pcap
+    Threads::Threads
+)
+
+target_include_directories(ktag_feature
+    PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
+    PRIVATE
+    ${PROJECT_SOURCE_DIR}/
+)
+set_target_properties(ktag_feature PROPERTIES
+    EXPORT_NAME feature
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN"
+)
+
+# Deprecated fixed-vector Feature compatibility layer. Keep adapter-only
+# sources under src/legacy; the shared algorithms above remain in the Feature
+# layer because they implement the verified Legacy V1 provider semantics.
+set(KTAG_LEGACY_FEATURE_ADAPTER_SOURCES
+    ${PROJECT_SOURCE_DIR}/src/decode.cpp
+    ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
+    ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
+    ${PROJECT_SOURCE_DIR}/src/legacy/process_feature.cpp
+    ${PROJECT_SOURCE_DIR}/src/legacy/kdadk_feature_extract.cpp
+)
+add_library(KDADK_feature_extract SHARED
+    ${KTAG_LEGACY_FEATURE_ADAPTER_SOURCES}
 )
 
 target_compile_definitions(KDADK_feature_extract PRIVATE KDADK_BUILDING_DLL)
 
-target_link_libraries(KDADK_feature_extract PRIVATE pcap)
-
-target_include_directories(KDADK_feature_extract PRIVATE
-    ${PROJECT_SOURCE_DIR}/
-    ${PROJECT_SOURCE_DIR}/include
+target_link_libraries(KDADK_feature_extract PRIVATE
+    ktag_feature
+    pcap
+    Threads::Threads
 )
 
-# ============= 生成 ONNX 推理动态链接库 =============
+target_include_directories(KDADK_feature_extract
+    PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
+    PRIVATE ${PROJECT_SOURCE_DIR}/
+)
+set_target_properties(KDADK_feature_extract PROPERTIES
+    EXPORT_NAME feature_compat
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN"
+)
+
+# ============= Schema-aware inference layer =============
+add_library(ktag_inference SHARED
+    ${PROJECT_SOURCE_DIR}/src/inference/model_contract.cpp
+    ${PROJECT_SOURCE_DIR}/src/inference/prediction_batch.cpp
+    ${PROJECT_SOURCE_DIR}/src/inference/inference_context.cpp
+)
+add_library(KTAG::inference ALIAS ktag_inference)
+
+target_compile_definitions(ktag_inference PRIVATE KTAG_BUILDING_DLL)
+
+target_link_libraries(ktag_inference PRIVATE
+    ktag_feature
+    ${ONNXRUNTIME_LIB}
+    ${YAML_CPP_LIB}
+    Threads::Threads
+)
+
+target_include_directories(ktag_inference
+    PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
+    PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/inference
+    ${YAML_CPP_INCLUDE}
+    ${ONNXRUNTIME_INCLUDE_DIR}
+)
+
+set_target_properties(ktag_inference PROPERTIES
+    EXPORT_NAME inference
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    BUILD_RPATH "$ORIGIN;${YAML_CPP_LIB_DIR};${ONNXRUNTIME_LIB_DIR}"
+    INSTALL_RPATH "$ORIGIN;${YAML_CPP_LIB_DIR};${ONNXRUNTIME_LIB_DIR}"
+)
+
+# ============= Deprecated fixed-vector inference adapter =============
+set(KTAG_LEGACY_INFERENCE_ADAPTER_SOURCES
+    ${PROJECT_SOURCE_DIR}/src/legacy/utils.cpp
+    ${PROJECT_SOURCE_DIR}/src/legacy/kdadk_inference.cpp
+)
 add_library(KDADK_inference SHARED
-    ${PROJECT_SOURCE_DIR}/src/utils.cpp
-    ${PROJECT_SOURCE_DIR}/src/kdadk_inference.cpp
+    ${KTAG_LEGACY_INFERENCE_ADAPTER_SOURCES}
 )
 
 target_compile_definitions(KDADK_inference PRIVATE KDADK_BUILDING_DLL)
@@ -82,28 +202,35 @@ target_link_libraries(KDADK_inference PRIVATE
     ${YAML_CPP_LIB}
 )
 
-target_include_directories(KDADK_inference PRIVATE
+target_include_directories(KDADK_inference
+    PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
+    PRIVATE
     ${PROJECT_SOURCE_DIR}/
-    ${PROJECT_SOURCE_DIR}/include
     ${YAML_CPP_INCLUDE}
     ${ONNXRUNTIME_INCLUDE_DIR}
 )
 
 set_target_properties(KDADK_inference PROPERTIES
+    EXPORT_NAME inference_compat
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
+    BUILD_RPATH "${YAML_CPP_LIB_DIR};${ONNXRUNTIME_LIB_DIR}"
+    INSTALL_RPATH "${YAML_CPP_LIB_DIR};${ONNXRUNTIME_LIB_DIR}"
 )
 
 # ============= 生成动态库(可选) =============
 if(ENABLE_BUILD_LIB)
     add_library(kdadk_appidlib SHARED
-        ${PROJECT_SOURCE_DIR}/src/getProductVersion.c
+        ${PROJECT_SOURCE_DIR}/src/legacy/getProductVersion.c
     )
 
     target_compile_definitions(kdadk_appidlib PRIVATE KDADK_BUILDING_DLL)
 
     target_link_libraries(kdadk_appidlib PRIVATE
         pcap
+        ktag_feature
         KDADK_feature_extract
         KDADK_inference
         ${ONNXRUNTIME_LIB} 
@@ -118,7 +245,29 @@ if(ENABLE_BUILD_LIB)
     set_target_properties(kdadk_appidlib PROPERTIES
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED ON
+        BUILD_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN"
     )
+    if(KTAG_INSTALL_LEGACY_COMPAT)
+        install(TARGETS kdadk_appidlib
+                LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
+                ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
+                RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
+    endif()
+endif()
+
+install(TARGETS ktag_capture ktag_feature ktag_inference
+        EXPORT KTAGTargets
+        LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
+        RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
+
+if(KTAG_INSTALL_LEGACY_COMPAT)
+    install(TARGETS KDADK_feature_extract KDADK_inference
+            EXPORT KTAGTargets
+            LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
+            ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
+            RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
 endif()
 
 KDADK_APPID_glob_modules(${KDADK_APPID_MODULES_PATH})
