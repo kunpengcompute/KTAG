@@ -9,6 +9,10 @@
 ## 1. 项目介绍
 KTAG是鲲鹏数据分析开发套件的网络流分类库，包含流汇聚、协议检测、特征计算、AI引擎和训练工具包，针对鲲鹏特性进行极致亲和优化，在具备对明文流量分析能力的同时，亦能对加密流量进行实时分析，弥补传统基于规则检测的DPI方案无法分析加密流量的短板，为解决业界普遍难题提供端到端参考方案。
 
+当前公共库按 Capture、Feature、Inference 三层交付。新架构支持 callbacks
+自定义特征、Schema 化模型契约和由 demo 组织的单线程/多线程流水线。旧固定
+`feature_vector` 与旧模型接口继续作为 deprecated 兼容层保留。
+
 ## 2. 项目结构
 项目目录结构如下：
 ```
@@ -19,6 +23,7 @@ KTAG是鲲鹏数据分析开发套件的网络流分类库，包含流汇聚、�
 │       ├── installation_guide.md                             # 安装指南
 │       ├── user_guide.md                                     # 用户指南
 │       ├── api_reference.md                                  # API参考
+│       ├── migration_guide.md                                # 旧接口迁移指南
 |—— include                                                   # 头文件目录
 |—— src                                                       # 源码目录
 |—— test                                                      # 测试框架
@@ -56,6 +61,8 @@ KTAG当前适配的处理器和操作系统为鲲鹏920系列处理器，openEul
 | [编译指南](docs/zh/installation_guide.md#编译指南) | 提供了项目编译方法。 |
 | [用户指南](docs/zh/user_guide.md#用户指南) | 提供了测试框架说明及用法。 |
 | [API参考](docs/zh/api_reference.md#api参考) | 提供了特征提取和特征推理的接口说明。 |
+| [迁移指南](docs/zh/migration_guide.md) | 说明旧固定向量和旧模型到三层 API 的迁移方式。 |
+| [多线程 demo](docs/zh/demo_pipeline.md) | 说明四种管线模式、背压与 Feature Plugin。 |
 | [版本说明书](docs/zh/release_notes.md#版本说明书) | 提供了版本更新说明。 |
 
 ## 6. 贡献声明

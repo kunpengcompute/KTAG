@@ -62,13 +62,23 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
    - 首先需要构建 KDADK-APPID 库，生成 `KDADK_feature_extract` 和 `KDADK_inference` 库文件
 
 2. **依赖项**：
-   - GCC 10.3.1+
-   - CMake 3.10+
+   - Clang/Clang++（带 LibFuzzer）
+   - CMake 3.16.3+
    - LibFuzzer (随 LLVM 一起提供)
    - yaml-cpp 0.8.0
    - ONNX Runtime 1.22.0
 
 ### 4.2 构建步骤
+
+推荐从统一测试入口构建，它会先生成带 ASan 的兼容库，再配置正确的
+`test/fuzz/build` 目录：
+
+```bash
+cd test/build
+make fuzz
+```
+
+手工构建时执行：
 
 1. **构建前准备**：
 
@@ -107,8 +117,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 使用 LibFuzzer 运行测试：
 
 ```bash
-./kdadk_fuzzer -runs=30000000 -max_total_time=12600
+cd test/build
+make rfuzz fuzzcount=10000 fuzzargs="-max_total_time=60"
 ```
+
+`rfuzz` 会设置兼容模型配置路径和运行时库路径。直接运行二进制时，可通过
+`KTAG_LEGACY_CONFIG` 指定旧推理配置；未设置时只执行 Feature 兼容 API 的
+Fuzz。
 
 ### 5.2 运行选项
 
