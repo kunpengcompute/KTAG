@@ -1,0 +1,89 @@
+# Stage-7 Schema-aware pipeline example. Set enabled to false only in a full
+# legacy config that also contains model_path_onnx/scaler_path_json.
+pipeline:
+  enabled: true
+
+  # CLI may override this with --pipeline-mode. -n/--feature-threads and
+  # --inference-threads override only the worker counts for that invocation.
+
+  # single_thread: capture + feature + inference in the caller thread
+  # staged: one thread for each of capture, feature and inference
+  # feature_parallel: one capture, N feature workers, one inference worker
+  # full_parallel: one capture, N feature workers, M inference workers
+  mode: full_parallel
+
+  # Directory containing manifest.json, scaler metadata and the ONNX model.
+  # Relative paths are resolved against this YAML file.
+  # For the complete Legacy V1 schema, kdadk_demo -t creates it automatically.
+  # A customized schema needs a matching feature-ID manifest/scaler/model.
+  model_package_path: ../../result/legacy_model_package
+
+  capture:
+    packet_pool_size: 65536
+
+  feature:
+    threads: 4
+    # Capacity of each Feature worker's packet queue.
+    queue_capacity: 65536
+    flow_hash_seed: 2026
+    # legacy matches the historical extractor/model exactly. modern enables
+    # idle-timeout flow splitting and emits a UDP flow at the packet limit.
+    lifecycle_mode: legacy
+    expire_interval_ms: 1000
+    # Zero selects the Feature layer defaults.
+    flow_capacity: 0
+    tcp_idle_timeout_us: 0
+    udp_idle_timeout_us: 0
+    udp_packet_limit: 0
+
+  inference:
+    threads: 2
+    batch_size: 256
+    # Shared queue between Feature and Inference workers.
+    queue_capacity: 4096
+    intra_op_threads: 1
+    inter_op_threads: 1
+
+  backpressure:
+    # block is lossless. Other values: drop_newest, drop_oldest, fail.
+    policy: block
+
+  # Plugins are loaded before Schema composition. Relative paths are resolved
+  # against this YAML file.
+  plugins: []
+  # To load the example, replace the line above with:
+  # plugins:
+  #   - ../../output/plugins/libktag_example_feature_plugin.so
+
+  schema:
+    name: ktag_legacy_v1
+    version: 1
+
+    # With no selection fields the exact legacy v1 order is used. Either set
+    # feature_order, or use remove_features/add_features; do not combine them.
+    remove_features: []
+    add_features: []
+    # add_features:
+    #   - customer.packet_counts
+    # feature_order:
+    #   - legacy.flow.protocol
+
+  # Optional Schema-aware training contract. Without this block the current
+  # legacy CSV training flow is preserved and packaged by the legacy adapter.
+  # Custom-Schema CSV headers must match the columns declared here.
+  # training:
+  #   schema_hash: 0x123456789abcdef0
+  #   model_name: customer_classifier
+  #   model_version: 1
+  #   minimum_total_packets: 16
+  #   packet_count_features:
+  #     - traffic.send.packet_count
+  #     - traffic.receive.packet_count
+  #   input_features:
+  #     - traffic.send.packet_count
+  #     - traffic.receive.packet_count
+  #     - feature_id: customer.packet_counts
+  #       dimension: 2
+  #       columns:
+  #         - customer.packet_counts[0]
+  #         - customer.packet_counts[1]
