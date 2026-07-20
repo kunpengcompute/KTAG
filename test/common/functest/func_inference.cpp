@@ -4,8 +4,11 @@
 #include "kdadk_test.h"
 #include "kdadk_inference.h"
 
+#include <vector>
+#include <yaml-cpp/yaml.h>
+
 // 测试配置文件路径
-static const char *TEST_CONFIG_FILE = "../../../src/config.yaml";
+static const char *TEST_CONFIG_FILE = "../../../tools/demo/config.yaml";
 
 // 测试夹具
 class InferenceEngineTest : public ::testing::Test {
@@ -23,18 +26,6 @@ protected:
             inference_destroy(engine);
             engine = nullptr;
         }
-    }
-
-    void createTestConfig()
-    {
-        std::ofstream ofs(TEST_CONFIG_FILE);
-        ofs << "model_path: \"test_model.onnx\"\n";
-        ofs << "scaler_path: \"test_scaler.pkl\"\n";
-        ofs << "online_data_path: \"test_data\"\n";
-        ofs << "filter_packets: 5\n";
-        ofs << "columns_to_remove: [0, 1, 2]\n";
-        ofs << "onnx_log_level: WARNING\n";
-        ofs.close();
     }
 };
 
@@ -132,27 +123,52 @@ TEST(InferenceAlignmentTest, FeatureInferenceAlignment)
 
 TEST_F(InferenceEngineTest, PredictInputValidation)
 {
-    feature_vector_list features;
-    inference_result result;
+    inference_config config;
+    config.config_file = TEST_CONFIG_FILE;
+    engine = inference_init(&config);
+    if (engine == nullptr) {
+        return;
+    }
 
+    int prediction = 0;
+    inference_result result{};
+    result.predictions = &prediction;
     int ret = inference_predict(engine, nullptr, &result);
     EXPECT_EQ(ret, INFERENCE_ERROR) << "Should fail with NULL features";
 
-    features.count = 1;
-    features.vectors = static_cast<feature_vector *>(malloc(sizeof(feature_vector) * features.count));;
+    feature_vector vector{};
+    feature_vector_list features{};
+    features.count = 1U;
+    features.capacity = 1U;
+    features.vectors = &vector;
     ret = inference_predict(engine, &features, nullptr);
     EXPECT_EQ(ret, INFERENCE_ERROR) << "Should fail with NULL result";
 }
 
 TEST_F(InferenceEngineTest, ConfigParameters)
 {
+    const YAML::Node expected = YAML::LoadFile(TEST_CONFIG_FILE);
+    ASSERT_TRUE(expected["filter_packets"]);
+    ASSERT_TRUE(expected["columns_to_remove"]);
+    const int expected_filter_packets =
+        expected["filter_packets"].as<int>();
+    const std::vector<int> expected_columns =
+        expected["columns_to_remove"].as<std::vector<int>>();
+
     inference_config config;
     config.config_file = TEST_CONFIG_FILE;
 
     engine = inference_init(&config);
 
     if (engine) {
-        EXPECT_EQ(engine->filter_packets, 10) << "filter_packets should be 5";
-        EXPECT_EQ(engine->columns_to_remove_count, 3) << "Should have 3 columns to remove";
+        EXPECT_EQ(expected_filter_packets, engine->filter_packets);
+        ASSERT_EQ(expected_columns.size(), engine->columns_to_remove_count);
+        for (uint32_t index = 0U;
+             index < engine->columns_to_remove_count;
+             ++index) {
+            EXPECT_EQ(
+                expected_columns[index],
+                engine->columns_to_remove[index]);
+        }
     }
 }
