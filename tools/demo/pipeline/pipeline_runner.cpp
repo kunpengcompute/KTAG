@@ -742,3 +742,849 @@ bool run_single_source(
     statistics->elapsed_nanoseconds = elapsed_nanoseconds(execution_start);
     return true;
 }
+
+class parallel_source_executor {
+public:
+    parallel_source_executor(
+        const ktag_demo_pipeline_config &config,
+        const ktag_feature_schema *schema,
+        const ktag_feature_registry *registry,
+        uint32_t source_index)
+        : config_(config),
+          schema_(schema),
+          registry_(registry),
+          source_index_(source_index),
+          feature_queue_(config.feature_queue_capacity),
+          active_feature_workers_(config.feature_threads),
+          feature_stats_(config.feature_threads),
+          inference_stats_(config.inference_threads)
+    {
+        packet_queues_.reserve(config.feature_threads);
+        for (uint32_t index = 0U; index < config.feature_threads; ++index) {
+            packet_queues_.emplace_back(
+                new ktag_demo_bounded_queue<owned_packet>(
+                    config.packet_queue_capacity));
+        }
+    }
+
+    bool run(
+        const char *source,
+        bool live,
+        std::vector<pipeline_prediction> *predictions,
+        pipeline_source_statistics *statistics,
+        std::string *error)
+    {
+        *statistics = pipeline_source_statistics{};
+        predictions_ = predictions;
+        const ktag_capture_config capture_config = make_capture_config(
+            source, live, true, config_.packet_pool_size);
+        capture_.reset(ktag_capture_open(&capture_config));
+        domain_store_ = create_domain_store();
+        if (!capture_ || !domain_store_ || !create_contexts()) {
+            *error = error_message_.empty() ?
+                std::string("parallel pipeline initialization failed: ") +
+                    ktag_capture_get_last_error() : error_message_;
+            return false;
+        }
+
+        const auto execution_start = std::chrono::steady_clock::now();
+        try {
+            for (uint32_t index = 0U;
+                 index < config_.inference_threads;
+                 ++index) {
+                inference_threads_.emplace_back(
+                    &parallel_source_executor::inference_worker,
+                    this,
+                    index);
+            }
+            for (uint32_t index = 0U;
+                 index < config_.feature_threads;
+                 ++index) {
+                feature_threads_.emplace_back(
+                    &parallel_source_executor::feature_worker,
+                    this,
+                    index);
+            }
+            capture_thread_ = std::thread(
+                &parallel_source_executor::capture_worker,
+                this);
+        } catch (...) {
+            fail("failed to create pipeline threads");
+        }
+
+        if (capture_thread_.joinable()) {
+            capture_thread_.join();
+        } else {
+            close_packet_queues();
+        }
+        for (auto &thread : feature_threads_) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+        feature_queue_.close();
+        for (auto &thread : inference_threads_) {
+            if (thread.joinable()) {
+                thread.join();
+            }
+        }
+        const auto execution_end = std::chrono::steady_clock::now();
+
+        if (failed_.load(std::memory_order_acquire)) {
+            std::lock_guard<std::mutex> lock(error_mutex_);
+            *error = error_message_;
+            return false;
+        }
+        collect_statistics(static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                execution_end - execution_start).count()), statistics);
+        return true;
+    }
+
+private:
+    bool create_contexts()
+    {
+        try {
+            feature_contexts_.reserve(config_.feature_threads);
+            inference_contexts_.reserve(config_.inference_threads);
+            for (uint32_t index = 0U;
+                 index < config_.feature_threads;
+                 ++index) {
+                auto context = create_feature_context(
+                    config_, schema_, registry_, domain_store_.get());
+                if (!context) {
+                    error_message_ = "failed to create Feature Context";
+                    return false;
+                }
+                feature_contexts_.push_back(std::move(context));
+            }
+            for (uint32_t index = 0U;
+                 index < config_.inference_threads;
+                 ++index) {
+                auto context = create_inference_context(config_, schema_);
+                if (!context) {
+                    error_message_ = std::string(
+                        "failed to create Inference Context: ") +
+                        ktag_inference_get_last_error();
+                    return false;
+                }
+                inference_contexts_.push_back(std::move(context));
+            }
+            return true;
+        } catch (...) {
+            error_message_ = "out of memory creating pipeline contexts";
+            return false;
+        }
+    }
+
+    void fail(const std::string &message)
+    {
+        bool expected = false;
+        if (failed_.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel)) {
+            std::lock_guard<std::mutex> lock(error_mutex_);
+            error_message_ = message;
+        }
+        close_packet_queues();
+        feature_queue_.close();
+    }
+
+    void close_packet_queues()
+    {
+        for (auto &queue : packet_queues_) {
+            queue->close();
+        }
+    }
+
+    void capture_worker()
+    {
+        ktag_packet packet{};
+        ktag_packet_init(&packet);
+        while (!failed_.load(std::memory_order_acquire) &&
+               pipeline_interrupted == 0) {
+            const auto read_start = std::chrono::steady_clock::now();
+            const ktag_status status =
+                ktag_capture_next(capture_.get(), &packet);
+            capture_stats_.read_nanoseconds +=
+                elapsed_nanoseconds(read_start);
+            if (status == KTAG_STATUS_TIMEOUT) {
+                continue;
+            }
+            if (status == KTAG_ERROR_CAPACITY) {
+                ++capture_stats_.pool_waits;
+                std::this_thread::yield();
+                continue;
+            }
+            if (status == KTAG_STATUS_END_OF_STREAM) {
+                break;
+            }
+            if (status != KTAG_SUCCESS) {
+                fail(std::string("capture read failed: ") +
+                    ktag_capture_get_last_error());
+                break;
+            }
+
+            ++capture_stats_.packets;
+            capture_stats_.bytes += packet.captured_length;
+            ktag_flow_key key{};
+            const ktag_status key_status =
+                ktag_packet_get_flow_key(&packet, &key);
+            if (key_status != KTAG_SUCCESS) {
+                ++capture_stats_.unsupported;
+                ktag_packet_release(&packet);
+                continue;
+            }
+            const uint32_t worker = ktag_flow_select_worker(
+                &key, config_.feature_threads, config_.flow_hash_seed);
+            if (worker == KTAG_WORKER_INDEX_INVALID ||
+                worker >= packet_queues_.size()) {
+                ktag_packet_release(&packet);
+                fail("dispatcher returned an invalid Feature worker");
+                break;
+            }
+
+            owned_packet item(&packet);
+            const auto result = packet_queues_[worker]->push(
+                std::move(item), config_.backpressure);
+            if (result == ktag_demo_queue_push_result::failed) {
+                fail("packet queue reached capacity with fail policy");
+                break;
+            }
+            if (result == ktag_demo_queue_push_result::closed) {
+                break;
+            }
+        }
+        ktag_packet_release(&packet);
+        close_packet_queues();
+    }
+
+    bool enqueue_feature_batch(ktag_feature_batch *batch)
+    {
+        std::vector<feature_record_owned> records;
+        std::string error;
+        if (!copy_feature_records(batch, &records, &error)) {
+            fail(error);
+            return false;
+        }
+        for (auto &record : records) {
+            const auto result = feature_queue_.push(
+                std::move(record), config_.backpressure);
+            if (result == ktag_demo_queue_push_result::failed) {
+                fail("feature queue reached capacity with fail policy");
+                return false;
+            }
+            if (result == ktag_demo_queue_push_result::closed) {
+                if (!failed_.load(std::memory_order_acquire)) {
+                    fail("feature queue closed before Feature workers drained");
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void feature_worker(uint32_t worker_index)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        feature_batch_ptr output(ktag_feature_batch_create(schema_, 64U));
+        if (!output) {
+            fail("failed to create Feature worker output batch");
+            finish_feature_worker(worker_index, start);
+            return;
+        }
+
+        uint64_t last_expire_us = 0U;
+        owned_packet packet;
+        while (packet_queues_[worker_index]->pop(&packet)) {
+            if (failed_.load(std::memory_order_acquire)) {
+                break;
+            }
+            ++feature_stats_[worker_index].packets;
+            const uint64_t now_us = timestamp_us(packet.get()->timestamp);
+            const auto process_start = std::chrono::steady_clock::now();
+            const ktag_status status = ktag_feature_process_packet(
+                feature_contexts_[worker_index].get(),
+                packet.get(),
+                output.get());
+            feature_stats_[worker_index].work_nanoseconds +=
+                elapsed_nanoseconds(process_start);
+            packet = owned_packet();
+            if (status == KTAG_ERROR_NOT_SUPPORTED ||
+                status == KTAG_ERROR_INVALID_ARGUMENT) {
+                ++feature_stats_[worker_index].rejected_packets;
+                continue;
+            }
+            if (status != KTAG_SUCCESS || !enqueue_feature_batch(output.get())) {
+                if (status != KTAG_SUCCESS) {
+                    fail("Feature worker processing failed with status " +
+                        std::to_string(status));
+                }
+                break;
+            }
+            feature_stats_[worker_index].emitted_flows +=
+                ktag_feature_batch_get_count(output.get());
+
+            const uint64_t interval_us =
+                static_cast<uint64_t>(config_.expire_interval_ms) * 1000U;
+            if (interval_us != 0U &&
+                (last_expire_us == 0U ||
+                 (now_us >= last_expire_us &&
+                  now_us - last_expire_us >= interval_us))) {
+                const auto expire_start = std::chrono::steady_clock::now();
+                const ktag_status expire_status = ktag_feature_expire(
+                    feature_contexts_[worker_index].get(),
+                    now_us,
+                    output.get());
+                feature_stats_[worker_index].work_nanoseconds +=
+                    elapsed_nanoseconds(expire_start);
+                if (expire_status != KTAG_SUCCESS ||
+                    !enqueue_feature_batch(output.get())) {
+                    if (expire_status != KTAG_SUCCESS) {
+                        fail("Feature worker expiration failed");
+                    }
+                    break;
+                }
+                feature_stats_[worker_index].emitted_flows +=
+                    ktag_feature_batch_get_count(output.get());
+                last_expire_us = now_us;
+            }
+        }
+
+        if (!failed_.load(std::memory_order_acquire)) {
+            const auto flush_start = std::chrono::steady_clock::now();
+            const ktag_status flush_status = ktag_feature_flush(
+                feature_contexts_[worker_index].get(), output.get());
+            feature_stats_[worker_index].work_nanoseconds +=
+                elapsed_nanoseconds(flush_start);
+            if (flush_status != KTAG_SUCCESS ||
+                !enqueue_feature_batch(output.get())) {
+                if (flush_status != KTAG_SUCCESS) {
+                    fail("Feature worker flush failed");
+                }
+            } else {
+                feature_stats_[worker_index].emitted_flows +=
+                    ktag_feature_batch_get_count(output.get());
+            }
+        }
+        finish_feature_worker(worker_index, start);
+    }
+
+    void finish_feature_worker(
+        uint32_t worker_index,
+        const std::chrono::steady_clock::time_point &start)
+    {
+        feature_stats_[worker_index].elapsed_nanoseconds =
+            static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - start).count());
+        if (active_feature_workers_.fetch_sub(
+                1U, std::memory_order_acq_rel) == 1U) {
+            feature_queue_.close();
+        }
+    }
+
+    void inference_worker(uint32_t worker_index)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        feature_batch_ptr input(ktag_feature_batch_create(
+            schema_, config_.inference_batch_size));
+        prediction_batch_ptr output(ktag_prediction_batch_create(
+            config_.inference_batch_size));
+        if (!input || !output) {
+            fail("failed to create Inference worker batches");
+            return;
+        }
+
+        feature_record_owned record;
+        while (feature_queue_.pop(&record)) {
+            if (failed_.load(std::memory_order_acquire)) {
+                break;
+            }
+            ktag_feature_batch_clear(input.get());
+            uint32_t batch_count = 0U;
+            while (true) {
+                const ktag_status append_status = ktag_feature_batch_append(
+                    input.get(),
+                    &record.metadata,
+                    record.values.data(),
+                    static_cast<uint32_t>(record.values.size()));
+                if (append_status != KTAG_SUCCESS) {
+                    fail("failed to build Inference worker batch");
+                    break;
+                }
+                ++batch_count;
+                if (batch_count >= config_.inference_batch_size ||
+                    !feature_queue_.try_pop(&record)) {
+                    break;
+                }
+            }
+            if (failed_.load(std::memory_order_acquire)) {
+                break;
+            }
+
+            const auto inference_start = std::chrono::steady_clock::now();
+            const ktag_status status = ktag_inference_predict(
+                inference_contexts_[worker_index].get(),
+                input.get(),
+                output.get());
+            inference_stats_[worker_index].work_nanoseconds +=
+                elapsed_nanoseconds(inference_start);
+            if (status != KTAG_SUCCESS) {
+                fail(std::string("Inference worker failed: ") +
+                    ktag_inference_get_last_error());
+                break;
+            }
+            std::vector<pipeline_prediction> local;
+            std::string error;
+            if (!append_predictions(
+                    output.get(), source_index_, &local, &error)) {
+                fail(error);
+                break;
+            }
+            {
+                std::lock_guard<std::mutex> lock(prediction_mutex_);
+                try {
+                    predictions_->insert(
+                        predictions_->end(),
+                        local.begin(),
+                        local.end());
+                } catch (...) {
+                    fail("out of memory merging Inference results");
+                    break;
+                }
+            }
+            ++inference_stats_[worker_index].batches;
+            inference_stats_[worker_index].input_records += batch_count;
+            inference_stats_[worker_index].predictions += local.size();
+        }
+        inference_stats_[worker_index].elapsed_nanoseconds =
+            static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - start).count());
+    }
+
+    void collect_statistics(
+        uint64_t source_elapsed_nanoseconds,
+        pipeline_source_statistics *statistics) const
+    {
+        statistics->packets = capture_stats_.packets;
+        statistics->bytes = capture_stats_.bytes;
+        statistics->unsupported_packets = capture_stats_.unsupported;
+        statistics->pool_waits = capture_stats_.pool_waits;
+        statistics->capture_nanoseconds = capture_stats_.read_nanoseconds;
+        statistics->elapsed_nanoseconds = source_elapsed_nanoseconds;
+
+        for (uint32_t index = 0U; index < packet_queues_.size(); ++index) {
+            const auto queue = packet_queues_[index]->statistics();
+            const auto &worker = feature_stats_[index];
+            statistics->unsupported_packets += worker.rejected_packets;
+            statistics->emitted_flows += worker.emitted_flows;
+            statistics->feature_nanoseconds = std::max(
+                statistics->feature_nanoseconds,
+                worker.work_nanoseconds);
+            statistics->queue_drops +=
+                queue.dropped_newest + queue.dropped_oldest;
+            statistics->queue_failures += queue.failures;
+        }
+        const auto feature_queue = feature_queue_.statistics();
+        statistics->queue_drops +=
+            feature_queue.dropped_newest + feature_queue.dropped_oldest;
+        statistics->queue_failures += feature_queue.failures;
+        for (uint32_t index = 0U; index < inference_stats_.size(); ++index) {
+            const auto &worker = inference_stats_[index];
+            statistics->inference_inputs += worker.input_records;
+            statistics->predictions += worker.predictions;
+            statistics->inference_nanoseconds += worker.work_nanoseconds;
+        }
+    }
+
+    const ktag_demo_pipeline_config &config_;
+    const ktag_feature_schema *schema_;
+    const ktag_feature_registry *registry_;
+    uint32_t source_index_;
+    capture_ptr capture_;
+    domain_store_ptr domain_store_;
+    std::vector<feature_context_ptr> feature_contexts_;
+    std::vector<inference_context_ptr> inference_contexts_;
+    std::vector<std::unique_ptr<
+        ktag_demo_bounded_queue<owned_packet>>> packet_queues_;
+    ktag_demo_bounded_queue<feature_record_owned> feature_queue_;
+    std::atomic<uint32_t> active_feature_workers_;
+    std::atomic<bool> failed_{false};
+    std::mutex error_mutex_;
+    std::string error_message_;
+    capture_statistics capture_stats_;
+    std::vector<feature_worker_statistics> feature_stats_;
+    std::vector<inference_worker_statistics> inference_stats_;
+    std::thread capture_thread_;
+    std::vector<std::thread> feature_threads_;
+    std::vector<std::thread> inference_threads_;
+    std::mutex prediction_mutex_;
+    std::vector<pipeline_prediction> *predictions_ = nullptr;
+};
+
+bool run_parallel_source(
+    const ktag_demo_pipeline_config &config,
+    const ktag_feature_schema *schema,
+    const ktag_feature_registry *registry,
+    const char *source,
+    bool live,
+    uint32_t source_index,
+    std::vector<pipeline_prediction> *predictions,
+    pipeline_source_statistics *statistics,
+    std::string *error)
+{
+    parallel_source_executor executor(
+        config, schema, registry, source_index);
+    return executor.run(source, live, predictions, statistics, error);
+}
+
+bool write_predictions(
+    const char *path,
+    ktag_demo_pipeline_output_format format,
+    const std::vector<pipeline_prediction> &predictions,
+    std::string *error)
+{
+    if (path == nullptr || path[0] == '\0') {
+        std::printf(
+            "source_index,flow_key,first_packet_sequence,"
+            "last_packet_sequence,label,confidence\n");
+        for (const auto &prediction : predictions) {
+            std::printf(
+                "%u,\"%s\",%llu,%llu,%lld,%.9g\n",
+                prediction.source_index,
+                flow_text(prediction.record.metadata.flow_key).c_str(),
+                static_cast<unsigned long long>(
+                    prediction.record.metadata.first_packet_sequence),
+                static_cast<unsigned long long>(
+                    prediction.record.metadata.last_packet_sequence),
+                static_cast<long long>(prediction.record.label),
+                static_cast<double>(prediction.record.confidence));
+        }
+        return true;
+    }
+    std::ofstream output(path);
+    if (!output) {
+        *error = std::string("failed to open pipeline output: ") + path;
+        return false;
+    }
+    output << std::setprecision(9);
+    if (format == ktag_demo_pipeline_output_format::csv) {
+        output << "source_index,flow_key,first_packet_sequence,"
+                  "last_packet_sequence,label,confidence\n";
+        for (const auto &prediction : predictions) {
+            output << prediction.source_index << ",\""
+                   << flow_text(prediction.record.metadata.flow_key) << "\","
+                   << prediction.record.metadata.first_packet_sequence << ','
+                   << prediction.record.metadata.last_packet_sequence << ','
+                   << prediction.record.label << ','
+                   << prediction.record.confidence << '\n';
+        }
+    } else {
+        output << "[\n";
+        for (size_t index = 0U; index < predictions.size(); ++index) {
+            const auto &prediction = predictions[index];
+            output << "  {\"source_index\":" << prediction.source_index
+                   << ",\"flow_key\":\""
+                   << flow_text(prediction.record.metadata.flow_key)
+                   << "\",\"first_packet_sequence\":"
+                   << prediction.record.metadata.first_packet_sequence
+                   << ",\"last_packet_sequence\":"
+                   << prediction.record.metadata.last_packet_sequence
+                   << ",\"label\":" << prediction.record.label
+                   << ",\"confidence\":";
+            if (std::isfinite(prediction.record.confidence)) {
+                output << prediction.record.confidence;
+            } else {
+                output << "null";
+            }
+            output << '}' << (index + 1U == predictions.size() ? "\n" : ",\n");
+        }
+        output << "]\n";
+    }
+    if (!output) {
+        *error = "failed while writing pipeline output";
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+int ktag_demo_run_pipeline_internal(
+    const ktag_demo_pipeline_config &config,
+    const char *config_file,
+    const char **pcap_files,
+    int pcap_file_count,
+    const char *interface_name,
+    const char *output_file,
+    ktag_demo_pipeline_output_format output_format)
+{
+    pipeline_interrupted = 0;
+    signal_scope signals;
+    std::printf("========== 在线推理模式 ==========\n");
+    std::printf("配置文件: %s\n", config_file == nullptr ? "" : config_file);
+    std::printf("管线模式: %s\n", ktag_demo_pipeline_mode_name(config.mode));
+    std::printf("特征线程数: %u\n", config.feature_threads);
+    std::printf("推理线程数: %u\n", config.inference_threads);
+    std::printf(
+        "流生命周期: %s\n",
+        ktag_demo_feature_lifecycle_mode_name(config.lifecycle_mode));
+    std::printf("背压策略: %s\n", ktag_demo_backpressure_name(config.backpressure));
+    std::printf("模型包: %s\n", config.model_package_path.c_str());
+
+    ktag_demo_feature_plugin_loader plugin_loader;
+    registry_ptr registry(ktag_feature_registry_create());
+    if (!registry ||
+        ktag_feature_registry_register_legacy_builtins(registry.get()) !=
+            KTAG_SUCCESS) {
+        std::fprintf(stderr, "pipeline: failed to register built-in Providers\n");
+        return -1;
+    }
+
+    std::string error;
+    for (const auto &plugin : config.plugin_paths) {
+        if (!plugin_loader.load(plugin, registry.get(), &error)) {
+            std::fprintf(stderr, "pipeline: %s\n", error.c_str());
+            registry.reset();
+            plugin_loader.unload_all();
+            return -1;
+        }
+    }
+    schema_ptr schema = compose_schema(config, registry.get(), &error);
+    if (!schema) {
+        std::fprintf(stderr, "pipeline: %s\n", error.c_str());
+        registry.reset();
+        plugin_loader.unload_all();
+        return -1;
+    }
+
+    ktag_model_package_validation validation{};
+    validation.struct_size = sizeof(validation);
+    validation.api_version = KTAG_API_VERSION;
+    if (ktag_inference_validate_model_package(
+            config.model_package_path.c_str(),
+            schema.get(),
+            &validation) != KTAG_SUCCESS) {
+        std::fprintf(
+            stderr,
+            "pipeline: model package validation failed: %s\n",
+            ktag_inference_get_last_error());
+        schema.reset();
+        registry.reset();
+        plugin_loader.unload_all();
+        return -1;
+    }
+
+    std::printf(
+        "Schema: %s v%u (hash=0x%016llx, 模型输入=%u, 插件=%zu)\n",
+        config.schema_name.c_str(),
+        config.schema_version,
+        static_cast<unsigned long long>(validation.schema_hash),
+        validation.input_value_count,
+        plugin_loader.size());
+
+    std::vector<pipeline_prediction> predictions;
+    pipeline_run_statistics run_statistics;
+    const auto run_start = std::chrono::steady_clock::now();
+    bool success = true;
+    if (interface_name != nullptr && interface_name[0] != '\0') {
+        std::printf("\n========== 网口实时抓包模式 ==========\n");
+        std::printf("网口: %s\n", interface_name);
+        std::printf("输出: %s\n", output_file == nullptr ?
+            "仅控制台显示" : output_file);
+        std::printf("开始实时抓包 (Ctrl+C 退出)...\n\n");
+        pipeline_source_statistics source_statistics;
+        success = config.mode == ktag_demo_pipeline_mode::single_thread ?
+            run_single_source(
+                config,
+                schema.get(),
+                registry.get(),
+                interface_name,
+                true,
+                0U,
+                &predictions,
+                &source_statistics,
+                &error) :
+            run_parallel_source(
+                config,
+                schema.get(),
+                registry.get(),
+                interface_name,
+                true,
+                0U,
+                &predictions,
+                &source_statistics,
+                &error);
+        if (success) {
+            add_source_statistics(&run_statistics, source_statistics);
+        }
+    } else {
+        std::printf("\n========== PCAP文件推理模式 ==========\n");
+        std::printf("文件数量: %d\n", pcap_file_count);
+        std::printf("推理模式: %s\n", ktag_demo_pipeline_mode_name(config.mode));
+        if (output_file != nullptr) {
+            std::printf(
+                "输出文件: %s (格式: %s)\n",
+                output_file,
+                output_format == ktag_demo_pipeline_output_format::csv ?
+                    "CSV" : "JSON");
+        }
+        for (int index = 0;
+             index < pcap_file_count && success && pipeline_interrupted == 0;
+             ++index) {
+            std::printf(
+                "\n处理文件 %d/%d: %s (Label=%d)\n",
+                index + 1,
+                pcap_file_count,
+                pcap_files[index],
+                index);
+            pipeline_source_statistics source_statistics;
+            success = config.mode == ktag_demo_pipeline_mode::single_thread ?
+                run_single_source(
+                    config,
+                    schema.get(),
+                    registry.get(),
+                    pcap_files[index],
+                    false,
+                    static_cast<uint32_t>(index),
+                    &predictions,
+                    &source_statistics,
+                    &error) :
+                run_parallel_source(
+                    config,
+                    schema.get(),
+                    registry.get(),
+                    pcap_files[index],
+                    false,
+                    static_cast<uint32_t>(index),
+                    &predictions,
+                    &source_statistics,
+                    &error);
+            if (success) {
+                add_source_statistics(&run_statistics, source_statistics);
+            }
+        }
+    }
+
+    if (success) {
+        std::sort(predictions.begin(), predictions.end(), prediction_less);
+        const auto io_start = std::chrono::steady_clock::now();
+        success = write_predictions(
+            output_file, output_format, predictions, &error);
+        run_statistics.file_io_nanoseconds += elapsed_nanoseconds(io_start);
+    }
+    run_statistics.elapsed_nanoseconds = elapsed_nanoseconds(run_start);
+    if (!success) {
+        std::fprintf(stderr, "pipeline: %s\n", error.c_str());
+    } else {
+        PerformanceStats performance{};
+        constexpr double nanoseconds_per_second = 1000000000.0;
+        performance.pcap_read_time =
+            run_statistics.capture_nanoseconds / nanoseconds_per_second;
+        performance.feature_extraction_time =
+            run_statistics.feature_nanoseconds / nanoseconds_per_second;
+        performance.inference_time =
+            run_statistics.inference_nanoseconds / nanoseconds_per_second;
+        performance.file_io_time =
+            run_statistics.file_io_nanoseconds / nanoseconds_per_second;
+        performance.total_time = performance.feature_extraction_time +
+            performance.inference_time + performance.file_io_time;
+        performance.end_to_end_time =
+            run_statistics.elapsed_nanoseconds / nanoseconds_per_second;
+        performance.total_packets = run_statistics.packets;
+        performance.total_bytes = run_statistics.bytes;
+        print_performance_stats_ex(
+            &performance,
+            config.mode == ktag_demo_pipeline_mode::single_thread ? 0 : 1);
+
+        const uint64_t kept = run_statistics.predictions;
+        const uint64_t filtered = run_statistics.inference_inputs >= kept ?
+            run_statistics.inference_inputs - kept : 0U;
+        std::printf(
+            "过滤统计: 保留 %llu 个样本, 过滤掉 %llu 个样本\n",
+            static_cast<unsigned long long>(kept),
+            static_cast<unsigned long long>(filtered));
+        std::printf(
+            "\n======================= 管线统计 "
+            "=======================\n");
+        std::printf(
+            "特征提取流数:     %10llu 个\n"
+            "推理输入流数:     %10llu 个\n"
+            "不支持数据包:     %10llu 个\n"
+            "Packet Pool等待:%10llu 次\n",
+            static_cast<unsigned long long>(run_statistics.emitted_flows),
+            static_cast<unsigned long long>(run_statistics.inference_inputs),
+            static_cast<unsigned long long>(
+                run_statistics.unsupported_packets),
+            static_cast<unsigned long long>(run_statistics.pool_waits));
+        std::printf(
+            "队列丢弃:       %10llu 个\n"
+            "队列失败:       %10llu 次\n"
+            "是否中断:         %10s\n"
+            "========================================================\n",
+            static_cast<unsigned long long>(run_statistics.queue_drops),
+            static_cast<unsigned long long>(run_statistics.queue_failures),
+            pipeline_interrupted != 0 ? "是" : "否");
+
+        if (interface_name == nullptr && !predictions.empty()) {
+            std::vector<int> labels;
+            std::vector<int> predicted_labels;
+            labels.reserve(predictions.size());
+            predicted_labels.reserve(predictions.size());
+            for (const auto &prediction : predictions) {
+                labels.push_back(static_cast<int>(prediction.source_index));
+                predicted_labels.push_back(
+                    static_cast<int>(prediction.record.label));
+            }
+            ClassificationReport *report = calculate_classification_report(
+                labels.data(),
+                predicted_labels.data(),
+                static_cast<int>(predictions.size()));
+            if (report != nullptr) {
+                (void)print_and_save_classification_report(
+                    report, output_file);
+                free_classification_report(report);
+            }
+        }
+        if (output_file != nullptr) {
+            std::printf("推理结果已保存到: %s\n", output_file);
+        }
+    }
+
+    /* Required order: Contexts are local and already gone, then Schema and
+     * Registry, finally plugin state and dlclose. */
+    schema.reset();
+    registry.reset();
+    plugin_loader.unload_all();
+    return success ? 0 : -1;
+}
+
+int ktag_demo_run_pipeline(
+    const ktag_demo_pipeline_config &config,
+    const char *config_file,
+    const char **pcap_files,
+    int pcap_file_count,
+    const char *interface_name,
+    const char *output_file,
+    ktag_demo_pipeline_output_format output_format)
+{
+    try {
+        return ktag_demo_run_pipeline_internal(
+            config,
+            config_file,
+            pcap_files,
+            pcap_file_count,
+            interface_name,
+            output_file,
+            output_format);
+    } catch (const std::exception &exception) {
+        std::fprintf(
+            stderr,
+            "pipeline: unhandled runtime failure: %s\n",
+            exception.what());
+    } catch (...) {
+        std::fprintf(stderr, "pipeline: unknown runtime failure\n");
+    }
+    return -1;
+}
