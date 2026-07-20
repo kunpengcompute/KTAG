@@ -67,6 +67,8 @@ struct feature_context_flow {
     uint64_t first_packet_sequence = 0U;
     uint64_t last_packet_sequence = 0U;
     uint64_t last_seen_us = 0U;
+    uint64_t domain_lookup_version = 0U;
+    bool domain_lookup_initialized = false;
 
     ~feature_context_flow()
     {
@@ -420,6 +422,9 @@ ktag_status refresh_flow_domains(
     if (status != KTAG_SUCCESS) {
         return status;
     }
+    flow->domain_lookup_version =
+        ktag_domain_cache_get_applied_version(context->domain_cache);
+    flow->domain_lookup_initialized = true;
     if (add_new_tokens && !already_had_domain &&
         (found_source || found_destination)) {
         add_rawbow_to_node(nullptr, &flow->node, flow->node.src_ip_domain_name);
@@ -438,9 +443,15 @@ ktag_status process_flow_rawbow(
     }
     if (flow->node.src_ip_domain_name.empty() &&
         flow->node.dst_ip_domain_name.empty()) {
-        const ktag_status status = refresh_flow_domains(context, flow, true);
-        if (status != KTAG_SUCCESS) {
-            return status;
+        const uint64_t published_version =
+            ktag_domain_store_get_version(context->domain_store);
+        if (!flow->domain_lookup_initialized ||
+            flow->domain_lookup_version != published_version) {
+            const ktag_status status =
+                refresh_flow_domains(context, flow, true);
+            if (status != KTAG_SUCCESS) {
+                return status;
+            }
         }
     }
     if (!info.http_url.empty()) {

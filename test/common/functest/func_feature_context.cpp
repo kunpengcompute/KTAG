@@ -22,6 +22,7 @@ struct callback_counts {
     std::atomic<uint32_t> flow_create{0U};
     std::atomic<uint32_t> flow_destroy{0U};
     std::atomic<uint32_t> packet{0U};
+    std::atomic<uint32_t> packet_domain_present{0U};
     std::atomic<uint32_t> finish{0U};
     std::atomic<uint32_t> forward_domain_present{0U};
     std::atomic<uint32_t> reverse_domain_present{0U};
@@ -126,10 +127,18 @@ ktag_status on_packet(
     void *provider_state,
     void *,
     const ktag_packet_view *,
-    const ktag_flow_view *)
+    const ktag_flow_view *flow)
 {
     auto *counts = static_cast<callback_counts *>(provider_state);
     counts->packet.fetch_add(1U, std::memory_order_relaxed);
+    const char *forward_domain =
+        ktag_flow_view_get_domain(flow, KTAG_DIRECTION_FORWARD);
+    const char *reverse_domain =
+        ktag_flow_view_get_domain(flow, KTAG_DIRECTION_REVERSE);
+    if ((forward_domain != nullptr && forward_domain[0] != '\0') ||
+        (reverse_domain != nullptr && reverse_domain[0] != '\0')) {
+        counts->packet_domain_present.fetch_add(1U, std::memory_order_relaxed);
+    }
     return KTAG_SUCCESS;
 }
 
@@ -251,7 +260,7 @@ ktag_feature_context *make_context(
     config.tcp_idle_timeout_us = tcp_timeout;
     config.udp_idle_timeout_us = udp_timeout;
     config.udp_packet_limit = udp_packet_limit;
-    config.domain_authority_lookup_on_miss = 1U;
+    config.domain_authority_lookup_on_miss = 0U;
     config.lifecycle_mode = lifecycle_mode;
     return ktag_feature_create(&config);
 }
@@ -712,6 +721,57 @@ TEST(KTAGFeatureContext, FlowFinishRefreshesSharedDomainBeforeCallback)
         1U, counts.forward_domain_present.load(std::memory_order_relaxed));
     EXPECT_EQ(
         0U, counts.reverse_domain_present.load(std::memory_order_relaxed));
+
+    ktag_feature_batch_destroy(batch);
+    ktag_feature_destroy(context);
+    ktag_domain_store_destroy(store);
+    ktag_feature_schema_destroy(schema);
+    ktag_feature_registry_destroy(registry);
+}
+
+TEST(KTAGFeatureContext, SharedDomainVersionInvalidatesFlowMiss)
+{
+    callback_counts counts;
+    ktag_feature_registry *registry = nullptr;
+    ktag_feature_schema *schema = nullptr;
+    ASSERT_TRUE(make_contract(&counts, &registry, &schema));
+    ktag_domain_store_config store_config{};
+    store_config.struct_size = sizeof(store_config);
+    store_config.api_version = KTAG_API_VERSION;
+    store_config.max_entries = 16U;
+    store_config.journal_capacity = 8U;
+    ktag_domain_store *store = ktag_domain_store_create(&store_config);
+    ASSERT_NE(nullptr, store);
+    ktag_feature_context *context = make_context(
+        schema, registry, 8U, 100U, 1000U, 1000U, store);
+    ktag_feature_batch *batch = ktag_feature_batch_create(schema, 1U);
+    ASSERT_NE(nullptr, context);
+    ASSERT_NE(nullptr, batch);
+
+    const std::array<uint8_t, 4> source = {10U, 30U, 0U, 1U};
+    const auto frame = udp_frame(
+        source, 50000U, {10U, 30U, 0U, 2U}, 443U);
+    const auto first_packet = packet_view(frame, 1U, 1U);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_process_packet(context, &first_packet, batch));
+    EXPECT_EQ(
+        0U, counts.packet_domain_present.load(std::memory_order_relaxed));
+
+    ktag_ip_address address{};
+    address.version = 4U;
+    std::memcpy(address.bytes, source.data(), source.size());
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_domain_store_put(
+            store, &address, "updated.example.", 0U, nullptr));
+
+    const auto second_packet = packet_view(frame, 2U, 2U);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_process_packet(context, &second_packet, batch));
+    EXPECT_EQ(
+        1U, counts.packet_domain_present.load(std::memory_order_relaxed));
 
     ktag_feature_batch_destroy(batch);
     ktag_feature_destroy(context);

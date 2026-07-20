@@ -464,7 +464,7 @@ feature_context_ptr create_feature_context(
     config.tcp_idle_timeout_us = pipeline_config.tcp_idle_timeout_us;
     config.udp_idle_timeout_us = pipeline_config.udp_idle_timeout_us;
     config.udp_packet_limit = pipeline_config.udp_packet_limit;
-    config.domain_authority_lookup_on_miss = 1U;
+    config.domain_authority_lookup_on_miss = 0U;
     config.lifecycle_mode =
         pipeline_config.lifecycle_mode ==
                 ktag_demo_feature_lifecycle_mode::legacy_compat ?
