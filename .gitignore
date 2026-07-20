@@ -1,8 +1,5 @@
 .vscode/
-
-# Product and CMake build outputs.
 /docs/
-/examples/
 /build/
 /output/
 /result/
