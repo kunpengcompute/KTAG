@@ -25,7 +25,33 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 namespace {
 
 constexpr uint64_t FEATURE_FLOW_HASH_SEED = 0x4b544147464c4f57ULL;
+constexpr uint64_t FEATURE_FLOW_HASH_GOLDEN_RATIO = 0x9e3779b97f4a7c15ULL;
+constexpr uint32_t FEATURE_FLOW_INITIAL_CAPACITY = 10000U;
 constexpr uint16_t ETHER_TYPE_IPV4 = 0x0800U;
+
+uint64_t load_flow_address_word(
+    const uint8_t *address,
+    size_t length) noexcept
+{
+    uint64_t value = 0U;
+    std::memcpy(&value, address, length);
+    return value;
+}
+
+void combine_flow_hash(uint64_t *hash, uint64_t value) noexcept
+{
+    *hash ^= value + FEATURE_FLOW_HASH_GOLDEN_RATIO +
+        (*hash << 6U) + (*hash >> 2U);
+}
+
+uint64_t finalize_flow_hash(uint64_t hash) noexcept
+{
+    hash ^= hash >> 30U;
+    hash *= 0xbf58476d1ce4e5b9ULL;
+    hash ^= hash >> 27U;
+    hash *= 0x94d049bb133111ebULL;
+    return hash ^ (hash >> 31U);
+}
 
 enum class flow_finish_reason {
     protocol,
@@ -37,25 +63,60 @@ enum class flow_finish_reason {
 struct feature_flow_key_hash {
     size_t operator()(const ktag_flow_key &key) const noexcept
     {
-        return static_cast<size_t>(ktag_flow_hash(&key, FEATURE_FLOW_HASH_SEED));
+        const size_t address_length = key.address_a.version == 4U ?
+            sizeof(uint32_t) : sizeof(key.address_a.bytes);
+        const size_t first_word_length =
+            std::min(address_length, sizeof(uint64_t));
+        uint64_t hash = FEATURE_FLOW_HASH_SEED;
+        combine_flow_hash(
+            &hash,
+            load_flow_address_word(
+                key.address_a.bytes, first_word_length));
+        if (address_length > sizeof(uint64_t)) {
+            combine_flow_hash(
+                &hash,
+                load_flow_address_word(
+                    key.address_a.bytes + sizeof(uint64_t), sizeof(uint64_t)));
+        }
+        combine_flow_hash(
+            &hash,
+            load_flow_address_word(
+                key.address_b.bytes, first_word_length));
+        if (address_length > sizeof(uint64_t)) {
+            combine_flow_hash(
+                &hash,
+                load_flow_address_word(
+                    key.address_b.bytes + sizeof(uint64_t), sizeof(uint64_t)));
+        }
+        const uint64_t metadata =
+            static_cast<uint64_t>(key.port_a) |
+            (static_cast<uint64_t>(key.port_b) << 16U) |
+            (static_cast<uint64_t>(key.protocol) << 32U) |
+            (static_cast<uint64_t>(key.address_a.version) << 40U);
+        combine_flow_hash(&hash, metadata);
+        return static_cast<size_t>(finalize_flow_hash(hash));
     }
 };
 
 struct feature_flow_key_equal {
     bool operator()(const ktag_flow_key &first, const ktag_flow_key &second) const noexcept
     {
-        return first.address_a.version == second.address_a.version &&
-            first.address_b.version == second.address_b.version &&
-            first.port_a == second.port_a && first.port_b == second.port_b &&
-            first.protocol == second.protocol &&
-            std::memcmp(
+        if (first.address_a.version != second.address_a.version ||
+            first.address_b.version != second.address_b.version ||
+            first.port_a != second.port_a || first.port_b != second.port_b ||
+            first.protocol != second.protocol) {
+            return false;
+        }
+        const size_t address_length = first.address_a.version == 4U ?
+            sizeof(uint32_t) : sizeof(first.address_a.bytes);
+        return std::memcmp(
                 first.address_a.bytes,
                 second.address_a.bytes,
-                KTAG_IPV6_ADDRESS_SIZE) == 0 &&
+                address_length) == 0 &&
             std::memcmp(
                 first.address_b.bytes,
                 second.address_b.bytes,
-                KTAG_IPV6_ADDRESS_SIZE) == 0;
+                address_length) == 0;
     }
 };
 
@@ -853,7 +914,8 @@ KTAG_API ktag_feature_context *ktag_feature_create(
             return nullptr;
         }
 
-        context->flows.reserve(std::min(context->flow_capacity, 1024U));
+        context->flows.reserve(std::min(
+            context->flow_capacity, FEATURE_FLOW_INITIAL_CAPACITY));
         context->output_values.resize(
             context->pipeline->schema->value_count, 0.0F);
         context->stats.struct_size = sizeof(context->stats);
