@@ -1,51 +1,35 @@
-cmake_minimum_required(VERSION 3.10)
-project(kdadk_fuzz_test)
-
-set(CMAKE_CXX_COMPILER clang++)
-set(CMAKE_C_COMPILER clang)
+cmake_minimum_required(VERSION 3.16.3)
+project(kdadk_fuzz_test LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 包含头文件目录
-include_directories(
-    ${CMAKE_SOURCE_DIR}/../../util/onnxruntime-linux-aarch64-1.22.0/include
-    ${CMAKE_SOURCE_DIR}/../common/include
-    ${CMAKE_SOURCE_DIR}/../../include
-)
-
-# 查找KDADK库tim
-find_library(KDADK_FEATURE_LIBRARY NAMES KDADK_feature_extract PATHS 
+# Fuzzing deliberately exercises the retained compatibility boundary. The
+# target is not meaningful without the product libraries, so fail during
+# configuration instead of creating an executable that later fails to link.
+find_library(KDADK_FEATURE_LIBRARY NAMES KDADK_feature_extract PATHS
     ${CMAKE_SOURCE_DIR}/../../output
-    ${CMAKE_SOURCE_DIR}/../../build/lib
-    ${CMAKE_SOURCE_DIR}/../../lib
-    ${CMAKE_SOURCE_DIR}/../..
+    NO_DEFAULT_PATH
+    REQUIRED
 )
 
-find_library(KDADK_INFERENCE_LIBRARY NAMES KDADK_inference PATHS 
+find_library(KDADK_INFERENCE_LIBRARY NAMES KDADK_inference PATHS
     ${CMAKE_SOURCE_DIR}/../../output
-    ${CMAKE_SOURCE_DIR}/../../build/lib
-    ${CMAKE_SOURCE_DIR}/../../lib
-    ${CMAKE_SOURCE_DIR}/../..
+    NO_DEFAULT_PATH
+    REQUIRED
 )
 
-if(NOT KDADK_FEATURE_LIBRARY OR NOT KDADK_INFERENCE_LIBRARY)
-    message(WARNING "KDADK libraries not found, fuzz test will be built without KDADK")
-    message(STATUS "Looking for KDADK_feature_extract in: ${CMAKE_SOURCE_DIR}/../../output")
-    message(STATUS "Looking for KDADK_inference in: ${CMAKE_SOURCE_DIR}/../../output")
-else()
-    message(STATUS "Found KDADK_feature_extract: ${KDADK_FEATURE_LIBRARY}")
-    message(STATUS "Found KDADK_inference: ${KDADK_INFERENCE_LIBRARY}")
-endif()
-
-# 强制使用LibFuzzer
-set(HAS_LIBFUZZER TRUE)
+message(STATUS "Found KDADK_feature_extract: ${KDADK_FEATURE_LIBRARY}")
+message(STATUS "Found KDADK_inference: ${KDADK_INFERENCE_LIBRARY}")
 
 # 查找ONNX Runtime库
-find_library(ONNX_RUNTIME_LIBRARY NAMES onnxruntime PATHS 
+find_library(ONNX_RUNTIME_LIBRARY NAMES onnxruntime PATHS
     ${CMAKE_SOURCE_DIR}/../../util/onnxruntime-linux-aarch64-1.22.0/lib
-    ${CMAKE_SOURCE_DIR}/../../lib
-    ${CMAKE_SOURCE_DIR}/../..
+    NO_DEFAULT_PATH
+    REQUIRED
+)
+get_filename_component(
+    ONNXRUNTIME_LIB_DIR ${ONNX_RUNTIME_LIBRARY} DIRECTORY
 )
 
 find_library(YAML_CPP_LIB
@@ -58,21 +42,32 @@ get_filename_component(YAML_CPP_LIB_DIR ${YAML_CPP_LIB} DIRECTORY)
 message(STATUS "Found yaml-cpp library: ${YAML_CPP_LIB}")
 message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 
-if(ONNX_RUNTIME_LIBRARY)
-    message(STATUS "Found ONNX Runtime: ${ONNX_RUNTIME_LIBRARY}")
-else()
-    message(WARNING "ONNX Runtime library not found, fuzz test may fail to link")
-endif()
+message(STATUS "Found ONNX Runtime: ${ONNX_RUNTIME_LIBRARY}")
 
 # 构建LibFuzzer目标
 add_executable(kdadk_fuzzer kdadk_fuzzer.cpp)
-target_compile_options(kdadk_fuzzer PRIVATE -fsanitize=fuzzer,address -fprofile-instr-generate -fcoverage-mapping -g)
-if(KDADK_FEATURE_LIBRARY AND KDADK_INFERENCE_LIBRARY)
-    target_link_libraries(kdadk_fuzzer PRIVATE -fsanitize=fuzzer,address -fprofile-instr-generate -fcoverage-mapping ${KDADK_FEATURE_LIBRARY} ${KDADK_INFERENCE_LIBRARY} ${YAML_CPP_LIB})
-    if(ONNX_RUNTIME_LIBRARY)
-        target_link_libraries(kdadk_fuzzer PRIVATE ${ONNX_RUNTIME_LIBRARY})
-    endif()
-else()
-    target_link_libraries(kdadk_fuzzer PRIVATE -fsanitize=fuzzer,address -fprofile-instr-generate -fcoverage-mapping)
-endif()
+target_include_directories(kdadk_fuzzer PRIVATE
+    ${CMAKE_SOURCE_DIR}/../../include
+)
+target_compile_options(kdadk_fuzzer PRIVATE
+    -fsanitize=fuzzer,address
+    -fprofile-instr-generate
+    -fcoverage-mapping
+    -g
+)
+target_link_options(kdadk_fuzzer PRIVATE
+    -fsanitize=fuzzer,address
+    -fprofile-instr-generate
+    -fcoverage-mapping
+)
+target_link_libraries(kdadk_fuzzer PRIVATE
+    ${KDADK_FEATURE_LIBRARY}
+    ${KDADK_INFERENCE_LIBRARY}
+    ${ONNX_RUNTIME_LIBRARY}
+    ${YAML_CPP_LIB}
+)
+get_filename_component(KDADK_OUTPUT_DIR ${KDADK_FEATURE_LIBRARY} DIRECTORY)
+set_target_properties(kdadk_fuzzer PROPERTIES
+    BUILD_RPATH "${KDADK_OUTPUT_DIR};${ONNX_RUNTIME_LIB_DIR};${YAML_CPP_LIB_DIR}"
+)
 message(STATUS "Building LibFuzzer test")

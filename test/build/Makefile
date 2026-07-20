@@ -10,12 +10,14 @@
 ##############################################################
 
 ARCH = $(shell uname -p | cut -c 1-3)
-PWD = $(shell pwd)
-ROOT_DIR = $(PWD)/../..
+PWD := $(CURDIR)
+ROOT_DIR := $(abspath $(CURDIR)/../..)
 GTEST_DOWNLOAD_DIR = $(ROOT_DIR)/test/gtest-download
 GOOGLE_TEST_DIR = $(ROOT_DIR)/test/googletest-release-1.8.0
 KDADK_APPID_OBJ_DIR = $(ROOT_DIR)/build
 KDADK_APPID_OUTPUT_DIR = $(ROOT_DIR)/output
+FUZZ_SOURCE_DIR = $(ROOT_DIR)/test/fuzz
+FUZZ_BUILD_DIR = $(FUZZ_SOURCE_DIR)/build
 REDEF_FILE = $(PWD)/../common/include/*_redefine.h
 PERF_TEST_CFG_FILE = $(PWD)/../common/perftest/perf_test.cfg
 CMAKE_IN_FILE = $(ROOT_DIR)/config.cmake.in
@@ -178,6 +180,8 @@ endif
 		-DKDADK_APPID_COMPONENT_NAME:STRING=${KDADK_APPID_INFO_COMPONENT_NAME} \
 		-DKDADK_APPID_SOFTWARE_NAME:STRING=${KDADK_APPID_INFO_SOFTWARE_NAME} \
 		-DKDADK_APPID_PRODUCT_VERSION:STRING=${KDADK_APPID_INFO_PRODUCT_VERSION} \
+		-DENABLE_BUILD_LIB=ON \
+		-DKDADK_ENABLE_HIDDEN_VISIBILITY=OFF \
 		$(WITH_OMP) $(WITH_COVER) $(WITH_ASAN) $(IPP_2021);\
 	make -C $(KDADK_APPID_OBJ_DIR)/ -j16
 
@@ -204,17 +208,24 @@ rrperf:
 
 rrun: rrfunc rrperf
 
-fuzz: chmodpermission googletest
-	make kdadk_appidlib cover=asan
-	cmake -S $(ROOT_DIR)/test/build/fuzztest/ -B $(ROOT_DIR)/test/build/fuzztest/ $(WITH_COVER)
-	make -C $(ROOT_DIR)/test/build/fuzztest/ -f Makefile -j16
+fuzz:
+	$(MAKE) KDADK_APPIDlib cover=asan
+	cmake -S $(FUZZ_SOURCE_DIR) -B $(FUZZ_BUILD_DIR) \
+		-DCMAKE_C_COMPILER=clang \
+		-DCMAKE_CXX_COMPILER=clang++
+	cmake --build $(FUZZ_BUILD_DIR) --parallel 16
 
 rfuzz:
-	make -C $(ROOT_DIR)/test/build/fuzztest/ -f Makefile run func=$(func)
+	@test -x "$(FUZZ_BUILD_DIR)/kdadk_fuzzer" || \
+		(echo "missing fuzz binary; run 'make fuzz' first"; exit 1)
+	env KTAG_LEGACY_CONFIG=$(ROOT_DIR)/tools/demo/config.yaml \
+		LD_LIBRARY_PATH=$(KDADK_APPID_OUTPUT_DIR):$(ROOT_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib:$$LD_LIBRARY_PATH \
+		$(FUZZ_BUILD_DIR)/kdadk_fuzzer \
+		$(if $(fuzzcount),-runs=$(fuzzcount),) $(fuzzargs)
 
 asan: chmodpermission googletest
-	make kdadk_appidlib
-	make func
+	$(MAKE) KDADK_APPIDlib cover=asan
+	$(MAKE) func cover=asan
 
 rasan:
 	make -C $(ROOT_DIR)/test/build/functest/ -f $(ARCH_MK_FILE) asanrun func=$(diff_func)
@@ -250,8 +261,8 @@ omptest:
 clean:
 	make -C $(ROOT_DIR)/test/build/perftest/ -f $(ARCH_MK_FILE) clean
 	make -C $(ROOT_DIR)/test/build/functest/ -f $(ARCH_MK_FILE) clean
-	@if [ -e "$(ROOT_DIR)/test/build/fuzztest/Makefile" ]; then \
-		make -C "$(ROOT_DIR)/test/build/fuzztest" -f Makefile clean_all; \
+	@if [ -e "$(FUZZ_BUILD_DIR)/Makefile" ]; then \
+		cmake --build "$(FUZZ_BUILD_DIR)" --target clean; \
 	fi
 	rm -f $(PWD)/$(CSV_FILE_NAME)
 	#rm -rf $(GOOGLE_TEST_DIR)/build
@@ -270,6 +281,8 @@ help:
 	@echo "  omp=y              -- make with omp (arm only)"
 	@echo "  omp=n              -- make without omp (arm only)"
 	@echo "  func=<funcname>    -- run function(s)"
+	@echo "  fuzzcount=<count>  -- number of LibFuzzer runs"
+	@echo "  fuzzargs='<args>'  -- additional LibFuzzer arguments"
 	@echo " "
 	@echo "Target:"
 	@echo "  all                -- default"

@@ -5,6 +5,8 @@ GMOCK_DIR = ../../googletest-release-1.8.0/googlemock
 # Source file of function
 KDADK_APPID_modules_DIR = ../../..
 TEST_modules_DIR = ../../
+KDADK_APPID_OUTPUT_DIR := $(abspath $(KDADK_APPID_modules_DIR)/output)
+ONNXRUNTIME_LIB_DIR := $(abspath $(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib)
 
 # Header files path
 KDADK_APPID_DIR += -I $(GTEST_DIR)/include/
@@ -13,6 +15,9 @@ KDADK_APPID_DIR += -I $(GMOCK_DIR)/include/
 KDADK_APPID_DIR += -I $(TEST_modules_DIR)/common/include/
 KDADK_APPID_DIR += -I $(TEST_modules_DIR)/common/functest/
 KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/include/
+KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/src/
+KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/
+KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/tools/demo/plugin/
 KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/include/
 CFLAGS += -DLIB_KDADK_APPID_NAME=\"libkdadk_appidlib.so\"
 CXXFLAGS += -DLIB_KDADK_APPID_NAME=\"libkdadk_appidlib.so\"
@@ -35,14 +40,18 @@ SRC_FILES_DIRS += $(TEST_modules_DIR)/common/functest/
 
 # Static and shared libraries that need to be linked to the program.
 LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
-				-L$(KDADK_APPID_modules_DIR)/output/ \
+				-L$(KDADK_APPID_OUTPUT_DIR) \
 				-lkdadk_appidlib \
+				-lktag_capture \
+				-lktag_feature \
 				-lKDADK_feature_extract \
+				-lktag_inference \
 				-lKDADK_inference \
-				-L$(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib/ \
+				-L$(ONNXRUNTIME_LIB_DIR) \
 				-lonnxruntime
 
 LD_LIBRARIES += -pthread -lgtest -lgtest_main -lgmock -lgmock_main -lpcap
+LD_LIBRARIES += -lyaml-cpp -ldl
 
 ifeq ($(cover), y)
 LD_LIBRARIES += -lgcov
@@ -60,6 +69,16 @@ endif
 SRCEXTS   := .c .cc .cpp
 
 SOURCES_MUD = $(foreach d,$(SRC_FILES_DIRS),$(wildcard $(addprefix $(d)/*,$(SRCEXTS))))
+SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_config.cpp
+SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/plugin/feature_plugin_loader.cpp
+
+# The Provider Pipeline lifecycle test intentionally uses private headers and
+# symbols. Keep normal public-ABI functional builds independent of internals;
+# run it explicitly with `internal=y` against a visibility-disabled test build.
+ifneq ($(internal),y)
+SOURCES_MUD := $(filter-out $(TEST_modules_DIR)/common/functest/func_feature_provider.cpp,$(SOURCES_MUD))
+endif
+
 SOURCES = $(shell echo $(SOURCES_MUD) | \
 			awk -F ' ' '{for(i=1;i<=NF;i++)a[i]=$$i}END{for(i=1;i<=asort(a);i++)printf a[i]" "}')
 
@@ -84,7 +103,11 @@ endif
 
 all : $(PROGRAM)
 run:
-	env LD_LIBRARY_PATH=$(KDADK_APPID_modules_DIR)/output/:$(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib:/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_functest --gtest_filter=$(FILTER)
+	@test -f "$(KDADK_APPID_OUTPUT_DIR)/libkdadk_appidlib.so" || \
+		(echo "missing $(KDADK_APPID_OUTPUT_DIR)/libkdadk_appidlib.so; run 'sh build.sh -lib' from the repository root"; exit 1)
+	@test -f "$(KDADK_APPID_OUTPUT_DIR)/libktag_feature.so" || \
+		(echo "missing $(KDADK_APPID_OUTPUT_DIR)/libktag_feature.so; rebuild phase-8 libraries"; exit 1)
+	env LD_LIBRARY_PATH=$(KDADK_APPID_OUTPUT_DIR):$(ONNXRUNTIME_LIB_DIR):/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_functest --gtest_filter=$(FILTER)
 rrun:
 	env LD_LIBRARY_PATH=/usr/local/ksl/lib/:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_functest --gtest_filter=$(FILTER)
 
@@ -92,6 +115,8 @@ clean :
 	@-$(RM) *.d *.a *.so
 	@-$(RM)	./$(PROGRAM) $(SRC_DEPS)
 	@find $(TEST_modules_DIR)/common/functest/ -name '*.o' -exec $(RM) {} \;
+	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_config.o
+	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/plugin/feature_plugin_loader.o
 
 # Builds a sample test.
 
