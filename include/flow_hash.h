@@ -4,14 +4,12 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #ifndef FLOW_HASH_H
 #define FLOW_HASH_H
 #include <stdint.h>
-#include <pthread.h>
 #include "kdadk.h"
 typedef uint32_t (*hash_calc_func)(const uint8_t *key);
 
 typedef struct {
-flow_hash_node *nodes;
+    flow_hash_node *nodes;
     uint32_t node_num;
-    pthread_rwlock_t rwlock;
 } flow_hash_bucket;
 
 typedef struct {

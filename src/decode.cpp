@@ -9,6 +9,7 @@
 #include <netinet/udp.h>
 #include <net/ethernet.h>
 #include <arpa/inet.h>
+#include <limits>
 #include <unordered_map>
 
 const int ETHERNET_HEADER_LEN = 14;
@@ -343,14 +344,34 @@ std::string parse_domain(const u_char *data, size_t &pos, size_t data_len)
     return domain;
 }
 
-KDADKResult decode_udp(const u_char *packet, packet_info *info, domain_name_hash *domain_name_table)
+static uint64_t dns_expire_at_us(const timeval &timestamp, uint32_t ttl_seconds)
+{
+    uint64_t now_us = 0U;
+    if (timestamp.tv_sec >= 0 && timestamp.tv_usec >= 0) {
+        const uint64_t seconds = static_cast<uint64_t>(timestamp.tv_sec);
+        const uint64_t microseconds = static_cast<uint64_t>(timestamp.tv_usec);
+        if (seconds <=
+            (std::numeric_limits<uint64_t>::max() - microseconds) / 1000000U) {
+            now_us = seconds * 1000000U + microseconds;
+        }
+    }
+    if (ttl_seconds == 0U) {
+        return now_us == std::numeric_limits<uint64_t>::max() ?
+            now_us : now_us + 1U;
+    }
+    const uint64_t ttl_us = static_cast<uint64_t>(ttl_seconds) * 1000000U;
+    return ttl_us > std::numeric_limits<uint64_t>::max() - now_us ?
+        std::numeric_limits<uint64_t>::max() : now_us + ttl_us;
+}
+
+static KDADKResult decode_udp_with_domain_callback(
+    const u_char *packet,
+    packet_info *info,
+    domain_ipv4_update_callback callback,
+    void *user_data)
 {
     if (!packet) {
         return KDADK_STS_INVALID_PCAP_PACKET;
-    }
-
-    if (domain_name_table == nullptr) {
-        return KDADK_STS_NULL_PTR_ERR;
     }
 
     const struct udphdr *udp_header = reinterpret_cast<const struct udphdr *>(packet);
@@ -392,7 +413,16 @@ KDADKResult decode_udp(const u_char *packet, packet_info *info, domain_name_hash
                     struct in_addr ipv4_addr;
                     memcpy(&ipv4_addr, rr->data, sizeof(struct in_addr));
 
-                    domain_name_table_add(domain_name_table, ipv4_addr.s_addr, domain);
+                    if (callback != nullptr && !domain.empty()) {
+                        const KDADKResult update_result = callback(
+                            user_data,
+                            ipv4_addr.s_addr,
+                            domain,
+                            dns_expire_at_us(info->ts, ntohl(rr->ttl)));
+                        if (update_result != KDADK_STS_NO_ERR) {
+                            return update_result;
+                        }
+                    }
                 }
             } else if (ntohs(rr->type) == DNS_RESPOND_IPV6_TYPE) {
                 if (rr_len >= sizeof(struct in6_addr)) {
@@ -408,7 +438,42 @@ KDADKResult decode_udp(const u_char *packet, packet_info *info, domain_name_hash
     return KDADK_STS_NO_ERR;
 }
 
-KDADKResult decode_ipv4(const u_char *packet, packet_info *info, domain_name_hash *domain_name_table)
+static KDADKResult legacy_domain_update(
+    void *user_data,
+    uint32_t network_order_address,
+    const std::string &domain,
+    uint64_t expire_at_us)
+{
+    auto *table = static_cast<domain_name_hash *>(user_data);
+    if (table == nullptr) {
+        return KDADK_STS_NULL_PTR_ERR;
+    }
+    /* Preserve the legacy decoder's best-effort DomainTable update behavior. */
+    (void)domain_name_table_add_with_expiry(
+        table, network_order_address, domain, expire_at_us);
+    return KDADK_STS_NO_ERR;
+}
+
+KDADKResult decode_udp(
+    const u_char *packet,
+    packet_info *info,
+    domain_name_hash *domain_name_table)
+{
+    if (!packet) {
+        return KDADK_STS_INVALID_PCAP_PACKET;
+    }
+    if (domain_name_table == nullptr) {
+        return KDADK_STS_NULL_PTR_ERR;
+    }
+    return decode_udp_with_domain_callback(
+        packet, info, legacy_domain_update, domain_name_table);
+}
+
+static KDADKResult decode_ipv4_with_domain_callback(
+    const u_char *packet,
+    packet_info *info,
+    domain_ipv4_update_callback callback,
+    void *user_data)
 {
     if (!packet) {
         return KDADK_STS_INVALID_PCAP_PACKET;
@@ -421,14 +486,31 @@ KDADKResult decode_ipv4(const u_char *packet, packet_info *info, domain_name_has
     if (ip_header->ip_p == IPPROTO_TCP) {
         return decode_tcp(packet + (ip_header->ip_hl * UNIT_BYTES_FOUR), info);
     } else if (ip_header->ip_p == IPPROTO_UDP) {
-        return decode_udp(packet + (ip_header->ip_hl * UNIT_BYTES_FOUR), info, domain_name_table);
+        return decode_udp_with_domain_callback(
+            packet + (ip_header->ip_hl * UNIT_BYTES_FOUR),
+            info,
+            callback,
+            user_data);
     } else {
         return KDADK_STS_NOT_SUPPORT;
     }
     return KDADK_STS_NO_ERR;
 }
 
-KDADKResult decode_ethernet(const u_char *packet, packet_info *info, domain_name_hash *domain_name_table)
+KDADKResult decode_ipv4(
+    const u_char *packet,
+    packet_info *info,
+    domain_name_hash *domain_name_table)
+{
+    return decode_ipv4_with_domain_callback(
+        packet, info, legacy_domain_update, domain_name_table);
+}
+
+static KDADKResult decode_ethernet_with_domain_callback(
+    const u_char *packet,
+    packet_info *info,
+    domain_ipv4_update_callback callback,
+    void *user_data)
 {
     if (!packet) {
         return KDADK_STS_INVALID_PCAP_PACKET;
@@ -438,10 +520,24 @@ KDADKResult decode_ethernet(const u_char *packet, packet_info *info, domain_name
         return KDADK_STS_NOT_SUPPORT;
     }
     info->header_len += ETHERNET_HEADER_LEN;
-    return decode_ipv4(packet + ETHERNET_HEADER_LEN, info, domain_name_table);
+    return decode_ipv4_with_domain_callback(
+        packet + ETHERNET_HEADER_LEN, info, callback, user_data);
 }
 
-KDADKResult decode_sll(const u_char *packet, packet_info *info, domain_name_hash *domain_name_table)
+KDADKResult decode_ethernet(
+    const u_char *packet,
+    packet_info *info,
+    domain_name_hash *domain_name_table)
+{
+    return decode_ethernet_with_domain_callback(
+        packet, info, legacy_domain_update, domain_name_table);
+}
+
+static KDADKResult decode_sll_with_domain_callback(
+    const u_char *packet,
+    packet_info *info,
+    domain_ipv4_update_callback callback,
+    void *user_data)
 {
     if (!packet) {
         return KDADK_STS_INVALID_PCAP_PACKET;
@@ -451,11 +547,25 @@ KDADKResult decode_sll(const u_char *packet, packet_info *info, domain_name_hash
         return KDADK_STS_NOT_SUPPORT;
     }
     info->header_len += SLL_HEADER_LEN;
-    return decode_ipv4(packet + SLL_HEADER_LEN, info, domain_name_table);
+    return decode_ipv4_with_domain_callback(
+        packet + SLL_HEADER_LEN, info, callback, user_data);
 }
 
-KDADKResult decode_link_layer(
-    const u_char *packet, packet_info *info, int link_type, domain_name_hash *domain_name_table)
+KDADKResult decode_sll(
+    const u_char *packet,
+    packet_info *info,
+    domain_name_hash *domain_name_table)
+{
+    return decode_sll_with_domain_callback(
+        packet, info, legacy_domain_update, domain_name_table);
+}
+
+KDADKResult decode_link_layer_with_domain_callback(
+    const u_char *packet,
+    packet_info *info,
+    int link_type,
+    domain_ipv4_update_callback callback,
+    void *user_data)
 {
     if (!packet) {
         return KDADK_STS_INVALID_PCAP_PACKET;
@@ -463,10 +573,12 @@ KDADKResult decode_link_layer(
     KDADKResult ret;
     switch (link_type) {
         case DLT_EN10MB:
-            ret = decode_ethernet(packet, info, domain_name_table);
+            ret = decode_ethernet_with_domain_callback(
+                packet, info, callback, user_data);
             break;
         case DLT_LINUX_SLL:
-            ret = decode_sll(packet, info, domain_name_table);
+            ret = decode_sll_with_domain_callback(
+                packet, info, callback, user_data);
             break;
         default:
             printf("The link type not in DLT_EN10MB or DLT_LINUX_SLL\n");
@@ -474,5 +586,15 @@ KDADKResult decode_link_layer(
             break;
     }
     return ret;
+}
+
+KDADKResult decode_link_layer(
+    const u_char *packet,
+    packet_info *info,
+    int link_type,
+    domain_name_hash *domain_name_table)
+{
+    return decode_link_layer_with_domain_callback(
+        packet, info, link_type, legacy_domain_update, domain_name_table);
 }
 

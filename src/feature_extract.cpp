@@ -337,7 +337,48 @@ KDADKResult cal_stream_feature(flow_hash_node *node, stream_feature &node_sf)
     return KDADK_STS_NO_ERR;
 }
 
-KDADK_API KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
+KDADKResult feature_extract_rawbow_text(
+    flow_hash_node *node,
+    char rawbow[RAWBOW_MAX_LEN],
+    uint32_t *rawbow_len)
+{
+    if (!node || !rawbow || !rawbow_len) {
+        return KDADK_STS_NULL_PTR_ERR;
+    }
+    memset(rawbow, 0, RAWBOW_MAX_LEN);
+    *rawbow_len = 0;
+    const uint32_t rawbow_count = std::min(
+        node->rawbow_cnt, static_cast<uint32_t>(MAX_RAWBOW_CNT));
+    if (rawbow_count == 0) {
+        return KDADK_STS_NO_ERR;
+    }
+
+    size_t offset = 0;
+    for (uint32_t i = 0; i < rawbow_count; i++) {
+        if (i > 0) {
+            if (offset + 1 >= RAWBOW_MAX_LEN) {
+                break;
+            }
+            rawbow[offset++] = '_';
+        }
+
+        const char *str = node->rawbow[i].c_str();
+        size_t str_len = strlen(str);
+        if (offset + str_len >= RAWBOW_MAX_LEN) {
+            str_len = RAWBOW_MAX_LEN - offset - 1;
+            if (str_len == 0) {
+                break;
+            }
+        }
+        memcpy(rawbow + offset, str, str_len);
+        offset += str_len;
+    }
+    rawbow[offset] = '\0';
+    *rawbow_len = static_cast<uint32_t>(offset);
+    return KDADK_STS_NO_ERR;
+}
+
+KTAG_LEGACY_ALGORITHM_API KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
                                      char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len)
 {
     if (!node || !feature_vector || !rawbow || !rawbow_len) {
@@ -355,42 +396,14 @@ KDADK_API KDADKResult feature_extract_online(flow_hash_node *node, float feature
             return ret;
         }
         
-        double array[FEATURE_MAX_SIZE];
+        double array[FEATURE_MAX_SIZE] = {};
         streamFeatur2Array(node_sf, array, FEATURE_MAX_SIZE);  // 改这里
 
         for (int i = 0; i < FEATURE_MAX_SIZE; i++) {
             feature_vector[i] = static_cast<float>(array[i]);
         }
 
-        if (node->rawbow_cnt == 0) {
-            rawbow[0] = '\0';
-            *rawbow_len = 0;
-            return KDADK_STS_NO_ERR;
-        }
-
-        size_t offset = 0;
-        for (uint32_t i = 0; i < node->rawbow_cnt; i++) {
-            if (i > 0) {
-                if (offset + 1 >= RAWBOW_MAX_LEN) break;
-                rawbow[offset++] = '_';
-            }
-            
-            const char *str = node->rawbow[i].c_str();
-            size_t str_len = strlen(str);
-            
-            if (offset + str_len >= RAWBOW_MAX_LEN) {
-                str_len = RAWBOW_MAX_LEN - offset - 1;
-                if (str_len == 0) break;
-            }
-            
-            memcpy(rawbow + offset, str, str_len);
-            offset += str_len;
-        }
-        
-        rawbow[offset] = '\0';
-        *rawbow_len = offset;
-
-        return KDADK_STS_NO_ERR;
+        return feature_extract_rawbow_text(node, rawbow, rawbow_len);
         
     } catch (const std::exception &e) {
         memset(feature_vector, 0, sizeof(float) * FEATURE_MAX_SIZE);
