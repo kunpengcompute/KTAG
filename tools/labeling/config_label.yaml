@@ -1,0 +1,22 @@
+# 训练配置
+train:
+  data_paths: [
+    'data/youku/csv',
+    'data/yuanbao/csv',
+    'data/wymusic/csv'
+  ]
+  model_name: "labeling_train"
+  n_clusters: 3
+  test_size: 0.3
+  results_dir: results
+
+# 推理配置
+inference:
+  data_paths: [
+    'data/youku/csv',
+    'data/yuanbao/csv',
+    'data/wymusic/csv'
+  ]
+  model_path: "results/labeling_train_model.pkl"
+  scaler_path: "results/labeling_train_scaler.pkl"
+  output_file: "output/output.csv"

@@ -3,8 +3,14 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 #include "kdadk_feature_extract.h"
 #include "kdadk_export.h"
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+
+static_assert(
+    KTAG_LEGACY_V1_VALUE_COUNT == FEATURES_NUM - 1,
+    "Legacy Provider output must exactly match the consumed fixed-vector prefix");
 
 namespace {
 void free_flow_hash_node(flow_hash_node *node)
@@ -43,6 +49,57 @@ void free_flow_hash_node(flow_hash_node *node)
 
     delete node;
 }
+
+uint64_t timestamp_to_us(const timeval &timestamp)
+{
+    if (timestamp.tv_sec < 0) {
+        return 0U;
+    }
+    const uint64_t seconds = static_cast<uint64_t>(timestamp.tv_sec);
+    const uint64_t microseconds = timestamp.tv_usec < 0 ? 0U :
+        std::min<uint64_t>(
+            static_cast<uint64_t>(timestamp.tv_usec), 999999U);
+    if (seconds >
+        (std::numeric_limits<uint64_t>::max() - microseconds) / 1000000U) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return seconds * 1000000U + microseconds;
+}
+
+uint64_t flow_last_timestamp_us(const flow_hash_node *node)
+{
+    uint64_t result = 0U;
+    if (!node->raw_data.ts.empty()) {
+        result = timestamp_to_us(node->raw_data.ts.back());
+    }
+    if (!node->reverse_raw_data.ts.empty()) {
+        result = std::max(
+            result, timestamp_to_us(node->reverse_raw_data.ts.back()));
+    }
+    return result;
+}
+
+void refresh_flow_domains(feature_extractor *extractor, flow_hash_node *node)
+{
+    if (extractor == nullptr || extractor->domain_name_table == nullptr ||
+        extractor->hash_table == nullptr || node == nullptr) {
+        return;
+    }
+    const bool already_had_domain =
+        !node->src_ip_domain_name.empty() || !node->dst_ip_domain_name.empty();
+    bool found = false;
+    if (domain_name_table_refresh_flow(
+            extractor->domain_name_table,
+            node,
+            flow_last_timestamp_us(node),
+            found) != KDADK_STS_NO_ERR || !found || already_had_domain) {
+        return;
+    }
+    add_rawbow_to_node(
+        extractor->hash_table, node, node->src_ip_domain_name);
+    add_rawbow_to_node(
+        extractor->hash_table, node, node->dst_ip_domain_name);
+}
 }
 
 static int feature_list_add_internal(feature_vector_list *list, const feature_vector *fv)
@@ -77,7 +134,51 @@ static int rawbow_list_add_internal(rawbow_list *list, const rawbow *rb)
     return EXTRACTOR_SUCCESS;
 }
 
-KDADK_API feature_extractor *extractor_init(int link_type)
+static int extract_legacy_vector(
+    feature_extractor *extractor,
+    flow_hash_node *node,
+    uint64_t flow_id,
+    feature_vector *features,
+    rawbow *rawbows,
+    int extract_rawbow)
+{
+    if (!extractor || !node || !features) {
+        return EXTRACTOR_ERROR;
+    }
+
+    refresh_flow_domains(extractor, node);
+    memset(features, 0, sizeof(*features));
+    float extracted[FEATURE_MAX_SIZE] = {};
+    char rawbow_text[RAWBOW_MAX_LEN] = {};
+    uint32_t rawbow_len = 0U;
+    if (feature_extract_online(
+            node, extracted, rawbow_text, &rawbow_len) !=
+        KDADK_STS_NO_ERR) {
+        return EXTRACTOR_ERROR;
+    }
+
+    /*
+     * The historical CSV contract writes flow_id plus the 353 populated
+     * values from FEATURE_MAX_SIZE. The final algorithm slot is deterministic
+     * zero and was never written by the old writer.
+     */
+    features->features[0] = static_cast<float>(flow_id);
+    memcpy(
+        &features->features[1],
+        extracted,
+        sizeof(float) * (KTAG_LEGACY_V1_VALUE_COUNT - 1U));
+
+    if (extract_rawbow && rawbows) {
+        memcpy(rawbows->rawbow, rawbow_text, rawbow_len);
+        rawbows->rawbow[rawbow_len] = '\0';
+        rawbows->len = rawbow_len;
+    }
+    return EXTRACTOR_SUCCESS;
+}
+
+static feature_extractor *extractor_init_internal(
+    int link_type,
+    ktag_domain_store *domain_store)
 {
     if (link_type != DLT_EN10MB && link_type != DLT_LINUX_SLL) {
         fprintf(stderr, "Error: Unsupported link type %d\n", link_type);
@@ -97,7 +198,11 @@ KDADK_API feature_extractor *extractor_init(int link_type)
         return NULL;
     }
 
-    if (domain_name_table_create(&extractor->domain_name_table) || !extractor->domain_name_table) {
+    const KDADKResult domain_result = domain_store == nullptr ?
+        domain_name_table_create(&extractor->domain_name_table) :
+        domain_name_table_create_with_store(
+            &extractor->domain_name_table, domain_store);
+    if (domain_result != KDADK_STS_NO_ERR || !extractor->domain_name_table) {
         hash_table_destroy(extractor->hash_table);
         free(extractor);
         return NULL;
@@ -107,6 +212,21 @@ KDADK_API feature_extractor *extractor_init(int link_type)
     extractor_reset_statistics(extractor);
 
     return extractor;
+}
+
+KDADK_API feature_extractor *extractor_init(int link_type)
+{
+    return extractor_init_internal(link_type, nullptr);
+}
+
+KDADK_API feature_extractor *extractor_init_with_domain_store(
+    int link_type,
+    ktag_domain_store *domain_store)
+{
+    if (domain_store == nullptr) {
+        return nullptr;
+    }
+    return extractor_init_internal(link_type, domain_store);
 }
 
 static int process_packet_internal(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
@@ -156,23 +276,10 @@ static int process_packet_internal(feature_extractor *extractor, const unsigned 
     if (info.finish_flag) {
         remove_node_from_hash_bucket(extractor->hash_table, node);
 
-        float fv[FEATURE_MAX_SIZE];
-        char rb[RAWBOW_MAX_LEN];
-        uint32_t rb_len = 0;
-
-        ret = feature_extract_online(node, fv, rb, &rb_len);
-        if (ret == KDADK_STS_NO_ERR) {
-            uint64_t flow_id = extractor->next_flow_id++;
-
-            features->features[0] = (float)flow_id;
-
-            memcpy(&features->features[1], fv, sizeof(float) * FEATURE_MAX_SIZE);
-
-            if (extract_rawbow && rawbows) {
-                memcpy(rawbows->rawbow, rb, rb_len + 1);
-                rawbows->len = rb_len;
-            }
-
+        const uint64_t flow_id = extractor->next_flow_id;
+        if (extract_legacy_vector(
+                extractor, node, flow_id, features, rawbows, extract_rawbow) == EXTRACTOR_SUCCESS) {
+            extractor->next_flow_id++;
             *has_feature = 1;
             extractor->stats.extracted_flows++;
         }
@@ -229,16 +336,13 @@ static int finalize_internal(feature_extractor *extractor, feature_vector_list *
         flow_hash_node *node = extractor->hash_table->buckets[i].nodes;
 
         while (node) {
-            float fv[FEATURE_MAX_SIZE];
-            char rb[RAWBOW_MAX_LEN];
-            uint32_t rb_len = 0;
+            feature_vector temp_fv{};
+            rawbow temp_rb{};
+            const uint64_t flow_id = extractor->next_flow_id;
 
-            if (feature_extract_online(node, fv, rb, &rb_len) == KDADK_STS_NO_ERR) {
-                uint64_t flow_id = extractor->next_flow_id++;
-
-                feature_vector temp_fv;
-                temp_fv.features[0] = (float)flow_id;
-                memcpy(&temp_fv.features[1], fv, sizeof(float) * FEATURE_MAX_SIZE);
+            if (extract_legacy_vector(
+                    extractor, node, flow_id, &temp_fv, &temp_rb, extract_rawbow) == EXTRACTOR_SUCCESS) {
+                extractor->next_flow_id++;
 
                 if (feature_list_add_internal(features, &temp_fv) != EXTRACTOR_SUCCESS) {
                     fprintf(stderr, "Warning: Stopped processing remaining flows due to capacity limit\n");
@@ -247,10 +351,6 @@ static int finalize_internal(feature_extractor *extractor, feature_vector_list *
                 }
 
                 if (extract_rawbow && rawbows) {
-                    rawbow temp_rb;
-                    memcpy(temp_rb.rawbow, rb, rb_len + 1);
-                    temp_rb.len = rb_len;
-
                     if (rawbow_list_add_internal(rawbows, &temp_rb) != EXTRACTOR_SUCCESS) {
                         fprintf(stderr, "Warning: Stopped processing remaining flows due to capacity limit\n");
                         extractor->hash_table->buckets[i].nodes = node;

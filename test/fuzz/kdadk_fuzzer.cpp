@@ -1,25 +1,56 @@
-#include <string>
-#include <vector>
 #include "kdadk_feature_extract.h"
 #include "kdadk_inference.h"
+
 #include <stddef.h>
 #include <stdint.h>
-#include <vector>
 #include <cstdlib>
-#include <iostream>
+#include <cstring>
+
+namespace {
+
+struct inference_holder {
+    inference_engine *engine = nullptr;
+
+    inference_holder()
+    {
+        const char *config_path = std::getenv("KTAG_LEGACY_CONFIG");
+        if (config_path != nullptr && config_path[0] != '\0') {
+            inference_config config = {config_path};
+            engine = inference_init(&config);
+        }
+    }
+
+    ~inference_holder()
+    {
+        inference_destroy(engine);
+    }
+};
+
+inference_engine *fuzz_inference_engine()
+{
+    static inference_holder holder;
+    return holder.engine;
+}
+
+} // namespace
 
 // LibFuzzer目标函数
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+    if (size > UINT32_MAX - 16U) {
+        return 0;
+    }
     // 测试extractor_init
     int linkType = 0;
     if (size >= 4) {
-        linkType = *(int*)data;
+        std::memcpy(&linkType, data, sizeof(linkType));
     } else {
-        linkType = rand() % 2 == 0 ? DLT_EN10MB : DLT_LINUX_SLL;
+        linkType = size != 0U && (data[0] & 1U) != 0U ?
+            DLT_LINUX_SLL : DLT_EN10MB;
     }
     feature_extractor *extractor1 = extractor_init(linkType);
     extractor_destroy(extractor1);
-    int random_flag = rand() % 2 == 0 ? DLT_EN10MB : DLT_LINUX_SLL;
+    int random_flag = size > 1U && (data[1] & 1U) != 0U ?
+        DLT_LINUX_SLL : DLT_EN10MB;
     feature_extractor *extractor = extractor_init(random_flag);
     if (extractor) {
         // 测试process_packet
@@ -48,7 +79,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                 memcpy(packet + 14, data, size);
             }
         } else if (random_flag == DLT_LINUX_SLL) {
-            // Linux SLL格式：包类型(2) + ARP硬件类型(2) + 链路层地址长度(1) + 链路层地址(8) + 协议类型(2) + 数据
+            // Linux SLL格式：16字节头部 + 数据
             packet_len = size + 16; // 16字节SLL头部
             packet = (unsigned char *)malloc(packet_len);
             if (packet) {
@@ -62,11 +93,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                 packet[4] = 6;
                 // 填充链路层地址
                 memset(packet + 5, 0x11, 8);
+                packet[13] = 0x00;
                 // 填充协议类型（IP协议）
-                packet[13] = 0x08;
-                packet[14] = 0x00;
+                packet[14] = 0x08;
+                packet[15] = 0x00;
                 // 填充数据
-                memcpy(packet + 15, data, size);
+                memcpy(packet + 16, data, size);
             }
         }
         
@@ -115,33 +147,26 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         extractor_destroy(extractor);
     }
     
-    // 测试inference_init
-    inference_config config = {"../../../src/config.yaml"};
-    inference_engine *engine = inference_init(&config);
+    // KTAG_LEGACY_CONFIG is optional. When present, reuse one engine instead
+    // of loading the ONNX model for every fuzz input.
+    inference_engine *engine = fuzz_inference_engine();
     if (engine) {
         // 测试inference_predict
-        feature_vector_list features;
-        features.capacity = 1000;
-        features.count = 1000;
-        features.vectors = static_cast<feature_vector*>(malloc(sizeof(feature_vector) * features.capacity));
+        feature_vector vector{};
+        feature_vector_list features{};
+        features.capacity = 1;
+        features.count = 1;
+        features.vectors = &vector;
         if (size > 0) {
-            for (int i = 0; i < FEATURES_NUM && i < size; i++) {
-                features.vectors[0].features[i] = data[i % size];
+            for (int i = 0; i < FEATURES_NUM; i++) {
+                vector.features[i] = data[static_cast<size_t>(i) % size];
             }
         }
-        inference_result result;
-        result.count = 1000;
-        result.predictions = static_cast<int*>(malloc(sizeof(int) * result.count));
+        int prediction = 0;
+        inference_result result{};
+        result.count = 1;
+        result.predictions = &prediction;
         inference_predict(engine, &features, &result);
-        if (features.vectors) {
-            free(features.vectors);
-        }
-        if (result.predictions) {
-            free(result.predictions);
-        }
-        
-        // 测试inference_destroy
-        inference_destroy(engine);
     }
     
     // 测试空指针情况

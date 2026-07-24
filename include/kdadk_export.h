@@ -16,4 +16,15 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #  define KDADK_API
 #endif
 
+/* Legacy KDADK compatibility APIs remain available until explicitly removed. */
+#if defined(KTAG_SUPPRESS_DEPRECATED_WARNINGS)
+#  define KDADK_DEPRECATED(message)
+#elif defined(_MSC_VER)
+#  define KDADK_DEPRECATED(message) __declspec(deprecated(message))
+#elif defined(__GNUC__) || defined(__clang__)
+#  define KDADK_DEPRECATED(message) __attribute__((deprecated(message)))
+#else
+#  define KDADK_DEPRECATED(message)
+#endif
+
 #endif /* KDADK_EXPORT_H */

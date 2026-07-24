@@ -3,6 +3,8 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include "process_feature.h"
 
+#include <netinet/tcp.h>
+
 const int HASH_BUCKETS = 10000;
 const int CREATE_NODE = 1;
 const int NOT_CREATE_NODE = 0;
@@ -44,7 +46,13 @@ void process_rawbow(flow_hash *hash_table, packet_info *info, flow_hash_node *no
     if (node->rawbow_cnt < MAX_RAWBOW_CNT) {
         if (node->src_ip_domain_name.empty() && node->dst_ip_domain_name.empty()) {
             bool is_exist_domain = false;
-            ret = get_domain_by_ip(node, domain_name_table, is_exist_domain);
+            uint64_t now_us = 0U;
+            if (info->ts.tv_sec >= 0 && info->ts.tv_usec >= 0) {
+                now_us = static_cast<uint64_t>(info->ts.tv_sec) * 1000000U +
+                    static_cast<uint64_t>(info->ts.tv_usec);
+            }
+            ret = get_domain_by_ip_at(
+                node, domain_name_table, now_us, is_exist_domain);
             if (ret == KDADK_STS_NO_ERR && is_exist_domain == true) {
                 add_rawbow_to_node(hash_table, node, node->src_ip_domain_name);
                 add_rawbow_to_node(hash_table, node, node->dst_ip_domain_name);

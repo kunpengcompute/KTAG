@@ -3,17 +3,14 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #ifndef PROCESS_FEATURE_H
 #define PROCESS_FEATURE_H
-#include <filesystem>
-#include <cstdio>
-#include <cstdlib>
-#include <pcap.h>
-#include <arpa/inet.h>
-#include <netinet/tcp.h>
-#include <netinet/udp.h>
+
+#include <string>
+#include <vector>
+
 #include "decode.h"
-#include "flow_hash.h"
 #include "domain_name_hash.h"
 #include "feature_extract.h"
+#include "flow_hash.h"
 
 typedef struct {
     flow_hash *hash_table;

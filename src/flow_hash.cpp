@@ -57,11 +57,9 @@ static uint32_t hash_func_djb2_hash32(const uint8_t *key)
 KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
 {
     flow_hash *table = nullptr;
-    KDADKResult ret;
     int malloc_result;
     size_t malloc_size = 0;
     uint8_t *malloc_ptr = nullptr;
-    uint32_t i;
 
     if (hash_table == nullptr || buckets == 0) {
         return KDADK_STS_PARAMETER_ERR;
@@ -85,28 +83,11 @@ KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
     memset(malloc_ptr, 0, malloc_size);
     table->buckets = (flow_hash_bucket *)malloc_ptr;
 
-    for (i = 0; i < buckets; i++) {
-        malloc_result = pthread_rwlock_init(&table->buckets[i].rwlock, nullptr);
-        if (malloc_result) {
-            ret = KDADK_STS_INIT_RWLOCK_FAIL;
-            goto error;
-        }
-    }
-
     table->hash_func = hash_func_djb2_hash32;
     table->build_ok = 1;
     *hash_table = table;
 
     return KDADK_STS_NO_ERR;
-error:
-    printf("hash table init error\n");
-    for (uint32_t k = 0; k < i; k++) {
-        pthread_rwlock_destroy(&table->buckets[k].rwlock);
-    }
-    free(table->buckets);
-    free(table);
-    table = nullptr;
-    return ret;
 }
 
 static flow_hash_node *hash_table_match_node(flow_hash_node *node, const uint8_t *key)
@@ -171,21 +152,18 @@ flow_hash_node *hash_table_add(flow_hash *hash_table, const packet_info *info)
     hash = hash_table->hash_func((uint8_t *)&key);
     bucket_idx = hash % hash_table->bucket_num;
 
-    pthread_rwlock_wrlock(&hash_table->buckets[bucket_idx].rwlock);
     node = hash_table->buckets[bucket_idx].nodes;
     node = hash_table_match_node(node, (uint8_t *)&key);
     if (node) {
         if (node->status == CONNECTED) {
             add_packet_to_flow_node(node, info);
         }
-        pthread_rwlock_unlock(&hash_table->buckets[bucket_idx].rwlock);
         return node;
     }
 
     // 若 流哈希表中不存在 该五元组，则新建节点并加入，同时设置 该流的src_ip为流的首个packet的src_ip
     node = new (std::nothrow) flow_hash_node{};
     if (node == nullptr) {
-        pthread_rwlock_unlock(&hash_table->buckets[bucket_idx].rwlock);
         return nullptr;
     }
 
@@ -200,24 +178,26 @@ flow_hash_node *hash_table_add(flow_hash *hash_table, const packet_info *info)
 
     hash_table->buckets[bucket_idx].node_num++;
     add_packet_to_flow_node(node, info);
-    pthread_rwlock_unlock(&hash_table->buckets[bucket_idx].rwlock);
 
     return node;
 }
 
 KDADKResult hash_table_destroy(flow_hash *hash_table)
 {
-    uint32_t i;
-
     if (hash_table == nullptr)
         return KDADK_STS_NULL_PTR_ERR;
 
-    /* free all rwlock of hash_bucket. */
     if (hash_table->buckets != nullptr) {
-        for (i = 0; i < hash_table->bucket_num; i++) {
-            (void)pthread_rwlock_destroy(&hash_table->buckets[i].rwlock);
+        for (uint32_t index = 0; index < hash_table->bucket_num; ++index) {
+            flow_hash_node *node = hash_table->buckets[index].nodes;
+            while (node != nullptr) {
+                flow_hash_node *next = node->link_next;
+                delete node;
+                node = next;
+            }
+            hash_table->buckets[index].nodes = nullptr;
+            hash_table->buckets[index].node_num = 0U;
         }
-
         free(hash_table->buckets);
         hash_table->buckets = nullptr;
     }
@@ -305,23 +285,20 @@ std::vector<std::string> filter_tokens(const std::vector<std::string> &tokens)
 
 void add_rawbow_to_node(flow_hash *hash_table, flow_hash_node *node, std::string message)
 {
-    if (node->rawbow_cnt >= MAX_RAWBOW_CNT || message.empty()) {
+    (void)hash_table;
+    if (node == nullptr || node->rawbow_cnt >= MAX_RAWBOW_CNT || message.empty()) {
         return;
     }
 
     std::vector<std::string> tokens = tokenize_url(message);
     std::vector<std::string> filtered_tokens = filter_tokens(tokens);
 
-    // update the hash node
-    pthread_rwlock_wrlock(&hash_table->buckets[node->bucket_index].rwlock);
     for (std::string token : filtered_tokens) {
         if (node->rawbow_cnt >= MAX_RAWBOW_CNT) {
-            pthread_rwlock_unlock(&hash_table->buckets[node->bucket_index].rwlock);
             return;
         }
         node->rawbow[node->rawbow_cnt++] = token;
     }
-    pthread_rwlock_unlock(&hash_table->buckets[node->bucket_index].rwlock);
 }
 
 KDADKResult remove_node_from_hash_bucket(flow_hash *hash_table, flow_hash_node *node)
@@ -329,7 +306,9 @@ KDADKResult remove_node_from_hash_bucket(flow_hash *hash_table, flow_hash_node *
     if (hash_table == nullptr || node == nullptr) {
         return KDADK_STS_NULL_PTR_ERR;
     }
-    pthread_rwlock_wrlock(&hash_table->buckets[node->bucket_index].rwlock);
+    if (hash_table->buckets == nullptr || node->bucket_index >= hash_table->bucket_num) {
+        return KDADK_STS_PARAMETER_ERR;
+    }
     if (node->link_pre)
         node->link_pre->link_next = node->link_next;
     else
@@ -337,8 +316,11 @@ KDADKResult remove_node_from_hash_bucket(flow_hash *hash_table, flow_hash_node *
 
     if (node->link_next)
         node->link_next->link_pre = node->link_pre;
-    hash_table->buckets[node->bucket_index].node_num--;
-    pthread_rwlock_unlock(&hash_table->buckets[node->bucket_index].rwlock);
+    if (hash_table->buckets[node->bucket_index].node_num != 0U) {
+        hash_table->buckets[node->bucket_index].node_num--;
+    }
+    node->link_pre = nullptr;
+    node->link_next = nullptr;
     return KDADK_STS_NO_ERR;
 }
 
@@ -360,11 +342,9 @@ flow_hash_node *change_node_status(flow_hash *hash_table, const Tuple *tuple, in
     if (!hash_table->buckets[bucket_idx].nodes) {
         return nullptr;
     }
-    pthread_rwlock_rdlock(&hash_table->buckets[bucket_idx].rwlock);
     node = hash_table->buckets[bucket_idx].nodes;
     node = hash_table_match_node(node, (uint8_t *)&key);
     if (node == nullptr) {
-        pthread_rwlock_unlock(&hash_table->buckets[bucket_idx].rwlock);
         return nullptr;
     }
 
@@ -382,6 +362,5 @@ flow_hash_node *change_node_status(flow_hash *hash_table, const Tuple *tuple, in
                 break;
         }
     }
-    pthread_rwlock_unlock(&hash_table->buckets[bucket_idx].rwlock);
     return node;
 }

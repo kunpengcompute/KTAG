@@ -53,16 +53,18 @@ fs::path resolve_path(const std::string &path_str, const std::string &base_dir =
         base = fs::absolute(base_dir);
     }
     fs::path full_path = base / path;
-    return fs::absolute(full_path);
+    return fs::absolute(full_path).lexically_normal();
 }
 
 Config load_config_common(const string &config_path, bool is_online)
 {
     Config config;
     YAML::Node yaml_config;
+    const fs::path config_file_path = fs::absolute(config_path).lexically_normal();
+    const string config_dir = config_file_path.parent_path().string();
 
     try {
-        yaml_config = YAML::LoadFile(config_path);
+        yaml_config = YAML::LoadFile(config_file_path.string());
     } catch (const YAML::Exception &e) {
         throw runtime_error(string(e.what()));
     }
@@ -72,7 +74,7 @@ Config load_config_common(const string &config_path, bool is_online)
     }
 
     try {
-        string model_path = resolve_path(yaml_config["model_path_onnx"].as<string>());
+        string model_path = resolve_path(yaml_config["model_path_onnx"].as<string>(), config_dir);
         if (!fs::exists(model_path)) {
             throw runtime_error("文件不存在: " + model_path);
         }
@@ -86,7 +88,7 @@ Config load_config_common(const string &config_path, bool is_online)
     }
 
     try {
-        string scaler_path = resolve_path(yaml_config["scaler_path_json"].as<string>());
+        string scaler_path = resolve_path(yaml_config["scaler_path_json"].as<string>(), config_dir);
         if (!fs::exists(scaler_path)) {
             throw runtime_error("文件不存在: " + scaler_path);
         }

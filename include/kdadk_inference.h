@@ -6,11 +6,16 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 #include <stdint.h>
 #include "kdadk_feature_extract.h"
-#include "utils.h"
 #include "kdadk_export.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*
+ * Deprecated compatibility surface for config.yaml plus fixed feature_vector.
+ * It remains available until the project owner explicitly authorizes removal.
+ */
+#define KTAG_LEGACY_INFERENCE_COMPAT_AVAILABLE 1
 
 typedef struct standard_scaler standard_scaler;
 typedef struct ort_session ort_session;
@@ -40,6 +45,10 @@ typedef struct {
 #define INFERENCE_SUCCESS 0
 #define INFERENCE_ERROR -1
 
+/*
+ * LegacyModelAdapter API retained for one compatibility version. New code
+ * should use ktag_inference.h and a Schema-bound model package.
+ */
 /* ========== 推理引擎接口 ========== */
 
 /**
@@ -47,13 +56,15 @@ typedef struct {
  * @param config 推理配置（包含配置文件路径）
  * @return 推理引擎句柄，失败返回NULL
  */
-KDADK_API inference_engine *inference_init(const inference_config *config);
+KDADK_API KDADK_DEPRECATED("Use ktag_inference_create")
+inference_engine *inference_init(const inference_config *config);
 
 /**
  * @brief 销毁推理引擎
  * @param engine 推理引擎句柄
  */
-KDADK_API void inference_destroy(inference_engine *engine);
+KDADK_API KDADK_DEPRECATED("Use ktag_inference_destroy")
+void inference_destroy(inference_engine *engine);
 
 /**
  * @brief 批量推理
@@ -62,7 +73,8 @@ KDADK_API void inference_destroy(inference_engine *engine);
  * @param result 输出推理结果（调用者需要预先分配predictions数组）
  * @return INFERENCE_SUCCESS表示成功，INFERENCE_ERROR表示失败
  */
-KDADK_API int inference_predict(inference_engine *engine, const feature_vector_list *features, inference_result *result);
+KDADK_API KDADK_DEPRECATED("Use ktag_inference_predict")
+int inference_predict(inference_engine *engine, const feature_vector_list *features, inference_result *result);
 
 #ifdef __cplusplus
 }

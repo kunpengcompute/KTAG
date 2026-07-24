@@ -2,7 +2,7 @@
 ##############################################################
 ## Copyright: Copyright (c) Huawei Technologies Co., Ltd. 2020-2020. All rights reserved.
 ## @Filename: build.sh
-## @Usage: sh build.sh or sh build.sh clean or sh build.sh install or sh build.sh uninstall
+## @Usage: sh build.sh, sh build.sh -perf, sh build.sh clean, sh build.sh install or sh build.sh uninstall
 ##############################################################
 
 set -e
@@ -38,20 +38,22 @@ function kdadk_appid_clean()
 
 function kdadk_appid_install()
 {
+    # 检查是否以超级用户权限运行
+    if [[ $EUID -ne 0 ]]; then
+        echo "This script must be run as root"
+        exit 1
+    fi
+    if [ ! -f "${OBJ_DIR}/CMakeCache.txt" ]; then
+        echo "build directory is missing; run 'sh build.sh' first"
+        exit 1
+    fi
     if [ ! -d "${INSTALL_LIB_PATH}" ]; then
         mkdir -p ${INSTALL_LIB_PATH}
     fi
     if [ ! -d "${INSTALL_INCLUDE_PATH}" ]; then
         mkdir -p ${INSTALL_INCLUDE_PATH}
     fi
-    cp -rf ${LIB_ROOT_PATH}/include/* ${INSTALL_INCLUDE_PATH}
-    cp -rf ${OUTPUT_DIR}/* ${INSTALL_LIB_PATH}
-   
-    # 检查是否以超级用户权限运行
-    if [[ $EUID -ne 0 ]]; then
-    echo "This script must be run as root"
-    exit 1
-    fi
+    cmake --install "${OBJ_DIR}" --prefix /usr/local
 
     MARK="# Added by KDADK_APPID install script"
     if ! grep -q "$MARK" /etc/profile; then
@@ -72,14 +74,19 @@ function kdadk_appid_install()
 function kdadk_appid_uninstall()
 {
     kdadk_appid_clean
-    rm -rf ${INSTALL_INCLUDE_PATH}/*.h ${INSTALL_LIB_PATH}/*
-    # 删除标记和相关环境变量
-    LINES_TO_DELETE=3
-    # 循环删除所有标记及其后续行
-    while grep -q "# Added by KPCV install script" /etc/profile; do
-        sed -i "/# Added by KPCV install script/{N;N;N;d}" /etc/profile
+    rm -rf \
+        "${INSTALL_INCLUDE_PATH}" \
+        "${INSTALL_LIB_PATH}" \
+        /usr/local/lib/cmake/KTAG \
+        /usr/local/share/KTAG
+    rm -f /usr/local/bin/kdadk_demo /usr/local/bin/ktag_three_layer_example
+    # 删除安装脚本写入的环境变量。
+    while grep -q "# Added by KDADK_APPID install script" /etc/profile; do
+        sed -i "/# Added by KDADK_APPID install script/{N;N;N;d}" /etc/profile
     done
 }
+
+PERF_OPTION="-DKTAG_ENABLE_PERF_PROFILING=OFF"
 
 if [ "$1" == "" ] ;then
     COVERAGE_OPTION=""
@@ -92,6 +99,10 @@ elif [ "$1" == "-sve256" ]; then
     kdadk_appid_build
 elif [ "$1" == "-coverage" ]; then
     COVERAGE_OPTION="-DENABLE_TEST_COVERAGE=ON"
+    kdadk_appid_build
+elif [ "$1" == "-perf" ]; then
+    COVERAGE_OPTION=""
+    PERF_OPTION="-DKTAG_ENABLE_PERF_PROFILING=ON"
     kdadk_appid_build
 elif [ "$1" == "clean" ] ;then
     kdadk_appid_clean

@@ -3,6 +3,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 #include "kdadk_inference.h"
 #include "kdadk_export.h"
+#include "utils.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

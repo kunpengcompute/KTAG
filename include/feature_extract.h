@@ -6,6 +6,11 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include <math.h>
 #include "kdadk.h"
 #include "kdadk_export.h"
+#if defined(KTAG_FEATURE_INTERNAL_BUILD)
+#define KTAG_LEGACY_ALGORITHM_API
+#else
+#define KTAG_LEGACY_ALGORITHM_API KDADK_API
+#endif
 #define RAWBOW_MAX_LEN 4096
 const int HISTOGRAM_NUMS = 16;          // 统计信息-直方图位数
 const int RAW_BOW_HISTOGRAM_NUMS = 32;  // 词袋信息-直方图位数
@@ -59,8 +64,9 @@ struct stream_feature {
     double raw_bow_crc_result[RAW_BOW_HISTOGRAM_NUMS];
 };
 
-KDADK_API KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
+KTAG_LEGACY_ALGORITHM_API KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
                                    char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len);
+KDADKResult feature_extract_rawbow_text(flow_hash_node *node, char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len);
 double calculate_mean(const std::vector<uint32_t> &nums);
 double calculate_var(const std::vector<uint32_t> &nums, double mean);
 void calculate_hist(const std::vector<uint32_t> &nums, double min_val, double max_val, double *histogram,

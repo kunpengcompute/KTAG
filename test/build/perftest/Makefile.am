@@ -5,6 +5,8 @@ GMOCK_DIR = ../../googletest-release-1.8.0/googlemock
 # Source file of function
 KDADK_APPID_modules_DIR = ../../..
 TEST_modules_DIR = ../../
+KDADK_APPID_OUTPUT_DIR := $(abspath $(KDADK_APPID_modules_DIR)/output)
+ONNXRUNTIME_LIB_DIR := $(abspath $(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib)
 
 # Header files path
 KDADK_APPID_DIR += -I $(GTEST_DIR)/include/
@@ -30,11 +32,12 @@ SRC_FILES_DIRS += $(TEST_modules_DIR)/common/perftest/
 
 # Static and shared libraries that need to be linked to the program.
 LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
-                -L$(KDADK_APPID_modules_DIR)/output/ \
+                -L$(KDADK_APPID_OUTPUT_DIR) \
                 -lkdadk_appidlib \
+				-lktag_feature \
                 -lKDADK_feature_extract \
 				-lKDADK_inference \
-				-L$(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib/ \
+				-L$(ONNXRUNTIME_LIB_DIR) \
 				-lonnxruntime
 
 LD_LIBRARIES += -pthread -lgtest -lgtest_main -lgmock -lgmock_main -lpcap
@@ -76,7 +79,11 @@ endif
 
 all : $(PROGRAM)
 run:
-	env LD_LIBRARY_PATH=$(KDADK_APPID_modules_DIR)/output/:$(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib:/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_perftest --gtest_filter=$(FILTER)
+	@test -f "$(KDADK_APPID_OUTPUT_DIR)/libkdadk_appidlib.so" || \
+		(echo "missing $(KDADK_APPID_OUTPUT_DIR)/libkdadk_appidlib.so; run 'sh build.sh -lib' from the repository root"; exit 1)
+	@test -f "$(KDADK_APPID_OUTPUT_DIR)/libktag_feature.so" || \
+		(echo "missing $(KDADK_APPID_OUTPUT_DIR)/libktag_feature.so; rebuild phase-8 libraries"; exit 1)
+	env LD_LIBRARY_PATH=$(KDADK_APPID_OUTPUT_DIR):$(ONNXRUNTIME_LIB_DIR):/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_perftest --gtest_filter=$(FILTER)
 rrun:
 	env LD_LIBRARY_PATH=/usr/local/ksl/lib/:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_perftest --gtest_filter=$(FILTER)
 

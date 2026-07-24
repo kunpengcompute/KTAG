@@ -75,8 +75,20 @@ extern const int BYTE_OFFSET_2;
 extern const int SHIFT_16;
 extern const int SHIFT_8;
 
+typedef KDADKResult (*domain_ipv4_update_callback)(
+    void *user_data,
+    uint32_t network_order_address,
+    const std::string &domain,
+    uint64_t expire_at_us);
+
 KDADKResult decode_link_layer(const u_char *packet, packet_info *info, int link_type,
                               domain_name_hash *domain_name_table);
+KDADKResult decode_link_layer_with_domain_callback(
+    const u_char *packet,
+    packet_info *info,
+    int link_type,
+    domain_ipv4_update_callback callback,
+    void *user_data);
 bool is_http_payload(const u_char *packet, int length);
 KDADKResult parse_http_payload(const u_char *packet, packet_info *info, uint32_t length);
 KDADKResult parse_tls_sni(const size_t msg_body_start, const size_t extensions_len, packet_info *info,

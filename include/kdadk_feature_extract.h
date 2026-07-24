@@ -12,6 +12,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <netinet/in.h>
 #include "process_feature.h"
 #include "kdadk_export.h"
+#include "ktag_feature.h"
 
 #define HASH_BUCKETS 65536
 #define DLT_EN10MB 1
@@ -20,6 +21,13 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*
+ * Deprecated compatibility surface for the historical fixed feature_vector.
+ * It remains source/binary compatible until the project owner explicitly
+ * authorizes removal. New integrations must use ktag_feature.h.
+ */
+#define KTAG_LEGACY_FEATURE_COMPAT_AVAILABLE 1
 
 #define FEATURES_NUM FEATURE_MAX_SIZE + 1 /* 354 + 1 (flow_id在第0列) */
 
@@ -58,6 +66,8 @@ typedef struct {
     int initialized;
     uint64_t next_flow_id; /* 全局唯一的flow_id计数器 */
     statistics stats;      /* 统计信息 */
+    /* Reserved to preserve the published compatibility structure layout. */
+    void *legacy_feature_pipeline;
 } feature_extractor;
 
 #define EXTRACTOR_SUCCESS 0
@@ -68,13 +78,21 @@ typedef struct {
  * @param link_type 链路层类型
  * @return 特征提取器句柄，失败返回NULL
  */
-KDADK_API feature_extractor *extractor_init(int link_type);
+KDADK_API KDADK_DEPRECATED("Use ktag_feature_create")
+feature_extractor *extractor_init(int link_type);
+
+/* Compatibility constructor for multiple extractors sharing one DomainStore. */
+KDADK_API KDADK_DEPRECATED("Use ktag_feature_create with shared_domain_store")
+feature_extractor *extractor_init_with_domain_store(
+    int link_type,
+    ktag_domain_store *domain_store);
 
 /**
  * @brief 销毁特征提取器
  * @param extractor 特征提取器句柄
  */
-KDADK_API void extractor_destroy(feature_extractor *extractor);
+KDADK_API KDADK_DEPRECATED("Use ktag_feature_destroy")
+void extractor_destroy(feature_extractor *extractor);
 
 /**
  * @brief 处理单个数据包（仅提取特征向量）
@@ -86,7 +104,8 @@ KDADK_API void extractor_destroy(feature_extractor *extractor);
  * @param has_feature 输出标志，表示是否有特征提取（流结束）
  * @return EXTRACTOR_SUCCESS表示成功，EXTRACTOR_ERROR表示失败
  */
-KDADK_API int process_packet(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
+KDADK_API KDADK_DEPRECATED("Use ktag_feature_process_packet")
+int process_packet(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
                    const struct timeval *ts, feature_vector *features, int *has_feature);
 
 /**
@@ -100,7 +119,8 @@ KDADK_API int process_packet(feature_extractor *extractor, const unsigned char *
  * @param has_feature 输出标志，表示是否有特征提取（流结束）
  * @return EXTRACTOR_SUCCESS表示成功，EXTRACTOR_ERROR表示失败
  */
-KDADK_API int process_packet_with_rawbow(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
+KDADK_API KDADK_DEPRECATED("Use callbacks with ktag_feature_process_packet")
+int process_packet_with_rawbow(feature_extractor *extractor, const unsigned char *packet, uint32_t packet_len,
                                const struct timeval *ts, feature_vector *features, rawbow *rawbows, int *has_feature);
 
 /**
@@ -109,7 +129,8 @@ KDADK_API int process_packet_with_rawbow(feature_extractor *extractor, const uns
  * @param features 输出特征向量列表
  * @return EXTRACTOR_SUCCESS表示成功，EXTRACTOR_ERROR表示失败
  */
-KDADK_API int extractor_finalize(feature_extractor *extractor, feature_vector_list *features);
+KDADK_API KDADK_DEPRECATED("Use ktag_feature_flush")
+int extractor_finalize(feature_extractor *extractor, feature_vector_list *features);
 
 /**
  * @brief 处理所有剩余的流（提取特征向量和rawbow）
@@ -118,7 +139,8 @@ KDADK_API int extractor_finalize(feature_extractor *extractor, feature_vector_li
  * @param rawbows 输出rawbow列表
  * @return EXTRACTOR_SUCCESS表示成功，EXTRACTOR_ERROR表示失败
  */
-KDADK_API int extractor_finalize_with_rawbow(feature_extractor *extractor, feature_vector_list *features, rawbow_list *rawbows);
+KDADK_API KDADK_DEPRECATED("Use callbacks with ktag_feature_flush")
+int extractor_finalize_with_rawbow(feature_extractor *extractor, feature_vector_list *features, rawbow_list *rawbows);
 
 /**
  * @brief 获取统计信息
@@ -126,13 +148,15 @@ KDADK_API int extractor_finalize_with_rawbow(feature_extractor *extractor, featu
  * @param stats 输出统计信息
  * @return EXTRACTOR_SUCCESS表示成功，EXTRACTOR_ERROR表示失败
  */
-KDADK_API int extractor_get_statistics(feature_extractor *extractor, statistics *stats);
+KDADK_API KDADK_DEPRECATED("Use ktag_feature_get_statistics")
+int extractor_get_statistics(feature_extractor *extractor, statistics *stats);
 
 /**
  * @brief 重置统计信息
  * @param extractor 特征提取器句柄
  */
-KDADK_API void extractor_reset_statistics(feature_extractor *extractor);
+KDADK_API KDADK_DEPRECATED("Recreate the Feature Context to reset statistics")
+void extractor_reset_statistics(feature_extractor *extractor);
 
 #ifdef __cplusplus
 }
