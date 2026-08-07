@@ -2,253 +2,304 @@
 # Copyright (c) 2025 Huawei Technologies Co., Ltd.
 #
 
-import sys
-import logging
-from typing import List
-from sklearn.metrics import classification_report, accuracy_score
-import yaml
-import joblib
-import pandas as pd
-import numpy as np
-import os
 from datetime import datetime
+import logging
 from pathlib import Path
-from utils import resolve_path, select_schema_training_columns
+import sys
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+import joblib
+import numpy as np
+import pandas as pd
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+)
+import yaml
 
-def _load_and_concat(file_paths: List[str], base_dir=None):
-    """Load and concatenate multiple CSV files"""
-    dfs = []
-    for file_path in file_paths:
-        try:
-            df = pd.read_csv(resolve_path(file_path, base_dir))
-            dfs.append(df)
-        except FileNotFoundError:
-            logging.warning(f"{file_path} file not found. Skipping this file.")
-            continue
-        except PermissionError:
-            logging.warning(f"No permission to load {file_path}. Skipping this file.")
-            continue
-        except pd.errors.EmptyDataError:
-            logging.warning(f"File '{file_path}' is empty. Skipping this file.")
-            continue
-        except Exception as e:
-            logging.warning(f"Error occurred while reading {file_path}: {str(e)}. Skipping this file.")
-            continue
-    if not dfs:
-        raise ValueError("No data was successfully loaded from any of the provided CSV files.")
+from utils import (
+    load_labeled_data,
+    prepare_model_data,
+    resolve_path,
+    schema_identity,
+    validate_dataset_config,
+)
 
-    return pd.concat(dfs, axis=0, ignore_index=True)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def load_and_prepare_data(
-        data_paths: List[List[str]], scaler_path: str, config, base_dir=None):
-    """
-     Load and prepare the data, and add labels to the dataset.
-    """
-    labels = [i for i in range(len(data_paths))]
-    all_data = []
-    for paths, label in zip(data_paths, labels):
-        class_data = _load_and_concat(paths, base_dir)
-        class_data['label'] = label
-        all_data.append(class_data)
+        data_paths, scaler_path, config, base_dir=None):
+    """Compatibility wrapper returning the historical four values."""
+    combined = load_labeled_data(data_paths, base_dir, randomize=False)
+    prepared = prepare_model_data(combined, config)
+    scaler = joblib.load(scaler_path)
+    X = _validate_scaler_columns(scaler, prepared['X'], config)
+    X_scaled = scaler.transform(X)
+    return (
+        X_scaled,
+        prepared['y'],
+        prepared['X'],
+        prepared['raw_bow'],
+    )
 
-    combined_data = pd.concat(all_data, axis=0)
-    combined_data = combined_data.sample(frac=1).reset_index(drop=True)
 
-    # Separate features and labels
-    # X = combined_data.drop('label', axis=1)
-    y = combined_data['label']
-    raw_bow = None
-    if 'raw_bow' in combined_data.columns:
-        raw_bow = combined_data['raw_bow']
-        X = combined_data.drop(['label', 'raw_bow'], axis=1)
-    else:
-        X = combined_data.drop('label', axis=1)
-    X = select_schema_training_columns(X, config)
+def _validate_scaler_columns(scaler, X, config=None):
+    if len(getattr(scaler, 'mean_', [])) != X.shape[1]:
+        raise ValueError(
+            'scaler dimension does not match evaluation input: '
+            f'{len(getattr(scaler, "mean_", []))} != {X.shape[1]}')
+    if hasattr(scaler, 'feature_names_in_'):
+        expected = list(scaler.feature_names_in_)
+        actual = list(X.columns)
+        if expected != actual:
+            name, _, contract = schema_identity(config or {})
+            if (name != 'ktag_legacy_v1' or contract is None or
+                    X.shape[1] != contract['input_values'] or
+                    len(expected) != contract['input_values']):
+                raise ValueError(
+                    'evaluation Feature columns/order do not match trained '
+                    'scaler')
+            # Historical application CSVs and modern Schema CSVs carry
+            # different column names for the same frozen positional Legacy
+            # V1 contract.  Both sides have already passed the 351-value
+            # contract check, so renaming here allows an old IPv4 model and a
+            # new dual-stack model to be evaluated on the same regenerated
+            # IPv4 test set without weakening any custom/proxy Schema check.
+            X = X.copy()
+            X.columns = expected
+            logging.warning(
+                'ktag_legacy_v1 Scaler 使用历史列名；已按冻结的351维顺序'
+                '对齐评估输入，用于新旧应用模型同集比较')
+    return X
 
-    # standardization
+
+def _matrix_path(report_path, section):
+    stem = report_path.stem
+    suffix = '' if section == 'overall' else f'_{section}'
+    return report_path.with_name(
+        f'{stem}{suffix}_confusion_matrix.csv')
+
+
+def _write_confusion_matrix(path, matrix, labels):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame(
+        matrix,
+        index=[f'true_{label}' for label in labels],
+        columns=[f'predicted_{label}' for label in labels],
+    )
+    frame.to_csv(path, encoding='utf-8')
+    logging.info('Confusion Matrix 已保存到: %s', path)
+
+
+def _build_report_section(name, y_true, y_pred, labels):
+    if len(y_true) == 0:
+        return {
+            'name': name,
+            'support': 0,
+            'report': 'No samples; this address family is not evaluable.',
+            'accuracy': None,
+            'matrix': np.zeros((len(labels), len(labels)), dtype=int),
+        }
+    return {
+        'name': name,
+        'support': len(y_true),
+        'report': classification_report(
+            y_true,
+            y_pred,
+            labels=labels,
+            digits=4,
+            zero_division=0,
+        ),
+        'accuracy': accuracy_score(y_true, y_pred),
+        'matrix': confusion_matrix(y_true, y_pred, labels=labels),
+    }
+
+
+def _family_sections(y, y_pred, metadata, labels):
+    sections = [_build_report_section('overall', y, y_pred, labels)]
+    if 'meta.ip_version' not in metadata.columns:
+        logging.warning(
+            '旧 CSV 不含 meta.ip_version，仅输出整体 Classification Report')
+        return sections
     try:
-        scaler = joblib.load(scaler_path)
-        X_scaled = scaler.transform(X)
-    except FileNotFoundError as e:
-        raise FileNotFoundError(f"{scaler_path} file not found") from e
-    except PermissionError as e:
-        raise PermissionError(f"No permission to load the {scaler_path} file. Please check the file permissions.") from e
-    except Exception as e:
-        raise RuntimeError(f"Error occurred while standardizing data.") from e
+        versions = pd.to_numeric(
+            metadata['meta.ip_version'], errors='raise').astype(int)
+    except (ValueError, TypeError) as exc:
+        raise ValueError('meta.ip_version contains invalid values') from exc
+    invalid = sorted(set(versions) - {4, 6})
+    if invalid:
+        raise ValueError(
+            'meta.ip_version contains values other than 4/6: ' +
+            ', '.join(str(value) for value in invalid))
+    for version, name in ((4, 'ipv4'), (6, 'ipv6')):
+        mask = versions.to_numpy() == version
+        sections.append(_build_report_section(
+            name,
+            y.to_numpy()[mask],
+            y_pred[mask],
+            labels,
+        ))
+    if sections[0]['support'] != sections[1]['support'] + sections[2]['support']:
+        raise ValueError('IPv4/IPv6 support does not sum to overall support')
+    return sections
 
-    return X_scaled, y, X, raw_bow
+
+def _write_report(report_path, sections, labels, y, metadata):
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with report_path.open('w', encoding='utf-8') as stream:
+        stream.write('=' * 80 + '\n')
+        stream.write('Classification Report\n')
+        stream.write(
+            f'Generated at: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+        stream.write('=' * 80 + '\n')
+        for section in sections:
+            stream.write(f'\n[{section["name"]}] support={section["support"]}\n')
+            stream.write(section['report'])
+            if section['accuracy'] is not None:
+                stream.write(f'\nAccuracy: {section["accuracy"]:.4f}\n')
+            stream.write('Confusion Matrix:\n')
+            stream.write(np.array2string(section['matrix']) + '\n')
+
+        stream.write('\n[per-label address-family support]\n')
+        if 'meta.ip_version' in metadata.columns:
+            versions = pd.to_numeric(metadata['meta.ip_version']).astype(int)
+            for label in labels:
+                label_mask = y.to_numpy() == label
+                ipv4 = int(np.count_nonzero(
+                    label_mask & (versions.to_numpy() == 4)))
+                ipv6 = int(np.count_nonzero(
+                    label_mask & (versions.to_numpy() == 6)))
+                stream.write(
+                    f'label={label} IPv4={ipv4} IPv6={ipv6} '
+                    f'total={ipv4 + ipv6}\n')
+        else:
+            for label in labels:
+                support = int(np.count_nonzero(y.to_numpy() == label))
+                stream.write(
+                    f'label={label} IPv4=unavailable IPv6=unavailable '
+                    f'total={support}\n')
+        stream.write('=' * 80 + '\n')
+    logging.info('Classification Report 已保存到: %s', report_path)
 
 
 def predict_new_data(params):
-    """
-    Use the trained model to predict new data.
-
-    args:
-        model: Trained Random Forest Model
-        X_scaled: Data to be predicted
-        y: Expected predict result
-        X_original: Original features (before scaling)
-        raw_bow: Raw bow column if exists
-        anomaly_detect_switch: Whether to enable anomaly detection
-        anomaly_detect_limit: Threshold for anomaly detection
-        report_output_path: Path to save classification report
-        prediction_output_path: Path to save prediction results
-    """
+    """Predict labels and always preserve the model probability/confidence."""
     model = params['model']
     X_scaled = params['X_scaled']
-    y = params['y']
-    X_original = params['X_original']
-    raw_bow = params['raw_bow']
-    anomaly_detect_switch = params['anomaly_detect_switch']
-    anomaly_detect_limit = params['anomaly_detect_limit']
-    report_output_path = params['report_output_path']
-    prediction_output_path = params['prediction_output_path']
-    y_pred = model.predict(X_scaled)
+    y = params['y'].reset_index(drop=True)
+    X_original = params['X_original'].reset_index(drop=True)
+    metadata = params.get('metadata')
+    if metadata is None:
+        metadata = pd.DataFrame(index=X_original.index)
+    else:
+        metadata = metadata.reset_index(drop=True)
+    raw_bow = params.get('raw_bow')
+    report_path = Path(params['report_output_path'])
+    prediction_path = Path(params['prediction_output_path'])
+    labels = list(params.get('labels', sorted(set(y.tolist()))))
 
-    if anomaly_detect_switch:
-        # Obtain the predicted probabilities for each category
-        probs = model.predict_proba(X_scaled)
-        max_probs = np.max(probs, axis=1)
-        is_anomaly = max_probs < anomaly_detect_limit
-        # Mark the predicted labels of abnormal samples as -1.
-        y_pred = np.where(is_anomaly, -1, y_pred)
+    if not hasattr(model, 'predict_proba'):
+        raise ValueError('evaluation model must provide predict_proba')
+    y_pred = np.asarray(model.predict(X_scaled))
+    probabilities = np.asarray(model.predict_proba(X_scaled))
+    if (probabilities.ndim != 2 or probabilities.shape[0] != len(y) or
+            probabilities.shape[1] == 0):
+        raise ValueError('predict_proba returned an invalid probability matrix')
+    confidence = np.max(probabilities, axis=1)
+    if (not np.isfinite(probabilities).all() or
+            np.any(probabilities < 0.0) or np.any(probabilities > 1.0)):
+        raise ValueError('predict_proba returned invalid probability values')
 
-    # Generate classification report
-    report = classification_report(y, y_pred, digits=4)
-    accuracy = accuracy_score(y, y_pred)
+    sections = _family_sections(y, y_pred, metadata, labels)
+    for section in sections:
+        logging.info(
+            '%s evaluation support=%d%s\n%s',
+            section['name'],
+            section['support'],
+            ('' if section['accuracy'] is None else
+             f', accuracy={section["accuracy"]:.4f}'),
+            section['report'])
+        _write_confusion_matrix(
+            _matrix_path(report_path, section['name']),
+            section['matrix'],
+            labels,
+        )
+    _write_report(report_path, sections, labels, y, metadata)
 
-    logging.info('Model evaluation result:\n%s', report)
-    logging.info(f"Accuracy: {accuracy}")
-
-    # Save classification report to txt file
-    try:
-        # Create directory if not exists
-        report_dir = os.path.dirname(report_output_path)
-        if report_dir and not os.path.exists(report_dir):
-            os.makedirs(report_dir)
-
-        with open(report_output_path, 'w', encoding='utf-8') as f:
-            f.write("=" * 80 + "\n")
-            f.write(f"Classification Report\n")
-            f.write(f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("=" * 80 + "\n\n")
-            f.write(report)
-            f.write(f"\n\nAccuracy: {accuracy:.4f}\n")
-            f.write("=" * 80 + "\n")
-
-        logging.info(f"Classification report saved to: {report_output_path}")
-    except Exception as e:
-        logging.error(f"Failed to save classification report - {str(e)}")
-
-    # Save prediction results to csv file
-    try:
-        # Create directory if not exists
-        pred_dir = os.path.dirname(prediction_output_path)
-        if pred_dir and not os.path.exists(pred_dir):
-            os.makedirs(pred_dir)
-
-        # Create DataFrame with original features
-        result_df = pd.DataFrame(X_original)
-
-        # Add raw_bow column if exists
-        if raw_bow is not None:
-            result_df['raw_bow'] = raw_bow.values
-
-        # Add prediction and true label columns
-        result_df['predicted_label'] = y_pred
-        result_df['true_label'] = y.values
-
-        # Save to CSV
-        result_df.to_csv(prediction_output_path, index=False, encoding='utf-8')
-
-        logging.info(f"Prediction results saved to: {prediction_output_path}")
-        logging.info(f"Total samples: {len(result_df)}")
-
-        # Log prediction summary
-        correct_predictions = (y_pred == y.values).sum()
-        total_predictions = len(y_pred)
-        logging.info(f"Correct predictions: {correct_predictions}/{total_predictions}")
-
-    except Exception as e:
-        logging.error(f"Failed to save prediction results - {str(e)}")
+    prediction_path.parent.mkdir(parents=True, exist_ok=True)
+    result = pd.concat([metadata, X_original], axis=1)
+    if raw_bow is not None:
+        result['raw_bow'] = raw_bow.reset_index(drop=True)
+    result['predicted_label'] = y_pred
+    result['true_label'] = y.to_numpy()
+    result['confidence'] = confidence
+    result.to_csv(prediction_path, index=False, encoding='utf-8')
+    logging.info('Prediction details 已保存到: %s', prediction_path)
+    logging.info('Total samples: %d', len(result))
+    return {
+        'predictions': y_pred,
+        'confidence': confidence,
+        'sections': sections,
+        'details': result,
+    }
 
 
 def KDADK_Evaluation(config_file):
-    logging.info("Loaded config file : %s", config_file)
+    logging.info('Loaded config file: %s', config_file)
     config_path = Path(config_file).expanduser().resolve()
     config_dir = config_path.parent
-    # File Path and Labels- read from config.yaml
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-        data_paths = config['evaluation_data_paths']
-        anomaly_detect_switch = 0
-        anomaly_detect_limit = 0
+        with config_path.open('r', encoding='utf-8') as stream:
+            config = yaml.safe_load(stream)
+        if not isinstance(config, dict):
+            raise ValueError('config root must be a mapping')
+        training_groups, evaluation_groups, _ = validate_dataset_config(
+            config, config_dir)
+        if ('anomaly_detect_switch' in config or
+                'anomaly_detect_limit' in config):
+            logging.warning(
+                'anomaly threshold label rewriting is disabled; '
+                'the RandomForest label is preserved')
 
-        # Get output paths from config, with default values
-        report_output_path = resolve_path(config['classification_report_file'], config_dir)
-        prediction_output_path = resolve_path(config['predictions_detail_file'], config_dir)
-        model_path = resolve_path(config['model_path_pkl'], config_dir)
+        combined = load_labeled_data(
+            evaluation_groups, config_dir, randomize=False)
+        prepared = prepare_model_data(combined, config)
         scaler_path = resolve_path(config['scaler_path_pkl'], config_dir)
+        model_path = resolve_path(config['model_path_pkl'], config_dir)
+        scaler = joblib.load(scaler_path)
+        X = _validate_scaler_columns(scaler, prepared['X'], config)
+        X_scaled = scaler.transform(X)
+        model = joblib.load(model_path)
 
-    except PermissionError:
-        logging.error(f"No permission to read the {config_file} file. Please check the file permissions.")
-        return -1
-    except yaml.YAMLError:
-        logging.error("The YAML file format is incorrect.")
-        return -1
-    except KeyError as e:
-        logging.error(f"Missing necessary configuration items - {str(e)}")
-        return -1
-    except Exception as e:
-        logging.error(f"An unexpected error occurred while reading the configuration file. - {str(e)}")
-        return -1
-
-    if (not isinstance(anomaly_detect_switch, int)) or (not isinstance(anomaly_detect_limit, (int, float))):
-        logging.error("anomaly detect config must be digital")
-        return -1
-
-    # Load and prepare test data
-    X_scaled, y, X_original, raw_bow = load_and_prepare_data(
-        data_paths, scaler_path, config, config_dir)
-
-    # Load Model
-    try:
-        rf_model = joblib.load(model_path)
-    except FileNotFoundError:
-        logging.error(f"{model_path} file not found")
-        return -1
-    except PermissionError:
-        logging.error(f"No permission to load the {model_path} file. Please check the file permissions.")
-        return -1
-    except Exception as e:
-        logging.error(f"An unexpected error occurred while loading the random forest model. - {str(e)}")
+        result = predict_new_data({
+            'model': model,
+            'X_scaled': X_scaled,
+            'y': prepared['y'],
+            'X_original': X,
+            'metadata': prepared['metadata'],
+            'raw_bow': prepared['raw_bow'],
+            'labels': list(range(len(training_groups))),
+            'report_output_path': resolve_path(
+                config['classification_report_file'], config_dir),
+            'prediction_output_path': resolve_path(
+                config['predictions_detail_file'], config_dir),
+        })
+        logging.info(
+            '评估完成: labels=%d, input_values=%d, samples=%d',
+            len(training_groups), prepared['X'].shape[1],
+            len(result['predictions']))
+        return 0
+    except Exception as exc:
+        logging.exception('Evaluation failed: %s', exc)
         return -1
 
-    params = {
-        'model': rf_model,
-        'X_scaled': X_scaled,
-        'y': y,
-        'X_original': X_original,
-        'raw_bow': raw_bow,
-        'anomaly_detect_switch': anomaly_detect_switch,
-        'anomaly_detect_limit': anomaly_detect_limit,
-        'report_output_path': report_output_path,
-        'prediction_output_path': prediction_output_path
-    }
 
-    predict_new_data(params)
-
-    return 0
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     if len(sys.argv) != 2:
-        logging.info("Usage: python3 evaluation.py <path_to_config>")
+        logging.info('Usage: python3 evaluation.py <path_to_config>')
         sys.exit(1)
-    config_file = sys.argv[1]
-    res = KDADK_Evaluation(config_file)
-    if res == -1:
-        print("Error: Inference failed.")
+    sys.exit(0 if KDADK_Evaluation(sys.argv[1]) == 0 else 1)
