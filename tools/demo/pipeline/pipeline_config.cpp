@@ -3,6 +3,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "pipeline_config.h"
 
+#include <array>
 #include <filesystem>
 #include <cstring>
 #include <limits>
@@ -193,9 +194,124 @@ bool parse_backpressure(
     return true;
 }
 
+bool has_exact_features(
+    const std::vector<std::string> &features,
+    const std::unordered_set<std::string> &required)
+{
+    if (features.size() != required.size()) {
+        return false;
+    }
+    const std::unordered_set<std::string> configured(
+        features.cbegin(), features.cend());
+    return configured == required;
+}
+
+bool proxy_schema_exclusions(
+    const std::string &schema_name,
+    std::unordered_set<std::string> *excluded)
+{
+    if (schema_name == "proxy_endpoint_ablation_v1") {
+        *excluded = {"legacy.flow_id"};
+        return true;
+    }
+    if (schema_name == "ktag_proxy_v1") {
+        *excluded = {
+            "legacy.flow_id",
+            "network.src_ip",
+            "network.dst_ip",
+        };
+        return true;
+    }
+    if (schema_name == "proxy_no_endpoint_ablation_v1") {
+        *excluded = {
+            "legacy.flow_id",
+            "network.src_ip",
+            "network.dst_ip",
+            "network.src_port",
+            "network.dst_port",
+        };
+        return true;
+    }
+    return false;
+}
+
+bool validate_frozen_schema_selection(
+    const ktag_demo_pipeline_config &config,
+    std::string *error)
+{
+    if (config.schema_name == "ktag_legacy_v1") {
+        if (config.schema_version != 1U ||
+            !config.feature_order.empty() ||
+            !config.remove_features.empty() ||
+            !config.add_features.empty()) {
+            set_error(
+                error,
+                "ktag_legacy_v1 is a frozen 53-feature/354-value contract; "
+                "custom selections require a different Schema name/version");
+            return false;
+        }
+        return true;
+    }
+    std::unordered_set<std::string> required_exclusions;
+    if (!proxy_schema_exclusions(
+            config.schema_name, &required_exclusions)) {
+        return true;
+    }
+    if (config.schema_version != 1U) {
+        set_error(
+            error,
+            config.schema_name +
+                " requires pipeline.schema.version: 1");
+        return false;
+    }
+    if (!config.feature_order.empty()) {
+        set_error(
+            error,
+            config.schema_name +
+                " must use remove_features/add_features so its Built-in "
+                "and Proxy ordering remains auditable");
+        return false;
+    }
+    if (config.plugin_paths.empty()) {
+        set_error(
+            error,
+            config.schema_name +
+                " requires the official proxy Feature Plugin");
+        return false;
+    }
+    if (!has_exact_features(
+            config.remove_features, required_exclusions)) {
+        set_error(
+            error,
+            config.schema_name +
+                " remove_features does not match its frozen ablation "
+                "contract");
+        return false;
+    }
+    if (config.add_features.size() != 68U) {
+        set_error(
+            error,
+            config.schema_name +
+                " add_features must contain all 68 Proxy Feature "
+                "Descriptors in Catalog order");
+        return false;
+    }
+    for (const auto &feature_id : config.add_features) {
+        if (feature_id.rfind("proxy.", 0U) != 0U) {
+            set_error(
+                error,
+                config.schema_name +
+                    " add_features may contain only proxy.* Feature IDs");
+            return false;
+        }
+    }
+    return true;
+}
+
 bool parse_enabled_config(
     const YAML::Node &pipeline,
     const fs::path &config_directory,
+    bool feature_only,
     ktag_demo_pipeline_config *config,
     std::string *error)
 {
@@ -203,15 +319,16 @@ bool parse_enabled_config(
         return false;
     }
     const YAML::Node model_package_path = pipeline["model_package_path"];
-    if (!has_value(model_package_path) ||
-        !resolve_path(
+    if (!feature_only && has_value(model_package_path)) {
+        if (!resolve_path(
             config_directory,
             model_package_path.as<std::string>(),
             &config->model_package_path,
             error)) {
-        if (error != nullptr && error->empty()) {
-            *error = "pipeline.model_package_path is required";
+            return false;
         }
+    } else if (!feature_only) {
+        set_error(error, "pipeline.model_package_path is required");
         return false;
     }
 
@@ -222,7 +339,7 @@ bool parse_enabled_config(
     const YAML::Node schema = pipeline["schema"];
     if ((has_value(capture) && !capture.IsMap()) ||
         (has_value(feature) && !feature.IsMap()) ||
-        (has_value(inference) && !inference.IsMap()) ||
+        (!feature_only && has_value(inference) && !inference.IsMap()) ||
         (has_value(backpressure) && !backpressure.IsMap()) ||
         (has_value(schema) && !schema.IsMap())) {
         set_error(error, "pipeline nested configuration must use maps");
@@ -242,16 +359,36 @@ bool parse_enabled_config(
             has_value(feature) ? feature["lifecycle_mode"] : YAML::Node(),
             &config->lifecycle_mode,
             error) ||
-        !read_u32(inference, "threads", &config->inference_threads, error) ||
-        !read_u32(inference, "batch_size", &config->inference_batch_size, error) ||
-        !read_u32(inference, "queue_capacity", &config->feature_queue_capacity, error) ||
-        !read_u32(inference, "intra_op_threads", &config->inference_intra_op_threads, error) ||
-        !read_u32(inference, "inter_op_threads", &config->inference_inter_op_threads, error) ||
         !parse_backpressure(
             has_value(backpressure) ?
                 backpressure["policy"] : YAML::Node(),
             &config->backpressure,
             error)) {
+        return false;
+    }
+    if (!feature_only &&
+        (!read_u32(
+            inference, "threads", &config->inference_threads, error) ||
+         !read_u32(
+            inference,
+            "batch_size",
+            &config->inference_batch_size,
+            error) ||
+         !read_u32(
+            inference,
+            "queue_capacity",
+            &config->feature_queue_capacity,
+            error) ||
+         !read_u32(
+            inference,
+            "intra_op_threads",
+            &config->inference_intra_op_threads,
+            error) ||
+         !read_u32(
+            inference,
+            "inter_op_threads",
+            &config->inference_inter_op_threads,
+            error))) {
         return false;
     }
 
@@ -318,6 +455,10 @@ bool parse_enabled_config(
         return false;
     }
 
+    if (!validate_frozen_schema_selection(*config, error)) {
+        return false;
+    }
+
     return true;
 }
 
@@ -327,6 +468,7 @@ bool apply_overrides_and_normalize(
     std::string *error)
 {
     if (overrides != nullptr) {
+        config->feature_only = overrides->feature_only;
         if (overrides->mode_set) {
             config->mode = overrides->mode;
         }
@@ -360,6 +502,19 @@ bool apply_overrides_and_normalize(
         }
     }
 
+    if (config->feature_only) {
+        if (config->mode == ktag_demo_pipeline_mode::single_thread ||
+            config->mode == ktag_demo_pipeline_mode::staged) {
+            config->feature_threads = 1U;
+            config->inference_threads = 1U;
+        } else if (config->mode ==
+                   ktag_demo_pipeline_mode::feature_parallel) {
+            config->inference_threads = 1U;
+        } else {
+            config->inference_threads = config->feature_threads;
+        }
+        return true;
+    }
     if (config->mode == ktag_demo_pipeline_mode::single_thread ||
         config->mode == ktag_demo_pipeline_mode::staged) {
         config->feature_threads = 1U;
@@ -425,8 +580,14 @@ ktag_demo_load_pipeline_config_with_overrides(
 
         *config = {};
         config->enabled = true;
+        const bool feature_only =
+            overrides != nullptr && overrides->feature_only;
         if (!parse_enabled_config(
-                pipeline, absolute_config.parent_path(), config, error)) {
+                pipeline,
+                absolute_config.parent_path(),
+                feature_only,
+                config,
+                error)) {
             return ktag_demo_pipeline_config_result::error;
         }
         if (!apply_overrides_and_normalize(overrides, config, error)) {

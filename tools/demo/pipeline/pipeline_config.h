@@ -24,6 +24,7 @@ enum class ktag_demo_feature_lifecycle_mode {
 
 struct ktag_demo_pipeline_config {
     bool enabled = false;
+    bool feature_only = false;
     ktag_demo_pipeline_mode mode = ktag_demo_pipeline_mode::single_thread;
     std::string model_package_path;
 
@@ -59,6 +60,7 @@ struct ktag_demo_pipeline_config {
 /* Command-line values are optional. Zero thread counts mean "use YAML". */
 struct ktag_demo_pipeline_config_overrides {
     bool force_enable = false;
+    bool feature_only = false;
     bool mode_set = false;
     ktag_demo_pipeline_mode mode =
         ktag_demo_pipeline_mode::single_thread;

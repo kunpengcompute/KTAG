@@ -1,5 +1,9 @@
 .vscode/
-/docs/
+/docs/*
+!/docs/zh/
+/docs/zh/*
+!/docs/zh/proxy_protocol_identification_design.md
+!/docs/zh/vpn_proxy_identification_review_design.md
 /build/
 /output/
 /result/

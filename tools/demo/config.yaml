@@ -117,7 +117,12 @@ classification_report_file: ../../result/classification_report_2.txt
 predictions_detail_file: ../../result/predictions_detail_2.csv
 
 onnx_log_level: WARNING
-columns_to_remove: [0, 1, 2]
+# The active paths above are historical 354-column CSVs, so they keep the
+# historical [0, 1, 2] removal contract. Newly generated 366-column Schema
+# CSVs retain 12 meta.* columns and require [0..14] for application training;
+# do not change this value until training_data_paths/evaluation_data_paths are
+# replaced together. Training/evaluation now remove these columns in memory.
+columns_to_remove: []
 filter_packets: 16
 
 # New stage-7 orchestration is opt-in. With no pipeline CLI option this false
@@ -130,6 +135,8 @@ pipeline:
   # `kdadk_demo -t` automatically creates this Schema-bound model package
   # after writing the legacy ONNX/scaler files.
   model_package_path: ../../result/legacy_model_package
+  # Online -c/-j output retains numeric label/confidence and explicit IPv4/IPv6
+  # flow metadata. confidence=0 is valid; -1 means probability unavailable.
 
   capture:
     packet_pool_size: 65536
@@ -155,7 +162,12 @@ pipeline:
 
   plugins: []
   schema:
+    # Official application contract: 53 Feature Descriptors / 354 values,
+    # Hash 0xdd48882b53bebfa5. Do not reuse this name for custom selections.
     name: ktag_legacy_v1
     version: 1
     remove_features: []
     add_features: []
+
+  # The complete official proxy training/evaluation/inference configuration is
+  # proxy_config.yaml. It uses this same YAML structure and parser.
