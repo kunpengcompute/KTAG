@@ -224,6 +224,19 @@ TEST(KTAGFeatureBatch, AppendsDeepCopyAndValidatesSchemaWidth)
     metadata.flow_id = 42;
     metadata.first_packet_sequence = 10;
     metadata.last_packet_sequence = 20;
+    metadata.flow_key.address_a.version = 4U;
+    metadata.flow_key.address_a.bytes[0] = 192U;
+    metadata.flow_key.address_a.bytes[1] = 0U;
+    metadata.flow_key.address_a.bytes[2] = 2U;
+    metadata.flow_key.address_a.bytes[3] = 1U;
+    metadata.flow_key.address_b.version = 4U;
+    metadata.flow_key.address_b.bytes[0] = 198U;
+    metadata.flow_key.address_b.bytes[1] = 51U;
+    metadata.flow_key.address_b.bytes[2] = 100U;
+    metadata.flow_key.address_b.bytes[3] = 2U;
+    metadata.flow_key.port_a = 12345U;
+    metadata.flow_key.port_b = 443U;
+    metadata.flow_key.protocol = 6U;
     float values[] = {1.0F, 2.0F, 3.0F};
 
     EXPECT_EQ(KTAG_ERROR_SCHEMA_MISMATCH, ktag_feature_batch_append(batch, &metadata, values, 2));
@@ -237,6 +250,23 @@ TEST(KTAGFeatureBatch, AppendsDeepCopyAndValidatesSchemaWidth)
     EXPECT_EQ(3U, record.value_count);
     EXPECT_FLOAT_EQ(1.0F, record.values[0]);
     EXPECT_EQ(KTAG_ERROR_INVALID_ARGUMENT, ktag_feature_batch_get_record(batch, 1, &record));
+
+    ktag_feature_record_details details{};
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_batch_get_record_details(batch, 0U, &details));
+    EXPECT_EQ(42U, details.metadata.flow_id);
+    EXPECT_EQ(4U, details.source_address.version);
+    EXPECT_EQ(192U, details.source_address.bytes[0]);
+    EXPECT_EQ(4U, details.destination_address.version);
+    EXPECT_EQ(198U, details.destination_address.bytes[0]);
+    EXPECT_EQ(12345U, details.source_port);
+    EXPECT_EQ(443U, details.destination_port);
+    EXPECT_EQ(0U, details.ipv6_extension_packet_count);
+    EXPECT_EQ(0U, details.ip_fragment_first_packet_count);
+    EXPECT_EQ(
+        KTAG_ERROR_INVALID_ARGUMENT,
+        ktag_feature_batch_get_record_details(batch, 1U, &details));
 
     ktag_feature_batch_clear(batch);
     EXPECT_EQ(0U, ktag_feature_batch_get_count(batch));

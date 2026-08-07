@@ -16,12 +16,14 @@ void ktag_public_headers_c_compatibility_check(void)
     ktag_feature_descriptor descriptor = {0};
     ktag_feature_plugin_descriptor plugin = {0};
     ktag_feature_record_metadata metadata = {0};
+    ktag_feature_record_details record_details = {0};
     ktag_capture_config capture = {0};
     ktag_packet packet = {0};
     ktag_domain_store_config domain_store = {0};
     ktag_domain_cache_config domain_cache = {0};
     ktag_feature_config feature_config = {0};
     ktag_feature_statistics feature_statistics = {0};
+    ktag_packet_transport_view transport = {0};
     ktag_inference_config inference_config = {0};
     ktag_model_package_validation model_validation = {0};
     ktag_prediction_metadata prediction_metadata = {0};
@@ -33,6 +35,8 @@ void ktag_public_headers_c_compatibility_check(void)
     plugin.plugin_abi_version = KTAG_FEATURE_PLUGIN_ABI_VERSION;
     metadata.struct_size = sizeof(metadata);
     metadata.api_version = KTAG_API_VERSION;
+    record_details.struct_size = sizeof(record_details);
+    record_details.api_version = KTAG_API_VERSION;
     capture.struct_size = sizeof(capture);
     capture.api_version = KTAG_API_VERSION;
     ktag_packet_init(&packet);
@@ -44,6 +48,8 @@ void ktag_public_headers_c_compatibility_check(void)
     feature_config.api_version = KTAG_API_VERSION;
     feature_statistics.struct_size = sizeof(feature_statistics);
     feature_statistics.api_version = KTAG_API_VERSION;
+    transport.struct_size = sizeof(transport);
+    transport.api_version = KTAG_API_VERSION;
     inference_config.struct_size = sizeof(inference_config);
     inference_config.api_version = KTAG_API_VERSION;
     model_validation.struct_size = sizeof(model_validation);
@@ -55,12 +61,14 @@ void ktag_public_headers_c_compatibility_check(void)
     (void)descriptor;
     (void)plugin;
     (void)metadata;
+    (void)record_details;
     (void)capture;
     (void)packet;
     (void)domain_store;
     (void)domain_cache;
     (void)feature_config;
     (void)feature_statistics;
+    (void)transport;
     (void)inference_config;
     (void)model_validation;
     (void)prediction_metadata;

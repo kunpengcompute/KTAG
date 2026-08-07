@@ -66,6 +66,88 @@ std::vector<uint8_t> ipv6_frame(
     return frame;
 }
 
+std::vector<uint8_t> ipv6_frame_with_extension_chain(
+    const std::array<uint8_t, 16> &source,
+    uint16_t source_port,
+    const std::array<uint8_t, 16> &destination,
+    uint16_t destination_port,
+    uint32_t extension_count)
+{
+    constexpr size_t network_offset = 14U;
+    const size_t extension_bytes =
+        static_cast<size_t>(extension_count) * 8U;
+    const size_t payload_length = extension_bytes + 4U;
+    std::vector<uint8_t> frame(
+        network_offset + 40U + payload_length, 0U);
+    write_be16(&frame, 12U, 0x86ddU);
+    frame[network_offset] = 0x60U;
+    write_be16(
+        &frame,
+        network_offset + 4U,
+        static_cast<uint16_t>(payload_length));
+    frame[network_offset + 6U] =
+        extension_count == 0U ? 17U : 60U;
+    frame[network_offset + 7U] = 64U;
+    std::memcpy(
+        frame.data() + network_offset + 8U,
+        source.data(),
+        source.size());
+    std::memcpy(
+        frame.data() + network_offset + 24U,
+        destination.data(),
+        destination.size());
+    size_t offset = network_offset + 40U;
+    for (uint32_t index = 0U; index < extension_count; ++index) {
+        frame[offset] =
+            index + 1U == extension_count ? 17U : 60U;
+        frame[offset + 1U] = 0U;
+        offset += 8U;
+    }
+    write_be16(&frame, offset, source_port);
+    write_be16(&frame, offset + 2U, destination_port);
+    return frame;
+}
+
+std::vector<uint8_t> ipv6_fragment_frame(
+    const std::array<uint8_t, 16> &source,
+    uint16_t source_port,
+    const std::array<uint8_t, 16> &destination,
+    uint16_t destination_port,
+    uint16_t fragment_field)
+{
+    constexpr size_t network_offset = 14U;
+    constexpr size_t fragment_length = 8U;
+    constexpr size_t port_length = 4U;
+    std::vector<uint8_t> frame(
+        network_offset + 40U + fragment_length + port_length, 0U);
+    write_be16(&frame, 12U, 0x86ddU);
+    frame[network_offset] = 0x60U;
+    write_be16(
+        &frame,
+        network_offset + 4U,
+        fragment_length + port_length);
+    frame[network_offset + 6U] = 44U;
+    frame[network_offset + 7U] = 64U;
+    std::memcpy(
+        frame.data() + network_offset + 8U,
+        source.data(),
+        source.size());
+    std::memcpy(
+        frame.data() + network_offset + 24U,
+        destination.data(),
+        destination.size());
+    const size_t fragment = network_offset + 40U;
+    frame[fragment] = 17U;
+    write_be16(&frame, fragment + 2U, fragment_field);
+    write_be16(
+        &frame, fragment + fragment_length, source_port);
+    write_be16(
+        &frame,
+        fragment + fragment_length + 2U,
+        destination_port);
+    return frame;
+}
+
 ktag_packet packet_view(const std::vector<uint8_t> &data, uint32_t link_type)
 {
     ktag_packet packet{};
@@ -154,12 +236,21 @@ TEST(KTAGCaptureFlowKey, SupportedLinkTypesProduceTheSameFlowKey)
     std::vector<uint8_t> sll2(20U + raw.size(), 0U);
     write_be16(&sll2, 0U, 0x0800U);
     std::memcpy(sll2.data() + 20U, raw.data(), raw.size());
+    std::vector<uint8_t> qinq(22U + raw.size(), 0U);
+    write_be16(&qinq, 12U, 0x88a8U);
+    write_be16(&qinq, 14U, 1U);
+    write_be16(&qinq, 16U, 0x8100U);
+    write_be16(&qinq, 18U, 2U);
+    write_be16(&qinq, 20U, 0x0800U);
+    std::memcpy(qinq.data() + 22U, raw.data(), raw.size());
 
     const auto ethernet_packet = packet_view(
         ethernet, KTAG_CAPTURE_LINKTYPE_ETHERNET);
     const auto raw_packet = packet_view(raw, KTAG_CAPTURE_LINKTYPE_RAW);
     const auto sll_packet = packet_view(sll, KTAG_CAPTURE_LINKTYPE_LINUX_SLL);
     const auto sll2_packet = packet_view(sll2, KTAG_CAPTURE_LINKTYPE_LINUX_SLL2);
+    const auto qinq_packet = packet_view(
+        qinq, KTAG_CAPTURE_LINKTYPE_ETHERNET);
     ktag_flow_key expected{};
     ktag_flow_key actual{};
     ASSERT_EQ(KTAG_SUCCESS, ktag_packet_get_flow_key(&ethernet_packet, &expected));
@@ -168,6 +259,8 @@ TEST(KTAGCaptureFlowKey, SupportedLinkTypesProduceTheSameFlowKey)
     ASSERT_EQ(KTAG_SUCCESS, ktag_packet_get_flow_key(&sll_packet, &actual));
     expect_same_key(expected, actual);
     ASSERT_EQ(KTAG_SUCCESS, ktag_packet_get_flow_key(&sll2_packet, &actual));
+    expect_same_key(expected, actual);
+    ASSERT_EQ(KTAG_SUCCESS, ktag_packet_get_flow_key(&qinq_packet, &actual));
     expect_same_key(expected, actual);
 }
 
@@ -214,6 +307,78 @@ TEST(KTAGCaptureFlowKey, ReverseIPv6UdpPacketsHaveSameWorker)
         ktag_flow_select_worker(&reverse_key, 17U, 99U));
 }
 
+TEST(KTAGCaptureFlowKey, IPv6ExtensionChainKeepsTheSameFlowKey)
+{
+    std::array<uint8_t, 16> first{};
+    std::array<uint8_t, 16> second{};
+    first[0] = 0x20U;
+    first[1] = 0x01U;
+    first[15] = 1U;
+    second[0] = 0x20U;
+    second[1] = 0x01U;
+    second[15] = 2U;
+    const auto direct = ipv6_frame(first, 41000U, second, 443U);
+    const auto extended = ipv6_frame_with_extension_chain(
+        first, 41000U, second, 443U, 3U);
+    const auto direct_packet = packet_view(
+        direct, KTAG_CAPTURE_LINKTYPE_ETHERNET);
+    const auto extended_packet = packet_view(
+        extended, KTAG_CAPTURE_LINKTYPE_ETHERNET);
+
+    ktag_flow_key expected{};
+    ktag_flow_key actual{};
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_packet_get_flow_key(&direct_packet, &expected));
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_packet_get_flow_key(&extended_packet, &actual));
+    expect_same_key(expected, actual);
+}
+
+TEST(KTAGCaptureFlowKey, IPv6FragmentAndExtensionLimitsAreBounded)
+{
+    std::array<uint8_t, 16> first{};
+    std::array<uint8_t, 16> second{};
+    first[0] = 0x20U;
+    first[1] = 0x01U;
+    first[15] = 1U;
+    second[0] = 0x20U;
+    second[1] = 0x01U;
+    second[15] = 2U;
+
+    const auto atomic = ipv6_fragment_frame(
+        first, 41000U, second, 443U, 0U);
+    const auto non_initial = ipv6_fragment_frame(
+        first, 41000U, second, 443U, 8U);
+    const auto too_many = ipv6_frame_with_extension_chain(
+        first, 41000U, second, 443U, 9U);
+    auto jumbogram = ipv6_frame(first, 41000U, second, 443U);
+    write_be16(&jumbogram, 14U + 4U, 0U);
+
+    ktag_flow_key key{};
+    auto packet = packet_view(
+        atomic, KTAG_CAPTURE_LINKTYPE_ETHERNET);
+    EXPECT_EQ(
+        KTAG_SUCCESS,
+        ktag_packet_get_flow_key(&packet, &key));
+    packet = packet_view(
+        non_initial, KTAG_CAPTURE_LINKTYPE_ETHERNET);
+    EXPECT_EQ(
+        KTAG_ERROR_NOT_FOUND,
+        ktag_packet_get_flow_key(&packet, &key));
+    packet = packet_view(
+        too_many, KTAG_CAPTURE_LINKTYPE_ETHERNET);
+    EXPECT_EQ(
+        KTAG_ERROR_NOT_SUPPORTED,
+        ktag_packet_get_flow_key(&packet, &key));
+    packet = packet_view(
+        jumbogram, KTAG_CAPTURE_LINKTYPE_ETHERNET);
+    EXPECT_EQ(
+        KTAG_ERROR_NOT_SUPPORTED,
+        ktag_packet_get_flow_key(&packet, &key));
+}
+
 TEST(KTAGCaptureFlowKey, NonInitialIPv4FragmentUsesFallbackPath)
 {
     const std::array<uint8_t, 4> first = {192U, 0U, 2U, 1U};
@@ -255,6 +420,16 @@ TEST(KTAGCapturePacketBuffer, BorrowedPacketCanBecomeReferenceCountedOwnedCopy)
     EXPECT_EQ(1U, duplicate.data[0]);
     ktag_packet_release(&duplicate);
     EXPECT_EQ(0U, ktag_packet_is_owned(&duplicate));
+}
+
+TEST(KTAGCaptureDevices, IPv6AccessorsRejectInvalidViews)
+{
+    EXPECT_EQ(
+        0U,
+        ktag_capture_device_list_get_ipv6_count(nullptr, 0U));
+    EXPECT_EQ(
+        nullptr,
+        ktag_capture_device_list_get_ipv6(nullptr, 0U, 0U));
 }
 
 TEST(KTAGCaptureSource, OfflineBorrowedAndOwnedModesPreservePacketContract)
