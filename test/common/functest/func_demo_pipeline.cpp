@@ -709,4 +709,516 @@ TEST(KTAGDemoFeaturePlugin, RejectsInvalidPluginsAndUnloadsValidPlugin)
     EXPECT_EQ(0U, loader.size());
 }
 
+TEST(KTAGDemoPipelineConfig, FeatureOnlyDoesNotRequireModelOrInference)
+{
+    const std::string path = write_config(
+        "pipeline:\n"
+        "  enabled: false\n"
+        "  mode: full_parallel\n"
+        "  model_package_path: [ignored, in, feature, mode]\n"
+        "  feature:\n"
+        "    threads: 3\n"
+        "    lifecycle_mode: modern\n"
+        "  inference: ignored\n"
+        "  schema:\n"
+        "    name: ktag_legacy_v1\n"
+        "    version: 1\n");
+    ktag_demo_pipeline_config_overrides overrides;
+    overrides.force_enable = true;
+    overrides.feature_only = true;
+    ktag_demo_pipeline_config config;
+    std::string error;
+    ASSERT_EQ(
+        ktag_demo_pipeline_config_result::enabled,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error))
+        << error;
+    EXPECT_TRUE(config.feature_only);
+    EXPECT_TRUE(config.model_package_path.empty());
+    EXPECT_EQ(3U, config.feature_threads);
+    EXPECT_EQ(3U, config.inference_threads);
+    EXPECT_EQ(
+        ktag_demo_feature_lifecycle_mode::modern,
+        config.lifecycle_mode);
+
+    ktag_demo_pipeline_config inference_config;
+    ktag_demo_pipeline_config_overrides inference_overrides;
+    inference_overrides.force_enable = true;
+    error.clear();
+    EXPECT_EQ(
+        ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(),
+            &inference_overrides,
+            &inference_config,
+            &error));
+    EXPECT_FALSE(error.empty());
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsMutationOfFrozenOfficialSchemaNames)
+{
+    ktag_demo_pipeline_config_overrides overrides;
+    overrides.force_enable = true;
+    overrides.feature_only = true;
+    ktag_demo_pipeline_config config;
+    std::string error;
+
+    std::string path = write_config(
+        "pipeline:\n"
+        "  enabled: true\n"
+        "  plugins: [/tmp/libktag_proxy_features.so]\n"
+        "  schema:\n"
+        "    name: ktag_proxy_v1\n"
+        "    version: 1\n"
+        "    remove_features:\n"
+        "      - legacy.flow_id\n"
+        "      - network.src_ip\n"
+        "      - network.dst_ip\n"
+        "    add_features: [proxy.incomplete]\n");
+    EXPECT_EQ(
+        ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error));
+    EXPECT_NE(std::string::npos, error.find("68"));
+
+    path = write_config(
+        "pipeline:\n"
+        "  enabled: true\n"
+        "  plugins: [/tmp/libktag_proxy_features.so]\n"
+        "  schema:\n"
+        "    name: proxy_endpoint_ablation_v1\n"
+        "    version: 1\n"
+        "    remove_features:\n"
+        "      - legacy.flow_id\n"
+        "      - network.src_ip\n"
+        "      - network.dst_ip\n"
+        "    add_features: [proxy.incomplete]\n");
+    error.clear();
+    EXPECT_EQ(
+        ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error));
+    EXPECT_NE(std::string::npos, error.find("frozen ablation"));
+
+    path = write_config(
+        "pipeline:\n"
+        "  enabled: true\n"
+        "  schema:\n"
+        "    name: ktag_legacy_v1\n"
+        "    version: 1\n"
+        "    add_features: [customer.feature]\n");
+    error.clear();
+    EXPECT_EQ(
+        ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error));
+    EXPECT_NE(std::string::npos, error.find("frozen"));
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoOnlineInferenceContract, PreflightsApplicationAndProxySeparately)
+{
+    const fs::path root = fs::temp_directory_path() /
+        ("ktag_online_contract_" + std::to_string(getpid()));
+    ktag_feature_schema *application =
+        ktag_feature_schema_create_legacy_v1();
+    ASSERT_NE(nullptr, application);
+    ASSERT_EQ(
+        0xdd48882b53bebfa5ULL,
+        ktag_feature_schema_get_hash(application));
+    const fs::path application_package = root / "application";
+    ASSERT_TRUE(write_contract_package(
+        application_package,
+        application,
+        {"legacy.flow_id", "network.src_ip", "network.dst_ip"}));
+
+    ktag_demo_pipeline_config application_config;
+    application_config.enabled = true;
+    application_config.mode = ktag_demo_pipeline_mode::single_thread;
+    application_config.feature_threads = 1U;
+    application_config.inference_threads = 1U;
+    application_config.model_package_path = application_package.string();
+    const std::string application_output =
+        (root / "application.csv").string();
+    EXPECT_EQ(
+        0,
+        ktag_demo_run_pipeline(
+            application_config,
+            "functest-application",
+            nullptr,
+            0,
+            nullptr,
+            application_output.c_str(),
+            ktag_demo_pipeline_output_format::csv));
+
+    const fs::path invalid_application_package = root / "application_invalid";
+    ASSERT_TRUE(write_contract_package(
+        invalid_application_package,
+        application,
+        {
+            "legacy.flow_id",
+            "network.src_ip",
+            "network.dst_ip",
+            "network.protocol",
+        }));
+    application_config.model_package_path =
+        invalid_application_package.string();
+    EXPECT_NE(
+        0,
+        ktag_demo_run_pipeline(
+            application_config,
+            "functest-application-invalid",
+            nullptr,
+            0,
+            nullptr,
+            application_output.c_str(),
+            ktag_demo_pipeline_output_format::csv));
+    ktag_feature_schema_destroy(application);
+
+    ktag_feature_schema *proxy = make_proxy_v1_schema();
+    ASSERT_NE(nullptr, proxy);
+    ASSERT_EQ(118U, ktag_feature_schema_get_feature_count(proxy));
+    ASSERT_EQ(619U, ktag_feature_schema_get_value_count(proxy));
+    ASSERT_EQ(
+        0xca1eae5086b41ee5ULL,
+        ktag_feature_schema_get_hash(proxy));
+    const fs::path proxy_package = root / "proxy";
+    ASSERT_TRUE(write_contract_package(proxy_package, proxy, {}));
+
+    ktag_demo_pipeline_config proxy_config;
+    proxy_config.enabled = true;
+    proxy_config.mode = ktag_demo_pipeline_mode::single_thread;
+    proxy_config.feature_threads = 1U;
+    proxy_config.inference_threads = 1U;
+    proxy_config.model_package_path = proxy_package.string();
+    proxy_config.schema_name = "ktag_proxy_v1";
+    proxy_config.schema_version = 1U;
+    proxy_config.plugin_paths = {PROXY_PLUGIN};
+    proxy_config.remove_features = {
+        "legacy.flow_id", "network.src_ip", "network.dst_ip"};
+    add_proxy_feature_ids(&proxy_config);
+    const std::string proxy_output = (root / "proxy.csv").string();
+    EXPECT_EQ(
+        0,
+        ktag_demo_run_pipeline(
+            proxy_config,
+            "functest-proxy",
+            nullptr,
+            0,
+            nullptr,
+            proxy_output.c_str(),
+            ktag_demo_pipeline_output_format::csv));
+    ktag_feature_schema_destroy(proxy);
+
+    std::error_code ignored;
+    fs::remove_all(root, ignored);
+}
+
+TEST(KTAGDemoSchemaFeatureWriter, ExpandsSchemaAndQuotesIpv6Metadata)
+{
+    ktag_feature_schema *schema =
+        ktag_feature_schema_create("writer_test_v1", 1U);
+    ASSERT_NE(nullptr, schema);
+    ktag_feature_descriptor scalar{};
+    scalar.struct_size = sizeof(scalar);
+    scalar.api_version = KTAG_API_VERSION;
+    scalar.feature_id = "test.scalar";
+    scalar.display_name = "Scalar";
+    scalar.provider_id = "test.writer";
+    scalar.provider_version = 1U;
+    scalar.value_type = KTAG_FEATURE_FLOAT32;
+    scalar.dimension = 1U;
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_add(schema, &scalar));
+    ktag_feature_descriptor vector = scalar;
+    vector.feature_id = "test.vector";
+    vector.display_name = "Vector";
+    vector.dimension = 2U;
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_add(schema, &vector));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(schema));
+
+    ktag_demo_schema_feature_record record;
+    record.details.struct_size = sizeof(record.details);
+    record.details.api_version = KTAG_API_VERSION;
+    auto &metadata = record.details.metadata;
+    metadata.struct_size = sizeof(metadata);
+    metadata.api_version = KTAG_API_VERSION;
+    metadata.flow_id = 7U;
+    metadata.first_packet_sequence = 11U;
+    metadata.last_packet_sequence = 19U;
+    metadata.flow_key.address_a.version = 6U;
+    metadata.flow_key.address_b.version = 6U;
+    ASSERT_EQ(
+        1,
+        inet_pton(
+            AF_INET6,
+            "2001:db8::1",
+            metadata.flow_key.address_a.bytes));
+    ASSERT_EQ(
+        1,
+        inet_pton(
+            AF_INET6,
+            "2001:db8::2",
+            metadata.flow_key.address_b.bytes));
+    metadata.flow_key.port_a = 443U;
+    metadata.flow_key.port_b = 50000U;
+    metadata.flow_key.protocol = 6U;
+    record.details.source_address = metadata.flow_key.address_b;
+    record.details.destination_address = metadata.flow_key.address_a;
+    record.details.source_port = 50000U;
+    record.details.destination_port = 443U;
+    record.details.ipv6_extension_packet_count = 2U;
+    record.details.ip_fragment_first_packet_count = 1U;
+    record.values = {1.25F, 2.0F, 3.0F};
+
+    const std::string output_path =
+        "/tmp/ktag_schema_writer_" + std::to_string(getpid()) + ".csv";
+    std::string error;
+    ASSERT_TRUE(ktag_demo_write_schema_feature_csv(
+        output_path.c_str(), schema, {record}, &error)) << error;
+    std::ifstream input(output_path);
+    ASSERT_TRUE(input.good());
+    std::string header;
+    std::string row;
+    ASSERT_TRUE(static_cast<bool>(std::getline(input, header)));
+    ASSERT_TRUE(static_cast<bool>(std::getline(input, row)));
+    EXPECT_EQ(
+        "meta.flow_id,meta.ip_version,meta.src_ip,meta.dst_ip,"
+        "meta.src_port,meta.dst_port,meta.protocol,meta.flow_key,"
+        "meta.ipv6_extension_packet_count,"
+        "meta.ip_fragment_first_packet_count,"
+        "meta.first_packet_sequence,meta.last_packet_sequence,"
+        "test.scalar,test.vector[0],test.vector[1]",
+        header);
+    EXPECT_NE(std::string::npos, row.find("\"2001:db8::2\""));
+    EXPECT_NE(
+        std::string::npos,
+        row.find(
+            "\"[2001:db8::1]:443-[2001:db8::2]:50000/6\""));
+    EXPECT_NE(std::string::npos, row.find(",2,1,11,19,1.25,2,3"));
+
+    std::remove(output_path.c_str());
+    ktag_feature_schema_destroy(schema);
+}
+
+TEST(KTAGDemoPredictionWriter, WritesDualStackMetadataAndConfidenceContract)
+{
+    const std::vector<ktag_demo_pipeline_prediction> predictions{
+        make_prediction(false, 5, 0.0F, 7U),
+        make_prediction(
+            true,
+            9,
+            KTAG_INFERENCE_CONFIDENCE_UNAVAILABLE,
+            8U),
+    };
+    const std::string prefix =
+        "/tmp/ktag_prediction_writer_" + std::to_string(getpid());
+    const std::string csv_path = prefix + ".csv";
+    const std::string json_path = prefix + ".json";
+    std::string error;
+    ASSERT_TRUE(ktag_demo_write_pipeline_predictions(
+        csv_path.c_str(),
+        ktag_demo_pipeline_output_format::csv,
+        predictions,
+        &error)) << error;
+    ASSERT_TRUE(ktag_demo_write_pipeline_predictions(
+        json_path.c_str(),
+        ktag_demo_pipeline_output_format::json,
+        predictions,
+        &error)) << error;
+
+    const std::string csv = read_text_file(csv_path);
+    const std::string json = read_text_file(json_path);
+    EXPECT_EQ(
+        0U,
+        csv.find(
+            "source_index,flow_id,ip_version,src_ip,dst_ip,src_port,"
+            "dst_port,protocol,flow_key,first_packet_sequence,"
+            "last_packet_sequence,label,confidence\n"));
+    EXPECT_NE(std::string::npos, csv.find("\"198.51.100.10\""));
+    EXPECT_NE(std::string::npos, csv.find("\"2001:db8::2\""));
+    EXPECT_NE(
+        std::string::npos,
+        csv.find(
+            "\"[2001:db8::1]:443-[2001:db8::2]:50000/17\""));
+    EXPECT_NE(std::string::npos, csv.find(",5,0\n"));
+    EXPECT_NE(std::string::npos, csv.find(",9,-1\n"));
+
+    EXPECT_NE(std::string::npos, json.find("\"ip_version\":4"));
+    EXPECT_NE(std::string::npos, json.find("\"ip_version\":6"));
+    EXPECT_NE(std::string::npos, json.find("\"label\":5,\"confidence\":0"));
+    EXPECT_NE(std::string::npos, json.find("\"label\":9,\"confidence\":-1"));
+    EXPECT_EQ(std::string::npos, json.find("unknown"));
+    EXPECT_EQ(std::string::npos, json.find("label_name"));
+
+    auto invalid = predictions;
+    invalid[0U].record.confidence = -0.5F;
+    EXPECT_FALSE(ktag_demo_write_pipeline_predictions(
+        (prefix + "_invalid.csv").c_str(),
+        ktag_demo_pipeline_output_format::csv,
+        invalid,
+        &error));
+    EXPECT_NE(std::string::npos, error.find("confidence"));
+
+    std::remove(csv_path.c_str());
+    std::remove(json_path.c_str());
+    std::remove((prefix + "_invalid.csv").c_str());
+}
+
+TEST(KTAGDemoSchemaFeaturePipeline, FlushesSameApplicationCsvInAllModes)
+{
+    struct mode_case {
+        ktag_demo_pipeline_mode mode;
+        uint32_t feature_threads;
+        uint32_t output_threads;
+    };
+    const std::array<mode_case, 4U> modes{{
+        {ktag_demo_pipeline_mode::single_thread, 1U, 1U},
+        {ktag_demo_pipeline_mode::staged, 1U, 1U},
+        {ktag_demo_pipeline_mode::feature_parallel, 3U, 1U},
+        {ktag_demo_pipeline_mode::full_parallel, 3U, 3U},
+    }};
+    const std::string pcap_path = write_test_pcap();
+    const char *pcap_files[] = {pcap_path.c_str()};
+    std::string expected_csv;
+
+    for (const auto &test_case : modes) {
+        ktag_demo_pipeline_config config;
+        config.enabled = true;
+        config.feature_only = true;
+        config.mode = test_case.mode;
+        config.feature_threads = test_case.feature_threads;
+        config.inference_threads = test_case.output_threads;
+        config.lifecycle_mode = ktag_demo_feature_lifecycle_mode::modern;
+
+        const std::string output_path =
+            "/tmp/ktag_schema_pipeline_" + std::to_string(getpid()) + "_" +
+            ktag_demo_pipeline_mode_name(test_case.mode) + ".csv";
+        ASSERT_EQ(
+            0,
+            ktag_demo_run_pipeline(
+                config,
+                "functest",
+                pcap_files,
+                1,
+                nullptr,
+                output_path.c_str(),
+                ktag_demo_pipeline_output_format::csv))
+            << ktag_demo_pipeline_mode_name(test_case.mode);
+
+        const std::string csv = read_text_file(output_path);
+        ASSERT_FALSE(csv.empty());
+        const size_t first_newline = csv.find('\n');
+        ASSERT_NE(std::string::npos, first_newline);
+        const std::string header = csv.substr(0U, first_newline);
+        EXPECT_EQ(
+            366U,
+            static_cast<uint32_t>(
+                std::count(header.begin(), header.end(), ',')) + 1U);
+        EXPECT_EQ(2, std::count(csv.begin(), csv.end(), '\n'));
+        if (expected_csv.empty()) {
+            expected_csv = csv;
+        } else {
+            EXPECT_EQ(expected_csv, csv)
+                << ktag_demo_pipeline_mode_name(test_case.mode);
+        }
+        std::remove(output_path.c_str());
+    }
+    std::remove(pcap_path.c_str());
+}
+
+TEST(KTAGDemoDualStackPipeline, SkipsUnsupportedIpv6AndContinues)
+{
+    const std::string pcap_path = write_test_pcap_frames(
+        {
+            make_ipv6_non_initial_fragment(),
+            make_ipv6_frame(50U, std::vector<uint8_t>(8U, 0U)),
+            make_ipv6_frame(253U, std::vector<uint8_t>(8U, 0U)),
+            make_ipv6_udp_frame(),
+        },
+        "unsupported_then_valid_ipv6");
+    const char *pcap_files[] = {pcap_path.c_str()};
+    struct mode_case {
+        ktag_demo_pipeline_mode mode;
+        uint32_t feature_threads;
+        uint32_t output_threads;
+    };
+    const std::array<mode_case, 2U> modes{{
+        {ktag_demo_pipeline_mode::single_thread, 1U, 1U},
+        {ktag_demo_pipeline_mode::full_parallel, 2U, 2U},
+    }};
+
+    for (const auto &test_case : modes) {
+        ktag_demo_pipeline_config config;
+        config.enabled = true;
+        config.feature_only = true;
+        config.mode = test_case.mode;
+        config.feature_threads = test_case.feature_threads;
+        config.inference_threads = test_case.output_threads;
+        config.lifecycle_mode = ktag_demo_feature_lifecycle_mode::modern;
+        const std::string output_path =
+            "/tmp/ktag_dual_stack_skip_" + std::to_string(getpid()) + "_" +
+            ktag_demo_pipeline_mode_name(test_case.mode) + ".csv";
+
+        testing::internal::CaptureStdout();
+        const int result = ktag_demo_run_pipeline(
+            config,
+            "functest",
+            pcap_files,
+            1,
+            nullptr,
+            output_path.c_str(),
+            ktag_demo_pipeline_output_format::csv);
+        const std::string console = testing::internal::GetCapturedStdout();
+        ASSERT_EQ(0, result) << ktag_demo_pipeline_mode_name(test_case.mode);
+
+        const std::string csv = read_text_file(output_path);
+        EXPECT_EQ(2, std::count(csv.begin(), csv.end(), '\n'));
+        EXPECT_NE(std::string::npos, csv.find(",6,\"2001:db8::10\","));
+        const std::string marker = "不支持数据包:";
+        const size_t marker_position = console.find(marker);
+        ASSERT_NE(std::string::npos, marker_position);
+        const size_t value_position = console.find_first_not_of(
+            " \t", marker_position + marker.size());
+        ASSERT_NE(std::string::npos, value_position);
+        EXPECT_EQ('3', console[value_position]);
+        std::remove(output_path.c_str());
+    }
+    std::remove(pcap_path.c_str());
+}
+
+TEST(KTAGDemoSchemaFeaturePipeline, RejectsMissingPluginAndSchemaFeature)
+{
+    ktag_demo_pipeline_config config;
+    config.enabled = true;
+    config.feature_only = true;
+    config.mode = ktag_demo_pipeline_mode::single_thread;
+    config.feature_threads = 1U;
+    config.inference_threads = 1U;
+    config.plugin_paths = {"/tmp/ktag_plugin_does_not_exist.so"};
+    EXPECT_NE(
+        0,
+        ktag_demo_run_pipeline(
+            config,
+            "functest",
+            nullptr,
+            0,
+            nullptr,
+            "/tmp/ktag_unused.csv",
+            ktag_demo_pipeline_output_format::csv));
+
+    config.plugin_paths.clear();
+    config.feature_order = {"missing.feature"};
+    EXPECT_NE(
+        0,
+        ktag_demo_run_pipeline(
+            config,
+            "functest",
+            nullptr,
+            0,
+            nullptr,
+            "/tmp/ktag_unused.csv",
+            ktag_demo_pipeline_output_format::csv));
+}
+
 } // namespace
