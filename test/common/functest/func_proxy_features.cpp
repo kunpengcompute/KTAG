@@ -1632,4 +1632,391 @@ TEST(KTAGProxyTcpSignature, DetectsCleartextCarriersOnlyOutsideTls)
     }
 }
 
+TEST(KTAGProxyQuic, ParsesV1V2VersionNegotiationAndOtherVersion)
+{
+    using ktag_proxy_features::quic_header_type;
+    const auto v1_initial = make_quic_long_packet(
+        ktag_proxy_features::KTAG_QUIC_VERSION_1,
+        quic_header_type::initial,
+        3U);
+    const auto v2_initial = make_quic_long_packet(
+        ktag_proxy_features::KTAG_QUIC_VERSION_2,
+        quic_header_type::initial,
+        64U);
+    const auto negotiation = make_quic_version_negotiation();
+    const auto other = make_unknown_quic_long();
+
+    quic_harness harness;
+    ASSERT_TRUE(harness.valid());
+    ASSERT_TRUE(harness.process(
+        make_udp_frame_with_payload(
+            false, false, v1_initial),
+        1U));
+    ASSERT_TRUE(harness.process(
+        make_udp_frame_with_payload(
+            false, true, v2_initial),
+        2U));
+    ASSERT_TRUE(harness.process(
+        make_udp_frame_with_payload(
+            false, false, negotiation),
+        3U));
+    ASSERT_TRUE(harness.process(
+        make_udp_frame_with_payload(
+            false, false, other),
+        4U));
+    ASSERT_TRUE(harness.finish());
+
+    const float *candidate =
+        harness.feature(QUIC_PACKET_CANDIDATE_COUNT);
+    const float *success =
+        harness.feature(QUIC_PARSE_SUCCESS_COUNT);
+    const float *failure =
+        harness.feature(QUIC_PARSE_FAILURE_COUNT);
+    const float *fixed = harness.feature(QUIC_FIXED_BIT_COUNT);
+    const float *long_header =
+        harness.feature(QUIC_LONG_HEADER_COUNT);
+    const float *v1 = harness.feature(QUIC_VERSION_V1_COUNT);
+    const float *v2 = harness.feature(QUIC_VERSION_V2_COUNT);
+    const float *version_other =
+        harness.feature(QUIC_VERSION_OTHER_COUNT);
+    const float *version_negotiation =
+        harness.feature(QUIC_VERSION_NEGOTIATION_COUNT);
+    const float *initial = harness.feature(QUIC_INITIAL_COUNT);
+    const float *first_initial =
+        harness.feature(QUIC_FIRST_INITIAL_LENGTH_LOG2);
+    const float *dcid = harness.feature(QUIC_FIRST_DCID_LENGTH);
+    const float *scid = harness.feature(QUIC_FIRST_SCID_LENGTH);
+    const float *token =
+        harness.feature(QUIC_FIRST_TOKEN_LENGTH_LOG2);
+    const float *lengths =
+        harness.feature(QUIC_SIGNED_DATAGRAM_LENGTH, 16U);
+    const float *types =
+        harness.feature(QUIC_HEADER_TYPE_SEQUENCE, 16U);
+    const float *sequence_count =
+        harness.feature(QUIC_SEQUENCE_VALID_COUNT);
+    ASSERT_NE(nullptr, candidate);
+    ASSERT_NE(nullptr, success);
+    ASSERT_NE(nullptr, failure);
+    ASSERT_NE(nullptr, fixed);
+    ASSERT_NE(nullptr, long_header);
+    ASSERT_NE(nullptr, v1);
+    ASSERT_NE(nullptr, v2);
+    ASSERT_NE(nullptr, version_other);
+    ASSERT_NE(nullptr, version_negotiation);
+    ASSERT_NE(nullptr, initial);
+    ASSERT_NE(nullptr, first_initial);
+    ASSERT_NE(nullptr, dcid);
+    ASSERT_NE(nullptr, scid);
+    ASSERT_NE(nullptr, token);
+    ASSERT_NE(nullptr, lengths);
+    ASSERT_NE(nullptr, types);
+    ASSERT_NE(nullptr, sequence_count);
+
+    EXPECT_FLOAT_EQ(4.0F, candidate[0U]);
+    EXPECT_FLOAT_EQ(4.0F, success[0U]);
+    EXPECT_FLOAT_EQ(0.0F, failure[0U]);
+    EXPECT_FLOAT_EQ(3.0F, fixed[0U]);
+    EXPECT_FLOAT_EQ(4.0F, long_header[0U]);
+    EXPECT_FLOAT_EQ(1.0F, v1[0U]);
+    EXPECT_FLOAT_EQ(1.0F, v2[0U]);
+    EXPECT_FLOAT_EQ(1.0F, version_other[0U]);
+    EXPECT_FLOAT_EQ(1.0F, version_negotiation[0U]);
+    EXPECT_FLOAT_EQ(2.0F, initial[0U]);
+    EXPECT_FLOAT_EQ(
+        expected_log2(v1_initial.size()), first_initial[0U]);
+    EXPECT_FLOAT_EQ(8.0F, dcid[0U]);
+    EXPECT_FLOAT_EQ(4.0F, scid[0U]);
+    EXPECT_FLOAT_EQ(expected_log2(3U), token[0U]);
+    EXPECT_FLOAT_EQ(
+        static_cast<float>(v1_initial.size()), lengths[0U]);
+    EXPECT_FLOAT_EQ(
+        -static_cast<float>(v2_initial.size()), lengths[1U]);
+    EXPECT_FLOAT_EQ(
+        static_cast<float>(negotiation.size()), lengths[2U]);
+    EXPECT_FLOAT_EQ(
+        static_cast<float>(other.size()), lengths[3U]);
+    EXPECT_FLOAT_EQ(2.0F, types[0U]);
+    EXPECT_FLOAT_EQ(2.0F, types[1U]);
+    EXPECT_FLOAT_EQ(1.0F, types[2U]);
+    EXPECT_FLOAT_EQ(0.0F, types[3U]);
+    EXPECT_FLOAT_EQ(4.0F, sequence_count[0U]);
+}
+
+TEST(KTAGProxyQuic, ClassifiesLongAndShortHeaderTypes)
+{
+    using ktag_proxy_features::quic_header_type;
+    const std::array<std::pair<uint32_t, quic_header_type>, 6U>
+        packets{{
+            {ktag_proxy_features::KTAG_QUIC_VERSION_1,
+             quic_header_type::zero_rtt},
+            {ktag_proxy_features::KTAG_QUIC_VERSION_1,
+             quic_header_type::handshake},
+            {ktag_proxy_features::KTAG_QUIC_VERSION_1,
+             quic_header_type::retry},
+            {ktag_proxy_features::KTAG_QUIC_VERSION_2,
+             quic_header_type::zero_rtt},
+            {ktag_proxy_features::KTAG_QUIC_VERSION_2,
+             quic_header_type::handshake},
+            {ktag_proxy_features::KTAG_QUIC_VERSION_2,
+             quic_header_type::retry},
+        }};
+
+    quic_harness harness;
+    ASSERT_TRUE(harness.valid());
+    uint64_t sequence = 1U;
+    for (const auto &packet : packets) {
+        ASSERT_TRUE(harness.process(
+            make_udp_frame_with_payload(
+                false,
+                false,
+                make_quic_long_packet(packet.first, packet.second)),
+            sequence++));
+    }
+    ASSERT_TRUE(harness.process(
+        make_udp_frame_with_payload(
+            false, true, make_quic_short_packet()),
+        sequence));
+    ASSERT_TRUE(harness.finish());
+
+    const float *candidate =
+        harness.feature(QUIC_PACKET_CANDIDATE_COUNT);
+    const float *success =
+        harness.feature(QUIC_PARSE_SUCCESS_COUNT);
+    const float *fixed = harness.feature(QUIC_FIXED_BIT_COUNT);
+    const float *long_header =
+        harness.feature(QUIC_LONG_HEADER_COUNT);
+    const float *short_header =
+        harness.feature(QUIC_SHORT_HEADER_COUNT);
+    const float *v1 = harness.feature(QUIC_VERSION_V1_COUNT);
+    const float *v2 = harness.feature(QUIC_VERSION_V2_COUNT);
+    const float *zero_rtt = harness.feature(QUIC_ZERO_RTT_COUNT);
+    const float *handshake = harness.feature(QUIC_HANDSHAKE_COUNT);
+    const float *retry = harness.feature(QUIC_RETRY_COUNT);
+    const float *types =
+        harness.feature(QUIC_HEADER_TYPE_SEQUENCE, 16U);
+    ASSERT_NE(nullptr, candidate);
+    ASSERT_NE(nullptr, success);
+    ASSERT_NE(nullptr, fixed);
+    ASSERT_NE(nullptr, long_header);
+    ASSERT_NE(nullptr, short_header);
+    ASSERT_NE(nullptr, v1);
+    ASSERT_NE(nullptr, v2);
+    ASSERT_NE(nullptr, zero_rtt);
+    ASSERT_NE(nullptr, handshake);
+    ASSERT_NE(nullptr, retry);
+    ASSERT_NE(nullptr, types);
+    EXPECT_FLOAT_EQ(7.0F, candidate[0U]);
+    EXPECT_FLOAT_EQ(7.0F, success[0U]);
+    EXPECT_FLOAT_EQ(7.0F, fixed[0U]);
+    EXPECT_FLOAT_EQ(6.0F, long_header[0U]);
+    EXPECT_FLOAT_EQ(1.0F, short_header[0U]);
+    EXPECT_FLOAT_EQ(3.0F, v1[0U]);
+    EXPECT_FLOAT_EQ(3.0F, v2[0U]);
+    EXPECT_FLOAT_EQ(2.0F, zero_rtt[0U]);
+    EXPECT_FLOAT_EQ(2.0F, handshake[0U]);
+    EXPECT_FLOAT_EQ(2.0F, retry[0U]);
+    const std::array<float, 7U> expected{{
+        3.0F, 4.0F, 5.0F, 3.0F, 4.0F, 5.0F, 6.0F,
+    }};
+    for (size_t index = 0U; index < expected.size(); ++index) {
+        EXPECT_FLOAT_EQ(expected[index], types[index]);
+    }
+}
+
+TEST(KTAGProxyQuic, HandlesMalformedRandomAndSalamanderPayloads)
+{
+    std::vector<uint8_t> bad_dcid{0xc0U};
+    append_be32(
+        &bad_dcid, ktag_proxy_features::KTAG_QUIC_VERSION_1);
+    bad_dcid.push_back(21U);
+
+    std::vector<uint8_t> bad_scid{0xc0U};
+    append_be32(
+        &bad_scid, ktag_proxy_features::KTAG_QUIC_VERSION_1);
+    bad_scid.push_back(0U);
+    bad_scid.push_back(21U);
+
+    std::vector<uint8_t> bad_varint{0xc0U};
+    append_be32(
+        &bad_varint, ktag_proxy_features::KTAG_QUIC_VERSION_1);
+    bad_varint.insert(bad_varint.end(), {0U, 0U, 0xc0U});
+
+    std::vector<uint8_t> truncated_token{0xc0U};
+    append_be32(
+        &truncated_token, ktag_proxy_features::KTAG_QUIC_VERSION_1);
+    truncated_token.insert(
+        truncated_token.end(), {0U, 0U, 10U, 0xaaU, 0xbbU});
+
+    std::vector<uint8_t> salamander(256U);
+    for (size_t index = 0U; index < salamander.size(); ++index) {
+        salamander[index] = static_cast<uint8_t>(index + 0x20U);
+    }
+
+    const std::array<std::vector<uint8_t>, 8U> payloads{{
+        std::vector<uint8_t>{},
+        std::vector<uint8_t>{1U, 2U, 3U, 4U},
+        std::vector<uint8_t>{0xc0U},
+        bad_dcid,
+        bad_scid,
+        bad_varint,
+        truncated_token,
+        salamander,
+    }};
+    quic_harness harness;
+    ASSERT_TRUE(harness.valid());
+    for (size_t index = 0U; index < payloads.size(); ++index) {
+        ASSERT_TRUE(harness.process(
+            make_udp_frame_with_payload(
+                false, false, payloads[index]),
+            index + 1U));
+    }
+    ASSERT_TRUE(harness.finish());
+
+    const float *candidate =
+        harness.feature(QUIC_PACKET_CANDIDATE_COUNT);
+    const float *success =
+        harness.feature(QUIC_PARSE_SUCCESS_COUNT);
+    const float *failure =
+        harness.feature(QUIC_PARSE_FAILURE_COUNT);
+    const float *fixed = harness.feature(QUIC_FIXED_BIT_COUNT);
+    const float *long_header =
+        harness.feature(QUIC_LONG_HEADER_COUNT);
+    const float *v1 = harness.feature(QUIC_VERSION_V1_COUNT);
+    const float *initial = harness.feature(QUIC_INITIAL_COUNT);
+    const float *sequence_count =
+        harness.feature(QUIC_SEQUENCE_VALID_COUNT);
+    const float *histogram =
+        harness.feature(QUIC_FIRST_BYTE_HISTOGRAM, 16U);
+    const float *entropy =
+        harness.feature(QUIC_PAYLOAD_ENTROPY_MEAN);
+    ASSERT_NE(nullptr, candidate);
+    ASSERT_NE(nullptr, success);
+    ASSERT_NE(nullptr, failure);
+    ASSERT_NE(nullptr, fixed);
+    ASSERT_NE(nullptr, long_header);
+    ASSERT_NE(nullptr, v1);
+    ASSERT_NE(nullptr, initial);
+    ASSERT_NE(nullptr, sequence_count);
+    ASSERT_NE(nullptr, histogram);
+    ASSERT_NE(nullptr, entropy);
+    EXPECT_FLOAT_EQ(5.0F, candidate[0U]);
+    EXPECT_FLOAT_EQ(0.0F, success[0U]);
+    EXPECT_FLOAT_EQ(5.0F, failure[0U]);
+    EXPECT_FLOAT_EQ(5.0F, fixed[0U]);
+    EXPECT_FLOAT_EQ(5.0F, long_header[0U]);
+    EXPECT_FLOAT_EQ(4.0F, v1[0U]);
+    EXPECT_FLOAT_EQ(4.0F, initial[0U]);
+    EXPECT_FLOAT_EQ(8.0F, sequence_count[0U]);
+    EXPECT_FLOAT_EQ(1.0F, histogram[0U]);
+    EXPECT_FLOAT_EQ(1.0F, histogram[2U]);
+    EXPECT_FLOAT_EQ(5.0F, histogram[12U]);
+    EXPECT_GT(entropy[0U], 0.0F);
+    EXPECT_LE(entropy[0U], 8.0F);
+}
+
+TEST(KTAGProxyQuic, EnforcesDatagramCapAndMatchesIpVersions)
+{
+    quic_harness capped;
+    ASSERT_TRUE(capped.valid());
+    for (uint32_t index = 0U; index < 65U; ++index) {
+        ASSERT_TRUE(capped.process(
+            make_udp_frame_with_payload(
+                false,
+                false,
+                make_quic_short_packet(
+                    static_cast<uint8_t>(index))),
+            index + 1U));
+    }
+    ASSERT_TRUE(capped.finish());
+    const float *candidate =
+        capped.feature(QUIC_PACKET_CANDIDATE_COUNT);
+    const float *success =
+        capped.feature(QUIC_PARSE_SUCCESS_COUNT);
+    const float *short_header =
+        capped.feature(QUIC_SHORT_HEADER_COUNT);
+    const float *sequence_count =
+        capped.feature(QUIC_SEQUENCE_VALID_COUNT);
+    const float *types =
+        capped.feature(QUIC_HEADER_TYPE_SEQUENCE, 16U);
+    const float *histogram =
+        capped.feature(QUIC_FIRST_BYTE_HISTOGRAM, 16U);
+    ASSERT_NE(nullptr, candidate);
+    ASSERT_NE(nullptr, success);
+    ASSERT_NE(nullptr, short_header);
+    ASSERT_NE(nullptr, sequence_count);
+    ASSERT_NE(nullptr, types);
+    ASSERT_NE(nullptr, histogram);
+    EXPECT_FLOAT_EQ(64.0F, candidate[0U]);
+    EXPECT_FLOAT_EQ(64.0F, success[0U]);
+    EXPECT_FLOAT_EQ(64.0F, short_header[0U]);
+    EXPECT_FLOAT_EQ(16.0F, sequence_count[0U]);
+    EXPECT_FLOAT_EQ(64.0F, histogram[4U]);
+    for (size_t index = 0U; index < 16U; ++index) {
+        EXPECT_FLOAT_EQ(6.0F, types[index]);
+    }
+
+    const auto initial = make_quic_long_packet(
+        ktag_proxy_features::KTAG_QUIC_VERSION_1,
+        ktag_proxy_features::quic_header_type::initial);
+    quic_harness ipv4;
+    quic_harness ipv6;
+    ASSERT_TRUE(ipv4.valid());
+    ASSERT_TRUE(ipv6.valid());
+    ASSERT_TRUE(ipv4.process(
+        make_udp_frame_with_payload(
+            false, false, initial),
+        1U));
+    ASSERT_TRUE(ipv6.process(
+        make_udp_frame_with_payload(
+            true, false, initial, true),
+        1U));
+    ASSERT_TRUE(ipv4.finish());
+    ASSERT_TRUE(ipv6.finish());
+    const auto ipv4_values = ipv4.values();
+    const auto ipv6_values = ipv6.values();
+    ASSERT_EQ(68U, ipv4_values.size());
+    ASSERT_EQ(ipv4_values.size(), ipv6_values.size());
+    for (size_t index = 0U; index < ipv4_values.size(); ++index) {
+        EXPECT_FLOAT_EQ(ipv4_values[index], ipv6_values[index])
+            << index;
+    }
+}
+
+TEST(KTAGProxyQuic, HandlesIpv6FragmentBoundaries)
+{
+    const std::vector<uint8_t> partial{
+        0xc0U, 0U, 0U, 0U, 1U, 8U,
+    };
+    quic_harness first_fragment;
+    ASSERT_TRUE(first_fragment.valid());
+    auto first_fragment_frame =
+        make_ipv6_udp_fragment_with_payload(partial, 1U);
+    constexpr size_t IPV6_FRAGMENT_UDP_OFFSET = 14U + 40U + 8U;
+    ASSERT_GE(
+        first_fragment_frame.size(), IPV6_FRAGMENT_UDP_OFFSET + 8U);
+    write_be16(
+        &first_fragment_frame,
+        IPV6_FRAGMENT_UDP_OFFSET + 4U,
+        1208U);
+    ASSERT_TRUE(first_fragment.process(
+        first_fragment_frame,
+        1U));
+    ASSERT_TRUE(first_fragment.finish());
+    const float *candidate =
+        first_fragment.feature(QUIC_PACKET_CANDIDATE_COUNT);
+    const float *failure =
+        first_fragment.feature(QUIC_PARSE_FAILURE_COUNT);
+    ASSERT_NE(nullptr, candidate);
+    ASSERT_NE(nullptr, failure);
+    EXPECT_FLOAT_EQ(1.0F, candidate[0U]);
+    EXPECT_FLOAT_EQ(1.0F, failure[0U]);
+
+    quic_harness non_initial;
+    ASSERT_TRUE(non_initial.valid());
+    ASSERT_TRUE(non_initial.process(
+        make_ipv6_udp_fragment_with_payload(partial, 8U),
+        1U));
+    EXPECT_TRUE(non_initial.finish_empty());
+}
+
 } // namespace
