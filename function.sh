@@ -75,6 +75,10 @@ function kdadk_appid_build()
         echo "build failed: example Feature plugin was not generated"
         exit 1
     fi
+    if [ ! -f "${OUTPUT_DIR}/plugins/libktag_proxy_features.so" ]; then
+        echo "build failed: proxy Feature plugin was not generated"
+        exit 1
+    fi
     if [[ "${COVERAGE_OPTION}" == *"-DENABLE_BUILD_LIB=ON"* ]]; then
         for fixture in bad_abi create_fail no_entry; do
             if [ ! -f "${OUTPUT_DIR}/plugins/libktag_test_feature_plugin_${fixture}.so" ]; then
@@ -121,6 +125,7 @@ function kdadk_appid_build()
     echo "  demo:    ${OUTPUT_DIR}/kdadk_demo"
     echo "  example: ${OUTPUT_DIR}/ktag_three_layer_example"
     echo "  plugin:  ${OUTPUT_DIR}/plugins/libktag_example_feature_plugin.so"
+    echo "  plugin:  ${OUTPUT_DIR}/plugins/libktag_proxy_features.so"
 }
 
 function deb_pack()
