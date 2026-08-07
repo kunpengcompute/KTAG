@@ -1271,4 +1271,365 @@ TEST(KTAGProxySequence, ClampsReversedTimeAndHandlesLargePayload)
     EXPECT_TRUE(std::isfinite(burst_payload[1U]));
 }
 
+TEST(KTAGProxyTcpSignature, ParsesTlsAcrossSegmentsAndIpVersions)
+{
+    const auto client_hello = make_client_hello_record(true);
+    const auto server_record = make_tls_application_record("xyz");
+    constexpr size_t SPLIT = 37U;
+    ASSERT_LT(SPLIT, client_hello.size());
+    const std::vector<uint8_t> first(
+        client_hello.begin(), client_hello.begin() + SPLIT);
+    const std::vector<uint8_t> second(
+        client_hello.begin() + SPLIT, client_hello.end());
+
+    tcp_signature_harness ipv4;
+    ASSERT_TRUE(ipv4.valid());
+    ASSERT_TRUE(ipv4.process(
+        make_tcp_frame_with_payload(
+            false, false, first, 1000U),
+        1U));
+    ASSERT_TRUE(ipv4.process(
+        make_tcp_frame_with_payload(
+            false,
+            false,
+            second,
+            1000U + static_cast<uint32_t>(SPLIT)),
+        2U));
+    ASSERT_TRUE(ipv4.process(
+        make_tcp_frame_with_payload(
+            false, true, server_record, 5000U),
+        3U));
+    ASSERT_TRUE(ipv4.finish());
+
+    tcp_signature_harness ipv6;
+    ASSERT_TRUE(ipv6.valid());
+    ASSERT_TRUE(ipv6.process(
+        make_tcp_frame_with_payload(
+            true, false, client_hello, 1000U, 0x18U, true),
+        1U));
+    ASSERT_TRUE(ipv6.process(
+        make_tcp_frame_with_payload(
+            true, true, server_record, 5000U, 0x18U, true),
+        2U));
+    ASSERT_TRUE(ipv6.finish());
+
+    const auto ipv4_values = ipv4.values();
+    const auto ipv6_values = ipv6.values();
+    ASSERT_EQ(52U, ipv4_values.size());
+    ASSERT_EQ(ipv4_values.size(), ipv6_values.size());
+    for (size_t index = 0U; index < ipv4_values.size(); ++index) {
+        EXPECT_FLOAT_EQ(ipv4_values[index], ipv6_values[index])
+            << index;
+    }
+
+    const float *candidate = ipv4.feature(TLS_RECORD_CANDIDATE);
+    const float *complete =
+        ipv4.feature(TLS_CLIENT_HELLO_COMPLETE);
+    const float *legacy = ipv4.feature(TLS_LEGACY_VERSION);
+    const float *supported =
+        ipv4.feature(TLS_SUPPORTED_VERSION_MAX);
+    const float *cipher_count =
+        ipv4.feature(TLS_CIPHER_SUITE_COUNT);
+    const float *extension_count =
+        ipv4.feature(TLS_EXTENSION_COUNT);
+    const float *cipher_hash =
+        ipv4.feature(TLS_CIPHER_SUITE_HASH_U16, 2U);
+    const float *extension_hash =
+        ipv4.feature(TLS_EXTENSION_ORDER_HASH_U16, 2U);
+    const float *sni = ipv4.feature(TLS_SNI_PRESENT);
+    const float *h2 = ipv4.feature(TLS_ALPN_H2_PRESENT);
+    const float *http11 =
+        ipv4.feature(TLS_ALPN_HTTP11_PRESENT);
+    const float *session =
+        ipv4.feature(TLS_SESSION_ID_LENGTH);
+    const float *psk = ipv4.feature(TLS_PSK_PRESENT);
+    const float *early = ipv4.feature(TLS_EARLY_DATA_PRESENT);
+    const float *records =
+        ipv4.feature(TLS_RECORD_SIGNED_LENGTH, 16U);
+    const float *record_count =
+        ipv4.feature(TLS_RECORD_VALID_COUNT);
+    const float *failures =
+        ipv4.feature(TLS_PARSE_FAILURE_COUNT);
+    ASSERT_NE(nullptr, candidate);
+    ASSERT_NE(nullptr, complete);
+    ASSERT_NE(nullptr, legacy);
+    ASSERT_NE(nullptr, supported);
+    ASSERT_NE(nullptr, cipher_count);
+    ASSERT_NE(nullptr, extension_count);
+    ASSERT_NE(nullptr, cipher_hash);
+    ASSERT_NE(nullptr, extension_hash);
+    ASSERT_NE(nullptr, sni);
+    ASSERT_NE(nullptr, h2);
+    ASSERT_NE(nullptr, http11);
+    ASSERT_NE(nullptr, session);
+    ASSERT_NE(nullptr, psk);
+    ASSERT_NE(nullptr, early);
+    ASSERT_NE(nullptr, records);
+    ASSERT_NE(nullptr, record_count);
+    ASSERT_NE(nullptr, failures);
+
+    EXPECT_FLOAT_EQ(1.0F, candidate[0U]);
+    EXPECT_FLOAT_EQ(1.0F, complete[0U]);
+    EXPECT_FLOAT_EQ(771.0F, legacy[0U]);
+    EXPECT_FLOAT_EQ(772.0F, supported[0U]);
+    EXPECT_FLOAT_EQ(3.0F, cipher_count[0U]);
+    EXPECT_FLOAT_EQ(5.0F, extension_count[0U]);
+    EXPECT_FLOAT_EQ(47982.0F, cipher_hash[0U]);
+    EXPECT_FLOAT_EQ(14528.0F, cipher_hash[1U]);
+    EXPECT_FLOAT_EQ(56644.0F, extension_hash[0U]);
+    EXPECT_FLOAT_EQ(53229.0F, extension_hash[1U]);
+    EXPECT_FLOAT_EQ(1.0F, sni[0U]);
+    EXPECT_FLOAT_EQ(1.0F, h2[0U]);
+    EXPECT_FLOAT_EQ(1.0F, http11[0U]);
+    EXPECT_FLOAT_EQ(4.0F, session[0U]);
+    EXPECT_FLOAT_EQ(1.0F, psk[0U]);
+    EXPECT_FLOAT_EQ(1.0F, early[0U]);
+    EXPECT_FLOAT_EQ(
+        static_cast<float>(client_hello.size() - 5U), records[0U]);
+    EXPECT_FLOAT_EQ(
+        -static_cast<float>(server_record.size() - 5U), records[1U]);
+    EXPECT_FLOAT_EQ(2.0F, record_count[0U]);
+    EXPECT_FLOAT_EQ(0.0F, failures[0U]);
+    for (size_t index = 2U; index < 16U; ++index) {
+        EXPECT_FLOAT_EQ(0.0F, records[index]);
+    }
+
+    tcp_signature_harness tls12;
+    ASSERT_TRUE(tls12.valid());
+    ASSERT_TRUE(tls12.process(
+        make_tcp_frame_with_payload(
+            false, false, make_client_hello_record(false), 2000U),
+        1U));
+    ASSERT_TRUE(tls12.finish());
+    const float *tls12_supported =
+        tls12.feature(TLS_SUPPORTED_VERSION_MAX);
+    ASSERT_NE(nullptr, tls12_supported);
+    EXPECT_FLOAT_EQ(771.0F, tls12_supported[0U]);
+}
+
+TEST(KTAGProxyTcpSignature, TracksTcpPrefixOrderingAndResourceCaps)
+{
+    tcp_signature_harness ordering;
+    ASSERT_TRUE(ordering.valid());
+    ASSERT_TRUE(ordering.process(
+        make_tcp_frame_with_payload(
+            false, false, bytes("ABCDE"), 100U),
+        1U));
+    ASSERT_TRUE(ordering.process(
+        make_tcp_frame_with_payload(
+            false, false, bytes("ABCDE"), 100U),
+        2U));
+    ASSERT_TRUE(ordering.process(
+        make_tcp_frame_with_payload(
+            false, false, bytes("KLMNO"), 110U),
+        3U));
+    ASSERT_TRUE(ordering.process(
+        make_tcp_frame_with_payload(
+            false, false, bytes("FGHIJ"), 105U),
+        4U));
+    ASSERT_TRUE(ordering.finish());
+
+    const float *forward_length =
+        ordering.feature(TCP_FORWARD_PREFIX_LENGTH_LOG2);
+    const float *reverse_length =
+        ordering.feature(TCP_REVERSE_PREFIX_LENGTH_LOG2);
+    const float *gap = ordering.feature(TCP_SEGMENT_GAP_COUNT);
+    const float *retransmission =
+        ordering.feature(TCP_RETRANSMISSION_COUNT);
+    const float *out_of_order =
+        ordering.feature(TCP_OUT_OF_ORDER_COUNT);
+    const float *entropy = ordering.feature(TCP_FORWARD_ENTROPY);
+    const float *printable =
+        ordering.feature(TCP_FORWARD_PRINTABLE_RATIO);
+    const float *zeros = ordering.feature(TCP_FORWARD_ZERO_RATIO);
+    ASSERT_NE(nullptr, forward_length);
+    ASSERT_NE(nullptr, reverse_length);
+    ASSERT_NE(nullptr, gap);
+    ASSERT_NE(nullptr, retransmission);
+    ASSERT_NE(nullptr, out_of_order);
+    ASSERT_NE(nullptr, entropy);
+    ASSERT_NE(nullptr, printable);
+    ASSERT_NE(nullptr, zeros);
+    EXPECT_FLOAT_EQ(expected_log2(15U), forward_length[0U]);
+    EXPECT_FLOAT_EQ(0.0F, reverse_length[0U]);
+    EXPECT_FLOAT_EQ(1.0F, gap[0U]);
+    EXPECT_FLOAT_EQ(1.0F, retransmission[0U]);
+    EXPECT_FLOAT_EQ(1.0F, out_of_order[0U]);
+    EXPECT_NEAR(std::log2(15.0), entropy[0U], 1e-6F);
+    EXPECT_FLOAT_EQ(1.0F, printable[0U]);
+    EXPECT_FLOAT_EQ(0.0F, zeros[0U]);
+
+    tcp_signature_harness byte_cap;
+    ASSERT_TRUE(byte_cap.valid());
+    const std::vector<uint8_t> zero_prefix(16U * 1024U, 0U);
+    ASSERT_TRUE(byte_cap.process(
+        make_tcp_frame_with_payload(
+            false, false, zero_prefix, 1000U),
+        1U));
+    ASSERT_TRUE(byte_cap.finish());
+    const float *truncated =
+        byte_cap.feature(TCP_FORWARD_PREFIX_TRUNCATED);
+    const float *zero_ratio_value =
+        byte_cap.feature(TCP_FORWARD_ZERO_RATIO);
+    const float *zero_entropy =
+        byte_cap.feature(TCP_FORWARD_ENTROPY);
+    ASSERT_NE(nullptr, truncated);
+    ASSERT_NE(nullptr, zero_ratio_value);
+    ASSERT_NE(nullptr, zero_entropy);
+    EXPECT_FLOAT_EQ(1.0F, truncated[0U]);
+    EXPECT_FLOAT_EQ(1.0F, zero_ratio_value[0U]);
+    EXPECT_FLOAT_EQ(0.0F, zero_entropy[0U]);
+
+    tcp_signature_harness segment_cap;
+    ASSERT_TRUE(segment_cap.valid());
+    for (uint32_t index = 0U; index < 65U; ++index) {
+        ASSERT_TRUE(segment_cap.process(
+            make_tcp_frame_with_payload(
+                false,
+                false,
+                std::vector<uint8_t>{static_cast<uint8_t>(index)},
+                3000U + index),
+            index + 1U));
+    }
+    ASSERT_TRUE(segment_cap.finish());
+    const float *capped_length =
+        segment_cap.feature(TCP_FORWARD_PREFIX_LENGTH_LOG2);
+    const float *capped_truncated =
+        segment_cap.feature(TCP_FORWARD_PREFIX_TRUNCATED);
+    ASSERT_NE(nullptr, capped_length);
+    ASSERT_NE(nullptr, capped_truncated);
+    EXPECT_FLOAT_EQ(expected_log2(64U), capped_length[0U]);
+    EXPECT_FLOAT_EQ(0.0F, capped_truncated[0U]);
+}
+
+TEST(KTAGProxyTcpSignature, HandlesMalformedTruncatedAndRandomTls)
+{
+    tcp_signature_harness random;
+    ASSERT_TRUE(random.valid());
+    ASSERT_TRUE(random.process(
+        make_tcp_frame_with_payload(
+            false,
+            false,
+            std::vector<uint8_t>{1U, 2U, 3U, 4U, 5U},
+            100U),
+        1U));
+    ASSERT_TRUE(random.finish());
+    const float *random_candidate =
+        random.feature(TLS_RECORD_CANDIDATE);
+    const float *random_failure =
+        random.feature(TLS_PARSE_FAILURE_COUNT);
+    ASSERT_NE(nullptr, random_candidate);
+    ASSERT_NE(nullptr, random_failure);
+    EXPECT_FLOAT_EQ(0.0F, random_candidate[0U]);
+    EXPECT_FLOAT_EQ(0.0F, random_failure[0U]);
+
+    tcp_signature_harness truncated;
+    ASSERT_TRUE(truncated.valid());
+    const std::vector<uint8_t> partial{{
+        0x16U, 0x03U, 0x03U, 0x00U, 0x20U, 0x01U,
+    }};
+    ASSERT_TRUE(truncated.process(
+        make_tcp_frame_with_payload(
+            false, false, partial, 200U),
+        1U));
+    ASSERT_TRUE(truncated.finish());
+    const float *truncated_candidate =
+        truncated.feature(TLS_RECORD_CANDIDATE);
+    const float *truncated_complete =
+        truncated.feature(TLS_CLIENT_HELLO_COMPLETE);
+    const float *truncated_failure =
+        truncated.feature(TLS_PARSE_FAILURE_COUNT);
+    ASSERT_NE(nullptr, truncated_candidate);
+    ASSERT_NE(nullptr, truncated_complete);
+    ASSERT_NE(nullptr, truncated_failure);
+    EXPECT_FLOAT_EQ(1.0F, truncated_candidate[0U]);
+    EXPECT_FLOAT_EQ(0.0F, truncated_complete[0U]);
+    EXPECT_FLOAT_EQ(1.0F, truncated_failure[0U]);
+
+    auto malformed = make_client_hello_record(true);
+    constexpr size_t EXTENSIONS_LENGTH_OFFSET = 58U;
+    ASSERT_GT(malformed.size(), EXTENSIONS_LENGTH_OFFSET + 1U);
+    malformed[EXTENSIONS_LENGTH_OFFSET] = 0xffU;
+    malformed[EXTENSIONS_LENGTH_OFFSET + 1U] = 0xffU;
+    tcp_signature_harness bad_extension;
+    ASSERT_TRUE(bad_extension.valid());
+    ASSERT_TRUE(bad_extension.process(
+        make_tcp_frame_with_payload(
+            false, false, malformed, 300U),
+        1U));
+    ASSERT_TRUE(bad_extension.finish());
+    const float *bad_complete =
+        bad_extension.feature(TLS_CLIENT_HELLO_COMPLETE);
+    const float *bad_failure =
+        bad_extension.feature(TLS_PARSE_FAILURE_COUNT);
+    ASSERT_NE(nullptr, bad_complete);
+    ASSERT_NE(nullptr, bad_failure);
+    EXPECT_FLOAT_EQ(0.0F, bad_complete[0U]);
+    EXPECT_FLOAT_EQ(1.0F, bad_failure[0U]);
+}
+
+TEST(KTAGProxyTcpSignature, DetectsCleartextCarriersOnlyOutsideTls)
+{
+    const auto request = bytes(
+        "POST /service HTTP/1.1\r\n"
+        "Host: example.com\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        "Content-Type: application/grpc\r\n\r\n");
+    std::vector<uint8_t> http2 = bytes(
+        "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
+    http2.insert(http2.end(), {
+        0U, 0U, 0U, 4U, 0U, 0U, 0U, 0U, 0U,
+    });
+
+    tcp_signature_harness cleartext;
+    ASSERT_TRUE(cleartext.valid());
+    ASSERT_TRUE(cleartext.process(
+        make_tcp_frame_with_payload(
+            false, false, request, 1000U),
+        1U));
+    ASSERT_TRUE(cleartext.process(
+        make_tcp_frame_with_payload(
+            false, true, http2, 2000U),
+        2U));
+    ASSERT_TRUE(cleartext.finish());
+    for (size_t feature : {
+             CARRIER_HTTP1_REQUEST,
+             CARRIER_WEBSOCKET_UPGRADE,
+             CARRIER_HTTP2_PREFACE,
+             CARRIER_HTTP2_FRAME,
+             CARRIER_GRPC_CONTENT_TYPE}) {
+        const float *value = cleartext.feature(feature);
+        ASSERT_NE(nullptr, value);
+        EXPECT_FLOAT_EQ(1.0F, value[0U]) << feature;
+    }
+
+    tcp_signature_harness encrypted;
+    ASSERT_TRUE(encrypted.valid());
+    ASSERT_TRUE(encrypted.process(
+        make_tcp_frame_with_payload(
+            false,
+            false,
+            make_tls_application_record(
+                "GET / HTTP/1.1\r\nUpgrade: websocket\r\n"
+                "Connection: Upgrade\r\n\r\n"),
+            3000U),
+        1U));
+    ASSERT_TRUE(encrypted.finish());
+    const float *tls_candidate =
+        encrypted.feature(TLS_RECORD_CANDIDATE);
+    ASSERT_NE(nullptr, tls_candidate);
+    EXPECT_FLOAT_EQ(1.0F, tls_candidate[0U]);
+    for (size_t feature : {
+             CARRIER_HTTP1_REQUEST,
+             CARRIER_WEBSOCKET_UPGRADE,
+             CARRIER_HTTP2_PREFACE,
+             CARRIER_HTTP2_FRAME,
+             CARRIER_GRPC_CONTENT_TYPE}) {
+        const float *value = encrypted.feature(feature);
+        ASSERT_NE(nullptr, value);
+        EXPECT_FLOAT_EQ(0.0F, value[0U]) << feature;
+    }
+}
+
 } // namespace
