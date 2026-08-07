@@ -43,6 +43,7 @@ struct ktag_capture_device_storage {
     std::string name;
     std::string description;
     std::vector<std::string> ipv4_addresses;
+    std::vector<std::string> ipv6_addresses;
 };
 
 struct ktag_capture_device_list {

@@ -147,6 +147,15 @@ KTAG_API const char *ktag_capture_device_list_get_ipv4(
     uint32_t device_index,
     uint32_t address_index);
 
+KTAG_API uint32_t ktag_capture_device_list_get_ipv6_count(
+    const ktag_capture_device_list *devices,
+    uint32_t index);
+
+KTAG_API const char *ktag_capture_device_list_get_ipv6(
+    const ktag_capture_device_list *devices,
+    uint32_t device_index,
+    uint32_t address_index);
+
 #ifdef __cplusplus
 }
 #endif

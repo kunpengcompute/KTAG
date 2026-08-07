@@ -6,6 +6,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include <stdint.h>
 #include <unordered_map>
 #include "kdadk.h"
+#include "ktag_types.h"
 #include "domain_name_hash.h"
 #define SLL_HEADER_LEN 16
 
@@ -81,6 +82,12 @@ typedef KDADKResult (*domain_ipv4_update_callback)(
     const std::string &domain,
     uint64_t expire_at_us);
 
+typedef KDADKResult (*domain_ip_update_callback)(
+    void *user_data,
+    const ktag_ip_address *address,
+    const std::string &domain,
+    uint64_t expire_at_us);
+
 KDADKResult decode_link_layer(const u_char *packet, packet_info *info, int link_type,
                               domain_name_hash *domain_name_table);
 KDADKResult decode_link_layer_with_domain_callback(
@@ -88,6 +95,13 @@ KDADKResult decode_link_layer_with_domain_callback(
     packet_info *info,
     int link_type,
     domain_ipv4_update_callback callback,
+    void *user_data);
+KDADKResult decode_transport_payload_with_domain_callback(
+    const u_char *transport,
+    uint32_t transport_length,
+    uint8_t protocol,
+    packet_info *info,
+    domain_ip_update_callback callback,
     void *user_data);
 bool is_http_payload(const u_char *packet, int length);
 KDADKResult parse_http_payload(const u_char *packet, packet_info *info, uint32_t length);

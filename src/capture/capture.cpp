@@ -274,13 +274,31 @@ KTAG_API ktag_capture_device_list *ktag_capture_list_devices(void)
             stored.description = device->description == nullptr ? "" : device->description;
             for (pcap_addr_t *address = device->addresses;
                  address != nullptr; address = address->next) {
-                if (address->addr == nullptr || address->addr->sa_family != AF_INET) {
+                if (address->addr == nullptr) {
                     continue;
                 }
-                const auto *ipv4 = reinterpret_cast<const sockaddr_in *>(address->addr);
-                char text[INET_ADDRSTRLEN] = {};
-                if (inet_ntop(AF_INET, &ipv4->sin_addr, text, sizeof(text)) != nullptr) {
-                    stored.ipv4_addresses.emplace_back(text);
+                if (address->addr->sa_family == AF_INET) {
+                    const auto *ipv4 =
+                        reinterpret_cast<const sockaddr_in *>(address->addr);
+                    char text[INET_ADDRSTRLEN] = {};
+                    if (inet_ntop(
+                            AF_INET,
+                            &ipv4->sin_addr,
+                            text,
+                            sizeof(text)) != nullptr) {
+                        stored.ipv4_addresses.emplace_back(text);
+                    }
+                } else if (address->addr->sa_family == AF_INET6) {
+                    const auto *ipv6 =
+                        reinterpret_cast<const sockaddr_in6 *>(address->addr);
+                    char text[INET6_ADDRSTRLEN] = {};
+                    if (inet_ntop(
+                            AF_INET6,
+                            &ipv6->sin6_addr,
+                            text,
+                            sizeof(text)) != nullptr) {
+                        stored.ipv6_addresses.emplace_back(text);
+                    }
                 }
             }
             result->devices.push_back(std::move(stored));
@@ -347,6 +365,30 @@ KTAG_API const char *ktag_capture_device_list_get_ipv4(
         return nullptr;
     }
     return devices->devices[device_index].ipv4_addresses[address_index].c_str();
+}
+
+KTAG_API uint32_t ktag_capture_device_list_get_ipv6_count(
+    const ktag_capture_device_list *devices,
+    uint32_t index)
+{
+    return devices == nullptr || index >= devices->devices.size() ? 0U :
+        static_cast<uint32_t>(
+            devices->devices[index].ipv6_addresses.size());
+}
+
+KTAG_API const char *ktag_capture_device_list_get_ipv6(
+    const ktag_capture_device_list *devices,
+    uint32_t device_index,
+    uint32_t address_index)
+{
+    if (devices == nullptr ||
+        device_index >= devices->devices.size() ||
+        address_index >=
+            devices->devices[device_index].ipv6_addresses.size()) {
+        return nullptr;
+    }
+    return devices->devices[device_index]
+        .ipv6_addresses[address_index].c_str();
 }
 
 } // extern "C"
