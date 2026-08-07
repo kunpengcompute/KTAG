@@ -53,11 +53,30 @@ ktag_status ktag_feature_flow_runtime_create_internal(
     uint64_t flow_id,
     ktag_feature_flow_runtime *runtime);
 
+ktag_status ktag_feature_flow_runtime_create_with_key_internal(
+    ktag_feature_pipeline *pipeline,
+    const flow_hash_node *node,
+    uint64_t flow_id,
+    const ktag_flow_key *flow_key,
+    const ktag_ip_address *forward_address,
+    uint16_t forward_port,
+    bool forward_is_node_source,
+    ktag_feature_flow_runtime *runtime);
+
 ktag_status ktag_feature_flow_runtime_on_packet_internal(
     ktag_feature_flow_runtime *runtime,
     const uint8_t *packet,
     uint32_t packet_length,
     const ktag_timestamp *timestamp);
+
+ktag_status ktag_feature_flow_runtime_on_packet_view_internal(
+    ktag_feature_flow_runtime *runtime,
+    const uint8_t *packet,
+    uint32_t packet_length,
+    const ktag_timestamp *timestamp,
+    const uint8_t *payload,
+    uint32_t payload_length,
+    const ktag_packet_transport_view *transport);
 
 ktag_status ktag_feature_flow_runtime_finish_internal(
     ktag_feature_flow_runtime *runtime,

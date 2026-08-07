@@ -2,6 +2,7 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "ktag_feature.h"
+#include "feature_batch_internal.h"
 
 #include <memory>
 #include <new>
@@ -9,7 +10,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <vector>
 
 struct ktag_feature_record_storage {
-    ktag_feature_record_metadata metadata{};
+    ktag_feature_record_details details{};
     std::vector<float> values;
 };
 
@@ -78,20 +79,16 @@ KTAG_API ktag_status ktag_feature_batch_append(
         metadata->api_version != KTAG_API_VERSION) {
         return KTAG_ERROR_INVALID_ARGUMENT;
     }
-    if (value_count != batch->value_count) {
-        return KTAG_ERROR_SCHEMA_MISMATCH;
-    }
-    try {
-        ktag_feature_record_storage record;
-        record.metadata = *metadata;
-        record.values.assign(values, values + value_count);
-        batch->records.push_back(std::move(record));
-        return KTAG_SUCCESS;
-    } catch (const std::bad_alloc &) {
-        return KTAG_ERROR_OUT_OF_MEMORY;
-    } catch (...) {
-        return KTAG_ERROR_INTERNAL;
-    }
+    ktag_feature_record_details details{};
+    details.struct_size = sizeof(details);
+    details.api_version = KTAG_API_VERSION;
+    details.metadata = *metadata;
+    details.source_address = metadata->flow_key.address_a;
+    details.destination_address = metadata->flow_key.address_b;
+    details.source_port = metadata->flow_key.port_a;
+    details.destination_port = metadata->flow_key.port_b;
+    return ktag_feature_batch_append_with_details_internal(
+        batch, &details, values, value_count);
 }
 
 KTAG_API void ktag_feature_batch_clear(ktag_feature_batch *batch)
@@ -128,10 +125,53 @@ KTAG_API ktag_status ktag_feature_batch_get_record(
     record->struct_size = sizeof(ktag_feature_record);
     record->api_version = KTAG_API_VERSION;
     record->schema_hash = batch->schema_hash;
-    record->metadata = stored.metadata;
+    record->metadata = stored.details.metadata;
     record->values = stored.values.data();
     record->value_count = batch->value_count;
     return KTAG_SUCCESS;
 }
 
+KTAG_API ktag_status ktag_feature_batch_get_record_details(
+    const ktag_feature_batch *batch,
+    uint32_t index,
+    ktag_feature_record_details *details)
+{
+    if (batch == nullptr || details == nullptr ||
+        index >= batch->records.size()) {
+        return KTAG_ERROR_INVALID_ARGUMENT;
+    }
+    *details = batch->records[index].details;
+    return KTAG_SUCCESS;
+}
+
 } // extern "C"
+
+ktag_status ktag_feature_batch_append_with_details_internal(
+    ktag_feature_batch *batch,
+    const ktag_feature_record_details *details,
+    const float *values,
+    uint32_t value_count)
+{
+    if (batch == nullptr || details == nullptr || values == nullptr ||
+        details->struct_size < sizeof(ktag_feature_record_details) ||
+        details->api_version != KTAG_API_VERSION ||
+        details->metadata.struct_size <
+            sizeof(ktag_feature_record_metadata) ||
+        details->metadata.api_version != KTAG_API_VERSION) {
+        return KTAG_ERROR_INVALID_ARGUMENT;
+    }
+    if (value_count != batch->value_count) {
+        return KTAG_ERROR_SCHEMA_MISMATCH;
+    }
+    try {
+        ktag_feature_record_storage record;
+        record.details = *details;
+        record.values.assign(values, values + value_count);
+        batch->records.push_back(std::move(record));
+        return KTAG_SUCCESS;
+    } catch (const std::bad_alloc &) {
+        return KTAG_ERROR_OUT_OF_MEMORY;
+    } catch (...) {
+        return KTAG_ERROR_INTERNAL;
+    }
+}

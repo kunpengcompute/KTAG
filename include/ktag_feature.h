@@ -104,6 +104,22 @@ typedef struct {
 } ktag_feature_record_metadata;
 
 /*
+ * Optional extended record metadata for audit/CSV output. These fields are
+ * not part of the Feature Schema and therefore never enter model input.
+ */
+typedef struct {
+    uint32_t struct_size;
+    uint32_t api_version;
+    ktag_feature_record_metadata metadata;
+    ktag_ip_address source_address;
+    ktag_ip_address destination_address;
+    uint16_t source_port;
+    uint16_t destination_port;
+    uint32_t ipv6_extension_packet_count;
+    uint32_t ip_fragment_first_packet_count;
+} ktag_feature_record_details;
+
+/*
  * Borrowed record view. values remains valid until the batch is mutated,
  * cleared or destroyed.
  */
@@ -120,6 +136,29 @@ typedef enum {
     KTAG_DIRECTION_FORWARD = 0,
     KTAG_DIRECTION_REVERSE = 1
 } ktag_direction;
+
+typedef enum {
+    KTAG_IP_FRAGMENT_NONE = 0,
+    KTAG_IP_FRAGMENT_ATOMIC = 1,
+    KTAG_IP_FRAGMENT_FIRST = 2,
+    KTAG_IP_FRAGMENT_NON_INITIAL = 3
+} ktag_ip_fragment_state;
+
+typedef struct {
+    uint32_t struct_size;
+    uint32_t api_version;
+    ktag_direction direction;
+    uint8_t network_version;
+    uint8_t transport_protocol;
+    uint8_t tcp_flags;
+    uint8_t fragment_state;
+    uint32_t network_header_length;
+    uint32_t transport_header_length;
+    uint32_t ipv6_extension_header_count;
+    uint32_t ipv6_extension_header_bytes;
+    uint32_t tcp_sequence;
+    uint32_t tcp_acknowledgment;
+} ktag_packet_transport_view;
 
 typedef struct {
     uint32_t header_length;
@@ -428,6 +467,10 @@ KTAG_API ktag_status ktag_feature_output_set(
 /* Read-only flow view accessors. Returned strings are borrowed. */
 KTAG_API uint64_t ktag_flow_view_get_flow_id(const ktag_flow_view *flow);
 
+KTAG_API ktag_status ktag_flow_view_get_flow_key(
+    const ktag_flow_view *flow,
+    ktag_flow_key *key);
+
 KTAG_API ktag_status ktag_flow_view_get_legacy_tuple(
     const ktag_flow_view *flow,
     uint32_t *src_ip,
@@ -470,6 +513,14 @@ KTAG_API ktag_status ktag_packet_view_get_timestamp(
     const ktag_packet_view *packet,
     ktag_timestamp *timestamp);
 
+KTAG_API ktag_status ktag_packet_view_get_transport(
+    const ktag_packet_view *packet,
+    ktag_packet_transport_view *transport);
+
+KTAG_API const uint8_t *ktag_packet_view_get_payload(
+    const ktag_packet_view *packet,
+    uint32_t *length);
+
 /* Dynamic feature batch. Values are copied when a record is appended. */
 KTAG_API ktag_feature_batch *ktag_feature_batch_create(
     const ktag_feature_schema *schema,
@@ -502,6 +553,11 @@ KTAG_API ktag_status ktag_feature_batch_get_record(
     const ktag_feature_batch *batch,
     uint32_t index,
     ktag_feature_record *record);
+
+KTAG_API ktag_status ktag_feature_batch_get_record_details(
+    const ktag_feature_batch *batch,
+    uint32_t index,
+    ktag_feature_record_details *details);
 
 #ifdef __cplusplus
 }

@@ -13,6 +13,11 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 extern "C" {
 #endif
 
+/*
+ * confidence in [0, 1] is a model-provided value; zero is valid and must not
+ * suppress or rewrite a label.  -1 means that the model has no usable
+ * probability output while the numeric label remains valid.
+ */
 #define KTAG_INFERENCE_CONFIDENCE_UNAVAILABLE (-1.0F)
 
 typedef struct ktag_inference_context ktag_inference_context;
@@ -53,6 +58,7 @@ typedef struct {
     ktag_prediction_metadata metadata;
     uint32_t source_record_index;
     int64_t label;
+    /* See KTAG_INFERENCE_CONFIDENCE_UNAVAILABLE; no unknown threshold applies. */
     float confidence;
 } ktag_prediction_record;
 

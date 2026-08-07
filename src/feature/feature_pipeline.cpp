@@ -226,6 +226,27 @@ ktag_status ktag_feature_flow_runtime_create_internal(
     uint64_t flow_id,
     ktag_feature_flow_runtime *runtime)
 {
+    return ktag_feature_flow_runtime_create_with_key_internal(
+        pipeline,
+        node,
+        flow_id,
+        nullptr,
+        nullptr,
+        0U,
+        true,
+        runtime);
+}
+
+ktag_status ktag_feature_flow_runtime_create_with_key_internal(
+    ktag_feature_pipeline *pipeline,
+    const flow_hash_node *node,
+    uint64_t flow_id,
+    const ktag_flow_key *flow_key,
+    const ktag_ip_address *forward_address,
+    uint16_t forward_port,
+    bool forward_is_node_source,
+    ktag_feature_flow_runtime *runtime)
+{
     if (pipeline == nullptr || node == nullptr || runtime == nullptr || runtime->active) {
         return KTAG_ERROR_INVALID_ARGUMENT;
     }
@@ -233,6 +254,21 @@ ktag_status ktag_feature_flow_runtime_create_internal(
         runtime->pipeline = pipeline;
         runtime->flow.node = node;
         runtime->flow.flow_id = flow_id;
+        runtime->flow.has_flow_key =
+            flow_key != nullptr && forward_address != nullptr;
+        if (runtime->flow.has_flow_key) {
+            runtime->flow.flow_key = *flow_key;
+            runtime->flow.forward_address = *forward_address;
+            runtime->flow.forward_port = forward_port;
+            runtime->flow.forward_is_node_source =
+                forward_is_node_source;
+        } else {
+            runtime->flow.flow_key = {};
+            runtime->flow.forward_address = {};
+            runtime->flow.forward_port = 0U;
+            runtime->flow.forward_is_node_source =
+                node->flow_src_ip == node->tuple.src_ip;
+        }
         runtime->flow.stream_feature_ready = false;
         runtime->flow_states.clear();
         runtime->flow_state_created.clear();
@@ -282,13 +318,46 @@ ktag_status ktag_feature_flow_runtime_on_packet_internal(
     uint32_t packet_length,
     const ktag_timestamp *timestamp)
 {
-    if (runtime == nullptr || !runtime->active || packet == nullptr || timestamp == nullptr) {
+    return ktag_feature_flow_runtime_on_packet_view_internal(
+        runtime,
+        packet,
+        packet_length,
+        timestamp,
+        nullptr,
+        0U,
+        nullptr);
+}
+
+ktag_status ktag_feature_flow_runtime_on_packet_view_internal(
+    ktag_feature_flow_runtime *runtime,
+    const uint8_t *packet,
+    uint32_t packet_length,
+    const ktag_timestamp *timestamp,
+    const uint8_t *payload,
+    uint32_t payload_length,
+    const ktag_packet_transport_view *transport)
+{
+    if (runtime == nullptr || !runtime->active ||
+        packet == nullptr || timestamp == nullptr ||
+        (payload == nullptr && payload_length != 0U) ||
+        (transport != nullptr &&
+         (transport->struct_size < sizeof(*transport) ||
+          transport->api_version != KTAG_API_VERSION))) {
         return KTAG_ERROR_INVALID_ARGUMENT;
     }
     ktag_packet_view view;
     view.data = packet;
     view.length = packet_length;
+    view.payload = payload;
+    view.payload_length = payload_length;
     view.timestamp = *timestamp;
+    view.transport.struct_size = sizeof(view.transport);
+    view.transport.api_version = KTAG_API_VERSION;
+    if (transport != nullptr) {
+        view.transport = *transport;
+        view.transport.struct_size = sizeof(view.transport);
+        view.transport.api_version = KTAG_API_VERSION;
+    }
     runtime->flow.stream_feature_ready = false;
     try {
         for (size_t index = 0; index < runtime->pipeline->providers.size(); ++index) {

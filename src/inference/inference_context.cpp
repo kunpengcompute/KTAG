@@ -145,6 +145,7 @@ void extract_tensor_confidences(
     size_t row_count,
     std::vector<float> *confidences)
 {
+    constexpr double probability_tolerance = 1.0e-6;
     confidences->assign(
         row_count, KTAG_INFERENCE_CONFIDENCE_UNAVAILABLE);
     if (row_count == 0U || outputs.size() < 2U ||
@@ -175,9 +176,21 @@ void extract_tensor_confidences(
             const float *probabilities = outputs[1].GetTensorData<float>();
             for (size_t row = 0U; row < row_count; ++row) {
                 const float *begin = probabilities + row * class_count;
-                const float confidence =
-                    *std::max_element(begin, begin + class_count);
-                if (std::isfinite(confidence)) {
+                bool valid = true;
+                float confidence = 0.0F;
+                for (size_t index = 0U; index < class_count; ++index) {
+                    const float probability = begin[index];
+                    if (!std::isfinite(probability) ||
+                        probability < -probability_tolerance ||
+                        probability > 1.0 + probability_tolerance) {
+                        valid = false;
+                        break;
+                    }
+                    confidence = std::max(
+                        confidence,
+                        std::min(1.0F, std::max(0.0F, probability)));
+                }
+                if (valid) {
                     (*confidences)[row] = confidence;
                 }
             }
@@ -186,11 +199,24 @@ void extract_tensor_confidences(
             const double *probabilities = outputs[1].GetTensorData<double>();
             for (size_t row = 0U; row < row_count; ++row) {
                 const double *begin = probabilities + row * class_count;
-                const double confidence =
-                    *std::max_element(begin, begin + class_count);
-                if (std::isfinite(confidence)) {
+                bool valid = true;
+                double confidence = 0.0;
+                for (size_t index = 0U; index < class_count; ++index) {
+                    const double probability = begin[index];
+                    if (!std::isfinite(probability) ||
+                        probability < -probability_tolerance ||
+                        probability > 1.0 + probability_tolerance) {
+                        valid = false;
+                        break;
+                    }
+                    confidence = std::max(
+                        confidence,
+                        std::min(1.0, std::max(0.0, probability)));
+                }
+                if (valid) {
                     const float converted = static_cast<float>(confidence);
-                    if (std::isfinite(converted)) {
+                    if (std::isfinite(converted) && converted >= 0.0F &&
+                        converted <= 1.0F) {
                         (*confidences)[row] = converted;
                     }
                 }

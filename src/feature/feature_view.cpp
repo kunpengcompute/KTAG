@@ -46,6 +46,17 @@ KTAG_API uint64_t ktag_flow_view_get_flow_id(const ktag_flow_view *flow)
     return flow == nullptr ? 0U : flow->flow_id;
 }
 
+KTAG_API ktag_status ktag_flow_view_get_flow_key(
+    const ktag_flow_view *flow,
+    ktag_flow_key *key)
+{
+    if (flow == nullptr || key == nullptr || !flow->has_flow_key) {
+        return KTAG_ERROR_INVALID_ARGUMENT;
+    }
+    *key = flow->flow_key;
+    return KTAG_SUCCESS;
+}
+
 KTAG_API ktag_status ktag_flow_view_get_legacy_tuple(
     const ktag_flow_view *flow,
     uint32_t *src_ip,
@@ -57,6 +68,10 @@ KTAG_API ktag_status ktag_flow_view_get_legacy_tuple(
     if (flow == nullptr || flow->node == nullptr || src_ip == nullptr || src_port == nullptr ||
         dst_ip == nullptr || dst_port == nullptr || protocol == nullptr) {
         return KTAG_ERROR_INVALID_ARGUMENT;
+    }
+    if (flow->has_flow_key &&
+        flow->flow_key.address_a.version == 6U) {
+        return KTAG_ERROR_NOT_SUPPORTED;
     }
     *src_ip = flow->node->tuple.src_ip;
     *src_port = flow->node->tuple.src_port;
@@ -107,7 +122,8 @@ KTAG_API const char *ktag_flow_view_get_domain(
     if (flow == nullptr || flow->node == nullptr) {
         return nullptr;
     }
-    const bool forward_is_tuple_source =
+    const bool forward_is_tuple_source = flow->has_flow_key ?
+        flow->forward_is_node_source :
         flow->node->flow_src_ip == flow->node->tuple.src_ip;
     if (direction == KTAG_DIRECTION_FORWARD) {
         return forward_is_tuple_source ?
@@ -162,6 +178,30 @@ KTAG_API ktag_status ktag_packet_view_get_timestamp(
     }
     *timestamp = packet->timestamp;
     return KTAG_SUCCESS;
+}
+
+KTAG_API ktag_status ktag_packet_view_get_transport(
+    const ktag_packet_view *packet,
+    ktag_packet_transport_view *transport)
+{
+    if (packet == nullptr || transport == nullptr ||
+        transport->struct_size < sizeof(*transport) ||
+        transport->api_version != KTAG_API_VERSION) {
+        return KTAG_ERROR_INVALID_ARGUMENT;
+    }
+    *transport = packet->transport;
+    return KTAG_SUCCESS;
+}
+
+KTAG_API const uint8_t *ktag_packet_view_get_payload(
+    const ktag_packet_view *packet,
+    uint32_t *length)
+{
+    if (packet == nullptr || length == nullptr) {
+        return nullptr;
+    }
+    *length = packet->payload_length;
+    return packet->payload;
 }
 
 } // extern "C"
