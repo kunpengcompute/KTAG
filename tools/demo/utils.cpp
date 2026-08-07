@@ -333,7 +333,7 @@ void print_performance_stats_ex(
     printf("文件IO耗时:         %10.4f 秒\n", stats->file_io_time);
     printf(
         stages_overlap ?
-            "阶段累计耗时:   %10.4f 秒 (多线程阶段可并行重叠)\n" :
+            "核心累计耗时:   %10.4f 秒 (多线程阶段可并行重叠)\n" :
             "总耗时:           %10.4f 秒 (特征提取 + 推理 + 文件IO)\n",
         stats->total_time);
     printf("端到端总耗时:       %10.4f 秒 (包含PCAP读取等所有开销)\n", stats->end_to_end_time);
@@ -357,7 +357,7 @@ void print_performance_stats_ex(
         double gbps = (stats->total_bytes * 8.0) / (1024.0 * 1024.0 * 1024.0) / stats->total_time;
         printf(
             stages_overlap ?
-                "阶段累计吞吐量: %10.4f MB/s (%10.4f Gbps)\n" :
+                "核心处理吞吐量: %10.4f MB/s (%10.4f Gbps)\n" :
                 "核心处理吞吐量: %10.4f MB/s (%10.4f Gbps)\n",
             mbps,
             gbps);

@@ -24,11 +24,13 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 enum {
     KTAG_DEMO_OPT_PIPELINE_MODE = 1000,
-    KTAG_DEMO_OPT_INFERENCE_THREADS
+    KTAG_DEMO_OPT_INFERENCE_THREADS,
+    KTAG_DEMO_OPT_FEATURE_CONFIG
 };
 
 typedef struct {
     char *config_file;
+    char *feature_config_file;
     char **pcap_files;
     int num_pcap_files;
     char *interface;
@@ -420,6 +422,7 @@ void print_usage(const char *prog_name)
     printf("  -t <config.yaml>        模型训练模式\n");
     printf("  -e <config.yaml>        模型验证模式\n");
     printf("  -f <file.pcap>          特征提取模式 (需要配合 -c 或 -j 使用)\n");
+    printf("  --config <config.yaml>  -f 可选：按现有 Pipeline/Schema 输出训练 CSV\n");
     printf("  -r <config.yaml>        在线推理模式 (需要配合 -c 或 -j 使用)\n");
     printf("  -p <file.pcap>          输入PCAP文件 (可多个)\n");
     printf("  -i <interface>          网口实时抓包\n");
@@ -434,12 +437,14 @@ void print_usage(const char *prog_name)
     printf("  -h                      显示帮助信息\n");
     printf("\n说明:\n");
     printf("  -c 和 -j 选项只能选择其中一个，分别指定CSV或JSON格式的输出文件\n");
+    printf("  新 Pipeline 推理输出含数字 label/confidence 及完整 IPv4/IPv6 流元数据\n");
     printf("  -c 选项的文件必须以 .csv 结尾\n");
     printf("  -j 选项的文件必须以 .json 结尾\n");
     printf("  -w rawbow输出仅适用于 -f 特征提取模式, rawbow特征列信息仅用于流量打标签进行人工校验\n");
     printf("\n示例:\n");
     printf("  # 特征提取 - CSV格式\n");
     printf("  %s -f input.pcap -c output.csv\n", prog_name);
+    printf("  %s -f input.pcap --config config.yaml -c schema.csv\n", prog_name);
     printf("\n");
     printf("  # 特征提取 - JSON格式，带rawbow\n");
     printf("  %s -f input.pcap -j output.json -w\n", prog_name);
@@ -521,6 +526,8 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args)
         {"feature-threads", required_argument, nullptr, 'n'},
         {"inference-threads", required_argument, nullptr,
             KTAG_DEMO_OPT_INFERENCE_THREADS},
+        {"config", required_argument, nullptr,
+            KTAG_DEMO_OPT_FEATURE_CONFIG},
         {nullptr, 0, nullptr, 0}};
     while ((opt = getopt_long(
                 argc,
@@ -594,6 +601,9 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args)
                     return -1;
                 }
                 break;
+            case KTAG_DEMO_OPT_FEATURE_CONFIG:
+                args->feature_config_file = optarg;
+                break;
             case 'c':
                 if (json_specified) {
                     fprintf(stderr, "错误: -c 和 -j 选项不能同时使用\n");
@@ -652,10 +662,17 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args)
 
     const int has_pipeline_cli = args->pipeline_mode != nullptr ||
         args->feature_threads != 0U || args->inference_threads != 0U;
-    if (has_pipeline_cli && args->operation != 3) {
+    if (args->feature_config_file != nullptr && args->operation != 2) {
         fprintf(
             stderr,
-            "错误: pipeline 和线程参数只能与在线推理模式 -r 一起使用\n");
+            "错误: --config 只能与 Schema 特征提取模式 -f 一起使用\n");
+        return -1;
+    }
+    if (has_pipeline_cli && args->operation != 3 &&
+        !(args->operation == 2 && args->feature_config_file != nullptr)) {
+        fprintf(
+            stderr,
+            "错误: pipeline 和线程参数只能与 -r，或 -f --config 一起使用\n");
         return -1;
     }
     if (args->pipeline_mode != nullptr &&
@@ -684,6 +701,39 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args)
             fprintf(stderr, "  %s -f input.pcap -c output.csv\n", (argc > 0) ? argv[0] : "kdadk_demo");
             fprintf(stderr, "  %s -f input.pcap -j output.json\n", (argc > 0) ? argv[0] : "kdadk_demo");
             return -1;
+        }
+        if (args->feature_config_file != nullptr) {
+            if (args->num_pcap_files != 1) {
+                fprintf(
+                    stderr,
+                    "错误: -f --config 每次只接受一个 PCAP；请为每个 PCAP 单独生成 CSV\n");
+                return -1;
+            }
+            if (args->output_format != FILE_FORMAT_CSV) {
+                fprintf(
+                    stderr,
+                    "错误: -f --config 的 Schema 特征输出必须使用 -c CSV\n");
+                return -1;
+            }
+            if (args->with_rawbow) {
+                fprintf(
+                    stderr,
+                    "错误: -w 只适用于未指定 --config 的旧固定向量路径\n");
+                return -1;
+            }
+            if (args->inference_threads != 0U) {
+                fprintf(
+                    stderr,
+                    "错误: Schema 特征提取不创建 Inference Worker\n");
+                return -1;
+            }
+            if (args->pipeline_mode != nullptr &&
+                strcmp(args->pipeline_mode, "legacy") == 0) {
+                fprintf(
+                    stderr,
+                    "错误: -f --config 需要选择现代 Pipeline Mode\n");
+                return -1;
+            }
         }
     }
 
@@ -750,7 +800,42 @@ int main(int argc, char *argv[])
 
         case 2:
             // 特征提取模式
-            if (args.num_pcap_files > 0) {
+            if (args.feature_config_file != nullptr) {
+                ktag_demo_pipeline_config pipeline_config;
+                ktag_demo_pipeline_config_overrides overrides;
+                overrides.force_enable = true;
+                overrides.feature_only = true;
+                overrides.feature_threads = args.feature_threads;
+                if (args.pipeline_mode != nullptr) {
+                    overrides.mode_set = true;
+                    (void)ktag_demo_pipeline_mode_from_name(
+                        args.pipeline_mode, &overrides.mode);
+                }
+                std::string pipeline_error;
+                const auto pipeline_result =
+                    ktag_demo_load_pipeline_config_with_overrides(
+                        args.feature_config_file,
+                        &overrides,
+                        &pipeline_config,
+                        &pipeline_error);
+                if (pipeline_result !=
+                    ktag_demo_pipeline_config_result::enabled) {
+                    fprintf(
+                        stderr,
+                        "Invalid feature pipeline configuration: %s\n",
+                        pipeline_error.c_str());
+                    ret = -1;
+                    break;
+                }
+                ret = ktag_demo_run_pipeline(
+                    pipeline_config,
+                    args.feature_config_file,
+                    (const char **)args.pcap_files,
+                    args.num_pcap_files,
+                    nullptr,
+                    args.output_file,
+                    ktag_demo_pipeline_output_format::csv);
+            } else if (args.num_pcap_files > 0) {
                 ret = feature_extraction_mode(args.pcap_files[0], args.output_file, args.with_rawbow);
             }
             break;
