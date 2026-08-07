@@ -1221,4 +1221,504 @@ TEST(KTAGDemoSchemaFeaturePipeline, RejectsMissingPluginAndSchemaFeature)
             ktag_demo_pipeline_output_format::csv));
 }
 
+TEST(KTAGDemoSchemaFeaturePipeline, RejectsReorderedProxyV1Contract)
+{
+    ktag_demo_pipeline_config config;
+    config.enabled = true;
+    config.feature_only = true;
+    config.mode = ktag_demo_pipeline_mode::single_thread;
+    config.feature_threads = 1U;
+    config.inference_threads = 1U;
+    config.schema_name = "ktag_proxy_v1";
+    config.schema_version = 1U;
+    config.plugin_paths = {PROXY_PLUGIN};
+    config.remove_features = {
+        "legacy.flow_id",
+        "network.src_ip",
+        "network.dst_ip",
+    };
+    for (const auto *provider :
+         ktag_proxy_features::KTAG_PROXY_PROVIDER_CATALOG) {
+        for (size_t index = 0U; index < provider->feature_count; ++index) {
+            config.add_features.emplace_back(
+                provider->features[index].feature_id);
+        }
+    }
+    ASSERT_EQ(68U, config.add_features.size());
+    std::swap(config.add_features[66U], config.add_features[67U]);
+    EXPECT_NE(
+        0,
+        ktag_demo_run_pipeline(
+            config,
+            "functest",
+            nullptr,
+            0,
+            nullptr,
+            "/tmp/ktag_unused.csv",
+            ktag_demo_pipeline_output_format::csv));
+}
+
+TEST(KTAGDemoSchemaFeaturePipeline, Writes619ValueProxyCsv)
+{
+    ktag_demo_pipeline_config_overrides overrides;
+    overrides.force_enable = true;
+    overrides.feature_only = true;
+    overrides.mode_set = true;
+    overrides.mode = ktag_demo_pipeline_mode::single_thread;
+    ktag_demo_pipeline_config config;
+    std::string error;
+    ASSERT_EQ(
+        ktag_demo_pipeline_config_result::enabled,
+        ktag_demo_load_pipeline_config_with_overrides(
+            OFFICIAL_PROXY_CONFIG, &overrides, &config, &error))
+        << error;
+    EXPECT_TRUE(config.feature_only);
+    EXPECT_EQ("ktag_proxy_v1", config.schema_name);
+    EXPECT_EQ(1U, config.schema_version);
+    EXPECT_EQ(1U, config.plugin_paths.size());
+    EXPECT_EQ(3U, config.remove_features.size());
+    EXPECT_EQ(68U, config.add_features.size());
+
+    const std::string pcap_path = write_test_pcap();
+    const std::string output_path =
+        "/tmp/ktag_proxy_schema_" + std::to_string(getpid()) + ".csv";
+    const char *pcap_files[] = {pcap_path.c_str()};
+    ASSERT_EQ(
+        0,
+        ktag_demo_run_pipeline(
+            config,
+            OFFICIAL_PROXY_CONFIG,
+            pcap_files,
+            1,
+            nullptr,
+            output_path.c_str(),
+            ktag_demo_pipeline_output_format::csv));
+
+    const std::string csv = read_text_file(output_path);
+    ASSERT_FALSE(csv.empty());
+    const size_t first_newline = csv.find('\n');
+    ASSERT_NE(std::string::npos, first_newline);
+    const std::string header = csv.substr(0U, first_newline);
+    EXPECT_EQ(
+        631U,
+        static_cast<uint32_t>(
+            std::count(header.begin(), header.end(), ',')) + 1U);
+    EXPECT_EQ(2, std::count(csv.begin(), csv.end(), '\n'));
+
+    std::remove(output_path.c_str());
+    std::remove(pcap_path.c_str());
+}
+
+TEST(KTAGDemoSchemaFeaturePipeline, WritesFrozenProxyAblationCsvs)
+{
+    struct ablation_case {
+        const char *schema_name;
+        std::vector<std::string> remove_features;
+        uint32_t csv_columns;
+    };
+    const std::array<ablation_case, 2U> cases{{
+        {
+            "proxy_endpoint_ablation_v1",
+            {"legacy.flow_id"},
+            633U,
+        },
+        {
+            "proxy_no_endpoint_ablation_v1",
+            {
+                "legacy.flow_id",
+                "network.src_ip",
+                "network.dst_ip",
+                "network.src_port",
+                "network.dst_port",
+            },
+            629U,
+        },
+    }};
+    const std::string pcap_path = write_test_pcap();
+    const char *pcap_files[] = {pcap_path.c_str()};
+
+    for (const auto &test_case : cases) {
+        ktag_demo_pipeline_config config;
+        config.enabled = true;
+        config.feature_only = true;
+        config.mode = ktag_demo_pipeline_mode::single_thread;
+        config.feature_threads = 1U;
+        config.inference_threads = 1U;
+        config.schema_name = test_case.schema_name;
+        config.schema_version = 1U;
+        config.plugin_paths = {PROXY_PLUGIN};
+        config.remove_features = test_case.remove_features;
+        add_proxy_feature_ids(&config);
+        ASSERT_EQ(68U, config.add_features.size());
+
+        const std::string output_path =
+            "/tmp/ktag_proxy_ablation_" + std::string(test_case.schema_name) +
+            "_" + std::to_string(getpid()) + ".csv";
+        ASSERT_EQ(
+            0,
+            ktag_demo_run_pipeline(
+                config,
+                "functest",
+                pcap_files,
+                1,
+                nullptr,
+                output_path.c_str(),
+                ktag_demo_pipeline_output_format::csv));
+
+        const std::string csv = read_text_file(output_path);
+        const size_t first_newline = csv.find('\n');
+        ASSERT_NE(std::string::npos, first_newline);
+        const std::string header = csv.substr(0U, first_newline);
+        EXPECT_EQ(
+            test_case.csv_columns,
+            static_cast<uint32_t>(
+                std::count(header.begin(), header.end(), ',')) + 1U);
+        if (std::string(test_case.schema_name) ==
+            "proxy_endpoint_ablation_v1") {
+            EXPECT_NE(std::string::npos, header.find("network.src_ip"));
+            EXPECT_NE(std::string::npos, header.find("network.dst_port"));
+        } else {
+            EXPECT_EQ(std::string::npos, header.find("network.src_ip"));
+            EXPECT_EQ(std::string::npos, header.find("network.dst_port"));
+        }
+        std::remove(output_path.c_str());
+    }
+    std::remove(pcap_path.c_str());
+}
+
+TEST(KTAGProxyFeaturePlugin, ExposesFrozenCatalogAndAbiDescriptor)
+{
+    EXPECT_EQ(
+        3U,
+        ktag_proxy_features::KTAG_PROXY_PROVIDER_CATALOG.size());
+    EXPECT_EQ(
+        68U,
+        ktag_proxy_features::KTAG_PROXY_FEATURE_DESCRIPTOR_COUNT);
+    EXPECT_EQ(
+        268U,
+        ktag_proxy_features::KTAG_PROXY_FEATURE_VALUE_COUNT);
+
+    std::unordered_set<std::string> feature_ids;
+    for (const auto *provider :
+         ktag_proxy_features::KTAG_PROXY_PROVIDER_CATALOG) {
+        ASSERT_NE(nullptr, provider);
+        EXPECT_EQ(1U, provider->provider_version);
+        for (size_t index = 0U;
+             index < provider->feature_count;
+             ++index) {
+            const auto &feature = provider->features[index];
+            ASSERT_NE(nullptr, feature.feature_id);
+            EXPECT_GT(feature.dimension, 0U);
+            EXPECT_TRUE(feature_ids.emplace(feature.feature_id).second)
+                << feature.feature_id;
+        }
+    }
+    EXPECT_EQ(68U, feature_ids.size());
+
+    ktag_feature_plugin_descriptor descriptor{};
+    descriptor.struct_size = sizeof(descriptor);
+    descriptor.api_version = KTAG_API_VERSION;
+    EXPECT_EQ(
+        KTAG_ERROR_NOT_SUPPORTED,
+        ktag_feature_plugin_query(
+            KTAG_FEATURE_PLUGIN_ABI_VERSION + 1U, &descriptor));
+
+    descriptor = query_proxy_plugin();
+    EXPECT_STREQ("ktag.proxy.features", descriptor.plugin_id);
+    EXPECT_STREQ("1.0.0", descriptor.plugin_version);
+    EXPECT_EQ(
+        KTAG_FEATURE_PLUGIN_ABI_VERSION,
+        descriptor.plugin_abi_version);
+    EXPECT_EQ(0U, descriptor.reserved);
+    ASSERT_NE(nullptr, descriptor.register_providers);
+
+    ktag_feature_registry *registry = ktag_feature_registry_create();
+    ASSERT_NE(nullptr, registry);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        descriptor.register_providers(nullptr, registry));
+    EXPECT_EQ(3U, ktag_feature_registry_get_provider_count(registry));
+
+    /* Leave the middle Provider registered to force rollback after the first
+     * Provider of the next transaction has been added successfully. */
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_registry_unregister(
+            registry,
+            ktag_proxy_features::KTAG_PROXY_SEQUENCE_PROVIDER_ID));
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_registry_unregister(
+            registry,
+            ktag_proxy_features::KTAG_PROXY_QUIC_PROVIDER_ID));
+    ASSERT_EQ(
+        KTAG_ERROR_ALREADY_EXISTS,
+        descriptor.register_providers(nullptr, registry));
+    EXPECT_EQ(1U, ktag_feature_registry_get_provider_count(registry));
+
+    ktag_feature_schema *rollback_schema =
+        ktag_feature_schema_create("proxy_rollback_check", 1U);
+    ASSERT_NE(nullptr, rollback_schema);
+    EXPECT_EQ(
+        KTAG_ERROR_NOT_FOUND,
+        ktag_feature_schema_add_registered(
+            rollback_schema,
+            registry,
+            ktag_proxy_features::KTAG_PROXY_SEQUENCE_FEATURES[0U]
+                .feature_id));
+    EXPECT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_schema_add_registered(
+            rollback_schema,
+            registry,
+            ktag_proxy_features::KTAG_PROXY_TCP_SIGNATURE_FEATURES[0U]
+                .feature_id));
+    ktag_feature_schema_destroy(rollback_schema);
+    ktag_feature_registry_destroy(registry);
+}
+
+TEST(KTAGProxyFeaturePlugin, LoadsOnceAndUnloadsAfterRegistry)
+{
+    ktag_feature_registry *registry = ktag_feature_registry_create();
+    ASSERT_NE(nullptr, registry);
+    ktag_demo_feature_plugin_loader loader;
+    std::string error;
+    ASSERT_TRUE(loader.load(PROXY_PLUGIN, registry, &error)) << error;
+    EXPECT_EQ(1U, loader.size());
+    EXPECT_EQ("ktag.proxy.features", loader.plugin_id(0U));
+    EXPECT_EQ(3U, ktag_feature_registry_get_provider_count(registry));
+    EXPECT_FALSE(loader.load(PROXY_PLUGIN, registry, &error));
+
+    ktag_feature_registry_destroy(registry);
+    loader.unload_all();
+    EXPECT_EQ(0U, loader.size());
+}
+
+TEST(KTAGProxyFeaturePlugin, BuildsLegacyProxyAndAvailableSchemas)
+{
+    const auto descriptor = query_proxy_plugin();
+    ASSERT_NE(nullptr, descriptor.register_providers);
+    ktag_feature_registry *registry = ktag_feature_registry_create();
+    ASSERT_NE(nullptr, registry);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_registry_register_legacy_builtins(registry));
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        descriptor.register_providers(nullptr, registry));
+    EXPECT_EQ(7U, ktag_feature_registry_get_provider_count(registry));
+
+    ktag_feature_schema *legacy =
+        ktag_feature_schema_create_legacy_v1();
+    ASSERT_NE(nullptr, legacy);
+    EXPECT_EQ(
+        53U,
+        ktag_feature_schema_get_feature_count(legacy));
+    EXPECT_EQ(
+        354U,
+        ktag_feature_schema_get_value_count(legacy));
+    EXPECT_EQ(
+        0xdd48882b53bebfa5ULL,
+        ktag_feature_schema_get_hash(legacy));
+
+    ktag_feature_schema *proxy =
+        ktag_feature_schema_create("ktag_proxy_v1", 1U);
+    ASSERT_NE(nullptr, proxy);
+    const std::unordered_set<std::string> excluded{
+        "legacy.flow_id",
+        "network.src_ip",
+        "network.dst_ip",
+    };
+    for (uint32_t index = 0U;
+         index < ktag_feature_schema_get_feature_count(legacy);
+         ++index) {
+        ktag_feature_descriptor feature{};
+        uint32_t offset = 0U;
+        ASSERT_EQ(
+            KTAG_SUCCESS,
+            ktag_feature_schema_get_descriptor(
+                legacy, index, &feature, &offset));
+        if (excluded.find(feature.feature_id) == excluded.end()) {
+            ASSERT_EQ(
+                KTAG_SUCCESS,
+                ktag_feature_schema_add_registered(
+                    proxy, registry, feature.feature_id));
+        }
+    }
+    ASSERT_TRUE(add_proxy_catalog(proxy, registry));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(proxy));
+    EXPECT_EQ(
+        118U,
+        ktag_feature_schema_get_feature_count(proxy));
+    EXPECT_EQ(
+        619U,
+        ktag_feature_schema_get_value_count(proxy));
+    EXPECT_EQ(
+        0xca1eae5086b41ee5ULL,
+        ktag_feature_schema_get_hash(proxy));
+    for (const auto &feature_id : excluded) {
+        ktag_feature_descriptor feature{};
+        uint32_t offset = 0U;
+        EXPECT_EQ(
+            KTAG_ERROR_NOT_FOUND,
+            ktag_feature_schema_find(
+                proxy, feature_id.c_str(), &feature, &offset));
+    }
+    const char *required[] = {
+        "network.src_port",
+        "network.dst_port",
+        "network.protocol",
+        "traffic.send.byte_count",
+        "traffic.receive.byte_count",
+        "rawbow.crc_histogram",
+    };
+    for (const char *feature_id : required) {
+        ktag_feature_descriptor feature{};
+        uint32_t offset = 0U;
+        EXPECT_EQ(
+            KTAG_SUCCESS,
+            ktag_feature_schema_find(
+                proxy, feature_id, &feature, &offset));
+    }
+    uint32_t proxy_schema_index = 50U;
+    uint32_t expected_offset = 351U;
+    for (const auto *provider :
+         ktag_proxy_features::KTAG_PROXY_PROVIDER_CATALOG) {
+        for (size_t index = 0U; index < provider->feature_count; ++index) {
+            ktag_feature_descriptor feature{};
+            uint32_t offset = 0U;
+            ASSERT_EQ(
+                KTAG_SUCCESS,
+                ktag_feature_schema_get_descriptor(
+                    proxy, proxy_schema_index, &feature, &offset));
+            EXPECT_STREQ(
+                provider->features[index].feature_id,
+                feature.feature_id);
+            EXPECT_EQ(provider->features[index].dimension, feature.dimension);
+            EXPECT_EQ(expected_offset, offset);
+            expected_offset += feature.dimension;
+            ++proxy_schema_index;
+        }
+    }
+    EXPECT_EQ(118U, proxy_schema_index);
+    EXPECT_EQ(619U, expected_offset);
+
+    ktag_feature_schema *available =
+        ktag_feature_schema_create("ktag_proxy_available_v1", 1U);
+    ASSERT_NE(nullptr, available);
+    for (uint32_t index = 0U;
+         index < ktag_feature_schema_get_feature_count(legacy);
+         ++index) {
+        ktag_feature_descriptor feature{};
+        uint32_t offset = 0U;
+        ASSERT_EQ(
+            KTAG_SUCCESS,
+            ktag_feature_schema_get_descriptor(
+                legacy, index, &feature, &offset));
+        ASSERT_EQ(
+            KTAG_SUCCESS,
+            ktag_feature_schema_add_registered(
+                available, registry, feature.feature_id));
+    }
+    ASSERT_TRUE(add_proxy_catalog(available, registry));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(available));
+    EXPECT_EQ(
+        121U,
+        ktag_feature_schema_get_feature_count(available));
+    EXPECT_EQ(
+        622U,
+        ktag_feature_schema_get_value_count(available));
+
+    ktag_feature_schema_destroy(available);
+    ktag_feature_schema_destroy(proxy);
+    ktag_feature_schema_destroy(legacy);
+    ktag_feature_registry_destroy(registry);
+}
+
+TEST(KTAGProxyFeaturePlugin, ProvidersWriteCompleteFeatureVector)
+{
+    const auto descriptor = query_proxy_plugin();
+    ASSERT_NE(nullptr, descriptor.register_providers);
+    ktag_feature_registry *registry = ktag_feature_registry_create();
+    ASSERT_NE(nullptr, registry);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        descriptor.register_providers(nullptr, registry));
+
+    ktag_feature_schema *schema =
+        ktag_feature_schema_create("ktag_proxy_features_only_v1", 1U);
+    ASSERT_NE(nullptr, schema);
+    ASSERT_TRUE(add_proxy_catalog(schema, registry));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(schema));
+    ASSERT_EQ(
+        268U,
+        ktag_feature_schema_get_value_count(schema));
+
+    ktag_feature_config config{};
+    config.struct_size = sizeof(config);
+    config.api_version = KTAG_API_VERSION;
+    config.schema = schema;
+    config.registry = registry;
+    config.flow_capacity = 8U;
+    config.udp_packet_limit = 100U;
+    config.lifecycle_mode = KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT;
+    ktag_feature_context *context = ktag_feature_create(&config);
+    ktag_feature_batch *batch =
+        ktag_feature_batch_create(schema, 1U);
+    ASSERT_NE(nullptr, context);
+    ASSERT_NE(nullptr, batch);
+
+    const auto frame = make_proxy_test_udp_frame();
+    ktag_packet packet{};
+    ktag_packet_init(&packet);
+    packet.data = frame.data();
+    packet.captured_length = static_cast<uint32_t>(frame.size());
+    packet.original_length = static_cast<uint32_t>(frame.size());
+    packet.link_type = KTAG_CAPTURE_LINKTYPE_ETHERNET;
+    packet.sequence = 1U;
+    packet.timestamp.seconds = 1U;
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_process_packet(context, &packet, batch));
+    EXPECT_EQ(0U, ktag_feature_batch_get_count(batch));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_flush(context, batch));
+    ASSERT_EQ(1U, ktag_feature_batch_get_count(batch));
+
+    ktag_feature_record record{};
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_batch_get_record(batch, 0U, &record));
+    ASSERT_EQ(268U, record.value_count);
+    for (uint32_t index = 0U; index < record.value_count; ++index) {
+        EXPECT_TRUE(std::isfinite(record.values[index])) << index;
+    }
+    EXPECT_FLOAT_EQ(1.0F, record.values[0U]);
+    EXPECT_FLOAT_EQ(1.0F, record.values[96U]);
+    EXPECT_FLOAT_EQ(1.0F, record.values[97U]);
+    EXPECT_FLOAT_EQ(1.0F, record.values[113U]);
+    EXPECT_FLOAT_EQ(1.0F, record.values[147U]);
+    for (uint32_t index = 148U; index < 200U; ++index) {
+        EXPECT_FLOAT_EQ(0.0F, record.values[index]) << index;
+    }
+    std::array<float, 68U> expected_quic{};
+    expected_quic[0U] = 1.0F;   /* packet_candidate_count */
+    expected_quic[2U] = 1.0F;   /* parse_failure_count */
+    expected_quic[3U] = 1.0F;   /* fixed_bit_count */
+    expected_quic[5U] = 1.0F;   /* short_header_count */
+    expected_quic[18U] = 1.0F;  /* signed_datagram_length[0] */
+    expected_quic[34U] = 6.0F;  /* header_type_sequence[0] */
+    expected_quic[50U] = 1.0F;  /* sequence_valid_count */
+    expected_quic[55U] = 1.0F;  /* high_nibble_histogram[4] */
+    for (size_t index = 0U; index < expected_quic.size(); ++index) {
+        EXPECT_FLOAT_EQ(
+            expected_quic[index], record.values[200U + index])
+            << index;
+    }
+
+    ktag_feature_batch_destroy(batch);
+    ktag_feature_destroy(context);
+    ktag_feature_schema_destroy(schema);
+    ktag_feature_registry_destroy(registry);
+}
+
 } // namespace
