@@ -63,6 +63,7 @@ KTAG当前适配的处理器和操作系统为鲲鹏920系列处理器，openEul
 | [API参考](docs/zh/api_reference.md#api参考) | 提供了特征提取和特征推理的接口说明。 |
 | [迁移指南](docs/zh/migration_guide.md) | 说明旧固定向量和旧模型到三层 API 的迁移方式。 |
 | [多线程 demo](docs/zh/demo_pipeline.md) | 说明四种管线模式、背压与 Feature Plugin。 |
+| [应用代理与加密代理流量分类功能设计](docs/zh/proxy_protocol_identification_design.md) | 说明应用与代理双栈分类、代理 Feature Plugin、轻量级 QUIC 与完整实施步骤。 |
 | [版本说明书](docs/zh/release_notes.md#版本说明书) | 提供了版本更新说明。 |
 
 ## 6. 贡献声明
