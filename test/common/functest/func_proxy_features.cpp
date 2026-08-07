@@ -836,4 +836,439 @@ private:
     bool finished_ = false;
 };
 
+class quic_harness {
+public:
+    quic_harness()
+    {
+        ktag_feature_plugin_descriptor plugin{};
+        plugin.struct_size = sizeof(plugin);
+        plugin.api_version = KTAG_API_VERSION;
+        if (ktag_feature_plugin_query(
+                KTAG_FEATURE_PLUGIN_ABI_VERSION,
+                &plugin) != KTAG_SUCCESS ||
+            plugin.register_providers == nullptr) {
+            return;
+        }
+
+        registry_ = ktag_feature_registry_create();
+        if (registry_ == nullptr ||
+            plugin.register_providers(nullptr, registry_) !=
+                KTAG_SUCCESS) {
+            return;
+        }
+        schema_ = ktag_feature_schema_create(
+            "proxy_quic_test_v1", 1U);
+        if (schema_ == nullptr) {
+            return;
+        }
+        for (const auto &feature :
+             ktag_proxy_features::KTAG_PROXY_QUIC_FEATURES) {
+            if (ktag_feature_schema_add_registered(
+                    schema_, registry_, feature.feature_id) !=
+                KTAG_SUCCESS) {
+                return;
+            }
+        }
+        if (ktag_feature_schema_freeze(schema_) != KTAG_SUCCESS) {
+            return;
+        }
+
+        ktag_feature_config config{};
+        config.struct_size = sizeof(config);
+        config.api_version = KTAG_API_VERSION;
+        config.schema = schema_;
+        config.registry = registry_;
+        config.flow_capacity = 8U;
+        config.udp_packet_limit = 1024U;
+        config.lifecycle_mode = KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT;
+        context_ = ktag_feature_create(&config);
+        batch_ = ktag_feature_batch_create(schema_, 1U);
+        valid_ = context_ != nullptr && batch_ != nullptr;
+    }
+
+    ~quic_harness()
+    {
+        ktag_feature_batch_destroy(batch_);
+        ktag_feature_destroy(context_);
+        ktag_feature_schema_destroy(schema_);
+        ktag_feature_registry_destroy(registry_);
+    }
+
+    quic_harness(const quic_harness &) = delete;
+    quic_harness &operator=(const quic_harness &) = delete;
+
+    bool valid() const
+    {
+        return valid_;
+    }
+
+    bool process(
+        const std::vector<uint8_t> &frame,
+        uint64_t sequence,
+        int64_t seconds = 1,
+        int32_t microseconds = 0)
+    {
+        if (!valid_ || frame.empty() || finished_) {
+            return false;
+        }
+        ktag_packet packet{};
+        ktag_packet_init(&packet);
+        packet.data = frame.data();
+        packet.captured_length =
+            static_cast<uint32_t>(frame.size());
+        packet.original_length =
+            static_cast<uint32_t>(frame.size());
+        packet.link_type = KTAG_CAPTURE_LINKTYPE_ETHERNET;
+        packet.sequence = sequence;
+        packet.timestamp.seconds = seconds;
+        packet.timestamp.microseconds = microseconds;
+        return ktag_feature_process_packet(
+                   context_, &packet, batch_) == KTAG_SUCCESS &&
+            ktag_feature_batch_get_count(batch_) == 0U;
+    }
+
+    bool finish()
+    {
+        if (!valid_ || finished_ ||
+            ktag_feature_flush(context_, batch_) != KTAG_SUCCESS ||
+            ktag_feature_batch_get_count(batch_) != 1U ||
+            ktag_feature_batch_get_record(
+                batch_, 0U, &record_) != KTAG_SUCCESS) {
+            return false;
+        }
+        finished_ = true;
+        return record_.value_count == 68U;
+    }
+
+    bool finish_empty()
+    {
+        if (!valid_ || finished_ ||
+            ktag_feature_flush(context_, batch_) != KTAG_SUCCESS) {
+            return false;
+        }
+        finished_ = true;
+        return ktag_feature_batch_get_count(batch_) == 0U;
+    }
+
+    const float *feature(
+        size_t catalog_index,
+        uint32_t expected_dimension = 1U) const
+    {
+        if (!finished_ ||
+            catalog_index >=
+                ktag_proxy_features::KTAG_PROXY_QUIC_FEATURES.size()) {
+            return nullptr;
+        }
+        ktag_feature_descriptor descriptor{};
+        uint32_t offset = 0U;
+        if (ktag_feature_schema_find(
+                schema_,
+                ktag_proxy_features::KTAG_PROXY_QUIC_FEATURES
+                    [catalog_index].feature_id,
+                &descriptor,
+                &offset) != KTAG_SUCCESS ||
+            descriptor.dimension != expected_dimension ||
+            offset > record_.value_count ||
+            expected_dimension > record_.value_count - offset) {
+            return nullptr;
+        }
+        return record_.values + offset;
+    }
+
+    std::vector<float> values() const
+    {
+        return finished_ && record_.values != nullptr ?
+            std::vector<float>(
+                record_.values,
+                record_.values + record_.value_count) :
+            std::vector<float>{};
+    }
+
+private:
+    ktag_feature_registry *registry_ = nullptr;
+    ktag_feature_schema *schema_ = nullptr;
+    ktag_feature_context *context_ = nullptr;
+    ktag_feature_batch *batch_ = nullptr;
+    ktag_feature_record record_{};
+    bool valid_ = false;
+    bool finished_ = false;
+};
+
+float expected_log2(uint64_t value)
+{
+    return static_cast<float>(
+        std::log2(1.0 + static_cast<double>(value)));
+}
+
+TEST(KTAGProxySequence, ExtractsSignedTcpSequenceAndBursts)
+{
+    sequence_harness harness;
+    ASSERT_TRUE(harness.valid());
+    ASSERT_TRUE(harness.process(
+        make_transport_frame(false, true, false, 10U, 0x18U, 1U),
+        1U, 1, 0));
+    ASSERT_TRUE(harness.process(
+        make_transport_frame(false, true, false, 0U, 0x10U, 2U),
+        2U, 1, 0));
+    ASSERT_TRUE(harness.process(
+        make_transport_frame(false, true, true, 20U, 0x18U, 1U),
+        3U, 1, 100));
+    ASSERT_TRUE(harness.process(
+        make_transport_frame(false, true, true, 5U, 0x10U, 2U),
+        4U, 1, 300));
+    ASSERT_TRUE(harness.process(
+        make_transport_frame(false, true, false, 15U, 0x18U, 3U),
+        5U, 1, 400));
+    ASSERT_TRUE(harness.finish());
+
+    const float *payload =
+        harness.feature(SIGNED_PAYLOAD_LENGTH, 32U);
+    const float *time =
+        harness.feature(RELATIVE_TIME_LOG2_US, 32U);
+    const float *flags = harness.feature(TCP_FLAGS, 32U);
+    const float *sequence_count =
+        harness.feature(SEQUENCE_VALID_COUNT, 1U);
+    const float *burst_packets =
+        harness.feature(BURST_SIGNED_PACKET_COUNT, 16U);
+    const float *burst_payload =
+        harness.feature(BURST_SIGNED_PAYLOAD_BYTES_LOG2, 16U);
+    const float *burst_duration =
+        harness.feature(BURST_DURATION_LOG2_US, 16U);
+    const float *burst_count =
+        harness.feature(BURST_VALID_COUNT, 1U);
+    const float *switch_count =
+        harness.feature(DIRECTION_SWITCH_COUNT, 1U);
+    const float *ratio =
+        harness.feature(FORWARD_PAYLOAD_RATIO, 1U);
+    ASSERT_NE(nullptr, payload);
+    ASSERT_NE(nullptr, time);
+    ASSERT_NE(nullptr, flags);
+    ASSERT_NE(nullptr, sequence_count);
+    ASSERT_NE(nullptr, burst_packets);
+    ASSERT_NE(nullptr, burst_payload);
+    ASSERT_NE(nullptr, burst_duration);
+    ASSERT_NE(nullptr, burst_count);
+    ASSERT_NE(nullptr, switch_count);
+    ASSERT_NE(nullptr, ratio);
+
+    const std::array<float, 5U> expected_payload{{
+        10.0F, 0.0F, -20.0F, -5.0F, 15.0F}};
+    const std::array<float, 5U> expected_flags{{
+        24.0F, 16.0F, -24.0F, -16.0F, 24.0F}};
+    for (size_t index = 0U; index < expected_payload.size(); ++index) {
+        EXPECT_FLOAT_EQ(expected_payload[index], payload[index]);
+        EXPECT_FLOAT_EQ(expected_flags[index], flags[index]);
+    }
+    EXPECT_FLOAT_EQ(0.0F, time[0U]);
+    EXPECT_FLOAT_EQ(0.0F, time[1U]);
+    EXPECT_FLOAT_EQ(expected_log2(100U), time[2U]);
+    EXPECT_FLOAT_EQ(expected_log2(300U), time[3U]);
+    EXPECT_FLOAT_EQ(expected_log2(400U), time[4U]);
+    EXPECT_FLOAT_EQ(5.0F, sequence_count[0U]);
+    for (size_t index = 5U; index < 32U; ++index) {
+        EXPECT_FLOAT_EQ(0.0F, payload[index]);
+        EXPECT_FLOAT_EQ(0.0F, time[index]);
+        EXPECT_FLOAT_EQ(0.0F, flags[index]);
+    }
+
+    EXPECT_FLOAT_EQ(2.0F, burst_packets[0U]);
+    EXPECT_FLOAT_EQ(-2.0F, burst_packets[1U]);
+    EXPECT_FLOAT_EQ(1.0F, burst_packets[2U]);
+    EXPECT_FLOAT_EQ(expected_log2(10U), burst_payload[0U]);
+    EXPECT_FLOAT_EQ(-expected_log2(25U), burst_payload[1U]);
+    EXPECT_FLOAT_EQ(expected_log2(15U), burst_payload[2U]);
+    EXPECT_FLOAT_EQ(0.0F, burst_duration[0U]);
+    EXPECT_FLOAT_EQ(expected_log2(200U), burst_duration[1U]);
+    EXPECT_FLOAT_EQ(0.0F, burst_duration[2U]);
+    EXPECT_FLOAT_EQ(3.0F, burst_count[0U]);
+    EXPECT_FLOAT_EQ(2.0F, switch_count[0U]);
+    EXPECT_FLOAT_EQ(0.5F, ratio[0U]);
+}
+
+TEST(KTAGProxySequence, ProducesSameFeaturesAcrossIpVersions)
+{
+    sequence_harness ipv4;
+    sequence_harness ipv6;
+    ASSERT_TRUE(ipv4.valid());
+    ASSERT_TRUE(ipv6.valid());
+    for (auto *harness : {&ipv4, &ipv6}) {
+        const bool use_ipv6 = harness == &ipv6;
+        ASSERT_TRUE(harness->process(
+            make_transport_frame(
+                use_ipv6, false, false, 7U),
+            1U, 2, 0));
+        ASSERT_TRUE(harness->process(
+            make_transport_frame(
+                use_ipv6, false, true, 9U),
+            2U, 2, 10));
+        ASSERT_TRUE(harness->process(
+            make_transport_frame(
+                use_ipv6, false, false, 0U),
+            3U, 2, 10));
+        ASSERT_TRUE(harness->finish());
+    }
+
+    const auto ipv4_values = ipv4.values();
+    const auto ipv6_values = ipv6.values();
+    ASSERT_EQ(148U, ipv4_values.size());
+    ASSERT_EQ(ipv4_values.size(), ipv6_values.size());
+    for (size_t index = 0U; index < ipv4_values.size(); ++index) {
+        EXPECT_FLOAT_EQ(ipv4_values[index], ipv6_values[index])
+            << index;
+    }
+
+    const float *payload =
+        ipv4.feature(SIGNED_PAYLOAD_LENGTH, 32U);
+    const float *flags = ipv4.feature(TCP_FLAGS, 32U);
+    ASSERT_NE(nullptr, payload);
+    ASSERT_NE(nullptr, flags);
+    EXPECT_FLOAT_EQ(7.0F, payload[0U]);
+    EXPECT_FLOAT_EQ(-9.0F, payload[1U]);
+    EXPECT_FLOAT_EQ(0.0F, payload[2U]);
+    for (size_t index = 0U; index < 32U; ++index) {
+        EXPECT_FLOAT_EQ(0.0F, flags[index]);
+    }
+
+    sequence_harness tcp_ipv4;
+    sequence_harness tcp_ipv6;
+    ASSERT_TRUE(tcp_ipv4.valid());
+    ASSERT_TRUE(tcp_ipv6.valid());
+    for (auto *harness : {&tcp_ipv4, &tcp_ipv6}) {
+        const bool use_ipv6 = harness == &tcp_ipv6;
+        ASSERT_TRUE(harness->process(
+            make_transport_frame(
+                use_ipv6, true, false, 11U, 0x18U, 1U),
+            1U, 5, 0));
+        ASSERT_TRUE(harness->process(
+            make_transport_frame(
+                use_ipv6, true, true, 13U, 0x10U, 1U),
+            2U, 5, 20));
+        ASSERT_TRUE(harness->finish());
+    }
+    const auto tcp_ipv4_values = tcp_ipv4.values();
+    const auto tcp_ipv6_values = tcp_ipv6.values();
+    ASSERT_EQ(tcp_ipv4_values.size(), tcp_ipv6_values.size());
+    for (size_t index = 0U; index < tcp_ipv4_values.size(); ++index) {
+        EXPECT_FLOAT_EQ(
+            tcp_ipv4_values[index], tcp_ipv6_values[index])
+            << index;
+    }
+}
+
+TEST(KTAGProxySequence, EnforcesPacketAndBurstCaps)
+{
+    sequence_harness exactly_32;
+    ASSERT_TRUE(exactly_32.valid());
+    for (uint32_t index = 0U; index < 32U; ++index) {
+        ASSERT_TRUE(exactly_32.process(
+            make_transport_frame(false, false, false, 2U),
+            index + 1U, 3, static_cast<int32_t>(index)));
+    }
+    ASSERT_TRUE(exactly_32.finish());
+    const float *exact_sequence_count =
+        exactly_32.feature(SEQUENCE_VALID_COUNT, 1U);
+    const float *exact_burst_count =
+        exactly_32.feature(BURST_VALID_COUNT, 1U);
+    const float *exact_burst_packets =
+        exactly_32.feature(BURST_SIGNED_PACKET_COUNT, 16U);
+    ASSERT_NE(nullptr, exact_sequence_count);
+    ASSERT_NE(nullptr, exact_burst_count);
+    ASSERT_NE(nullptr, exact_burst_packets);
+    EXPECT_FLOAT_EQ(32.0F, exact_sequence_count[0U]);
+    EXPECT_FLOAT_EQ(1.0F, exact_burst_count[0U]);
+    EXPECT_FLOAT_EQ(32.0F, exact_burst_packets[0U]);
+
+    sequence_harness over_limit;
+    ASSERT_TRUE(over_limit.valid());
+    for (uint32_t index = 0U; index < 33U; ++index) {
+        ASSERT_TRUE(over_limit.process(
+            make_transport_frame(
+                false,
+                false,
+                (index & 1U) != 0U,
+                1U),
+            index + 1U, 4, static_cast<int32_t>(index)));
+    }
+    ASSERT_TRUE(over_limit.finish());
+    const float *payload =
+        over_limit.feature(SIGNED_PAYLOAD_LENGTH, 32U);
+    const float *sequence_count =
+        over_limit.feature(SEQUENCE_VALID_COUNT, 1U);
+    const float *burst_packets =
+        over_limit.feature(BURST_SIGNED_PACKET_COUNT, 16U);
+    const float *burst_count =
+        over_limit.feature(BURST_VALID_COUNT, 1U);
+    const float *switch_count =
+        over_limit.feature(DIRECTION_SWITCH_COUNT, 1U);
+    const float *ratio =
+        over_limit.feature(FORWARD_PAYLOAD_RATIO, 1U);
+    ASSERT_NE(nullptr, payload);
+    ASSERT_NE(nullptr, sequence_count);
+    ASSERT_NE(nullptr, burst_packets);
+    ASSERT_NE(nullptr, burst_count);
+    ASSERT_NE(nullptr, switch_count);
+    ASSERT_NE(nullptr, ratio);
+    EXPECT_FLOAT_EQ(32.0F, sequence_count[0U]);
+    EXPECT_FLOAT_EQ(16.0F, burst_count[0U]);
+    EXPECT_FLOAT_EQ(31.0F, switch_count[0U]);
+    for (uint32_t index = 0U; index < 32U; ++index) {
+        EXPECT_FLOAT_EQ(
+            (index & 1U) == 0U ? 1.0F : -1.0F,
+            payload[index]);
+    }
+    for (uint32_t index = 0U; index < 16U; ++index) {
+        EXPECT_FLOAT_EQ(
+            (index & 1U) == 0U ? 1.0F : -1.0F,
+            burst_packets[index]);
+    }
+    EXPECT_NEAR(17.0F / 33.0F, ratio[0U], 1e-6F);
+}
+
+TEST(KTAGProxySequence, ClampsReversedTimeAndHandlesLargePayload)
+{
+    sequence_harness timing;
+    ASSERT_TRUE(timing.valid());
+    ASSERT_TRUE(timing.process(
+        make_transport_frame(false, false, false, 1U),
+        1U, 10, 500000));
+    ASSERT_TRUE(timing.process(
+        make_transport_frame(false, false, false, 1U),
+        2U, 10, 500000));
+    ASSERT_TRUE(timing.process(
+        make_transport_frame(false, false, false, 1U),
+        3U, 9, 500000));
+    ASSERT_TRUE(timing.finish());
+    const float *time =
+        timing.feature(RELATIVE_TIME_LOG2_US, 32U);
+    const float *duration =
+        timing.feature(BURST_DURATION_LOG2_US, 16U);
+    ASSERT_NE(nullptr, time);
+    ASSERT_NE(nullptr, duration);
+    EXPECT_FLOAT_EQ(0.0F, time[0U]);
+    EXPECT_FLOAT_EQ(0.0F, time[1U]);
+    EXPECT_FLOAT_EQ(0.0F, time[2U]);
+    EXPECT_FLOAT_EQ(0.0F, duration[0U]);
+
+    sequence_harness large_payload;
+    ASSERT_TRUE(large_payload.valid());
+    ASSERT_TRUE(large_payload.process(
+        make_transport_frame(false, false, false, 60000U),
+        1U, 11, 0));
+    ASSERT_TRUE(large_payload.process(
+        make_transport_frame(false, false, true, 5000U),
+        2U, 11, 1));
+    ASSERT_TRUE(large_payload.finish());
+    const float *payload =
+        large_payload.feature(SIGNED_PAYLOAD_LENGTH, 32U);
+    const float *burst_payload =
+        large_payload.feature(
+            BURST_SIGNED_PAYLOAD_BYTES_LOG2, 16U);
+    ASSERT_NE(nullptr, payload);
+    ASSERT_NE(nullptr, burst_payload);
+    EXPECT_FLOAT_EQ(60000.0F, payload[0U]);
+    EXPECT_FLOAT_EQ(-5000.0F, payload[1U]);
+    EXPECT_TRUE(std::isfinite(burst_payload[0U]));
+    EXPECT_TRUE(std::isfinite(burst_payload[1U]));
+}
+
 } // namespace
