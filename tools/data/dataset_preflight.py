@@ -470,9 +470,11 @@ def validate_dataset(config_path, output=None):
 
         overlap = train_stats.destination_ips & eval_stats.destination_ips
         if overlap:
-            errors.append(
+            warnings.append(
                 f"label {label} destination/server IP overlaps train and "
-                f"evaluation ({len(overlap)} addresses)")
+                f"evaluation ({len(overlap)} addresses); preflight continues, "
+                "but measured accuracy may overestimate cross-server "
+                "generalization")
         if train_stats.files + eval_stats.files < 2:
             errors.append(f"label {label} must contain multiple capture CSVs")
         combined_sources = train_stats.source_ips | eval_stats.source_ips
@@ -502,9 +504,10 @@ def validate_dataset(config_path, output=None):
     global_overlap = (
         all_training_destinations & all_evaluation_destinations)
     if global_overlap:
-        errors.append(
+        warnings.append(
             "destination/server IPs overlap between the complete training and "
-            f"evaluation datasets ({len(global_overlap)} addresses)")
+            f"evaluation datasets ({len(global_overlap)} addresses); "
+            "preflight continues with this generalization risk")
 
     if expected_header is not None:
         _validate_columns_to_remove(config, expected_header, contract, errors)

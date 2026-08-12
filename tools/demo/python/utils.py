@@ -673,7 +673,6 @@ def prepare_model_data(combined_data, config):
             raise ValueError(f'{name} training requires Schema CSV metadata')
 
     logging.info('训练/评估最终输入列数: %d', X.shape[1])
-    logging.info('最终输入列: %s', list(X.columns))
     return {
         'X': X.reset_index(drop=True),
         'y': y,

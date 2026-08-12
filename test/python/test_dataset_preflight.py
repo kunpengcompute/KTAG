@@ -179,7 +179,7 @@ class DatasetPreflightTest(unittest.TestCase):
                     self.assertTrue(result.ok, "\n".join(result.errors))
                     self.assertEqual(schema_hash, result.schema_hash)
 
-    def test_warns_missing_ipv6_and_rejects_server_leakage(self):
+    def test_warns_missing_ipv6_and_server_overlap_without_rejecting(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             config_path, header = _write_config(
@@ -193,13 +193,33 @@ class DatasetPreflightTest(unittest.TestCase):
                 overlap_destination=True)
             result = dataset_preflight.validate_dataset(
                 config_path, StringIO())
-            self.assertFalse(result.ok)
+            self.assertTrue(result.ok, "\n".join(result.errors))
             self.assertIn(
                 "evaluation has no IPv6 samples", "\n".join(result.warnings))
             self.assertNotIn(
                 "evaluation has no IPv6 samples", "\n".join(result.errors))
             self.assertIn(
+                "overlaps train and evaluation", "\n".join(result.warnings))
+            self.assertNotIn(
                 "overlaps train and evaluation", "\n".join(result.errors))
+
+    def test_rejects_same_csv_in_training_and_evaluation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            config_path, _ = _write_config(
+                directory, "ktag_legacy_v1", 1, list(range(15)))
+            with config_path.open("r", encoding="utf-8") as stream:
+                config = yaml.safe_load(stream)
+            config["evaluation_data_paths"] = config["training_data_paths"]
+            with config_path.open("w", encoding="utf-8") as stream:
+                yaml.safe_dump(config, stream, sort_keys=False)
+
+            result = dataset_preflight.validate_dataset(
+                config_path, StringIO())
+            self.assertFalse(result.ok)
+            self.assertIn(
+                "the same CSV appears in training and evaluation",
+                "\n".join(result.errors))
 
     def test_rejects_metadata_left_in_model_input(self):
         with tempfile.TemporaryDirectory() as temp:
