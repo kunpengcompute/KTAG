@@ -7,7 +7,8 @@
 - `demo`：用于特征提取、训练、评估和在线推理的 C++ 示例程序。
 - `demo/python`：demo 在模型训练和评估时调用的 Python 辅助脚本。
 - `demo/config.yaml`：现有应用分类的完整训练、评估和推理示例。
-- `demo/proxy_config.yaml`：`ktag_proxy_v1` 的训练、评估、特征提取和推理配置；当前可按已有数据配置部分标签，正式交付目标为 13 类。
+- `demo/proxy_config.yaml`：`ktag_proxy_v1` 的训练、评估、特征提取和推理配置；
+  当前启用两个 VMess 承载类别，13 类只是数据齐备后的参考训练规划。
 - `data/feature_filter.py`：CSV 特征过滤工具。
 - `data/dataset_preflight.py`：只读检查双栈 Schema CSV 和现有训练/评估配置。
 - `capture` 和 `labeling`：流量抓包和打标签工具。
@@ -24,6 +25,7 @@ sh build.sh
 
 ```text
 output/libktag_capture.so
+output/libktag_feature.so
 output/libKDADK_feature_extract.so
 output/libktag_inference.so
 output/libKDADK_inference.so
@@ -33,6 +35,9 @@ output/plugins/libktag_proxy_features.so
 output/python/training.py
 output/python/evaluation.py
 ```
+
+代理插件是可选 Feature Provider；不加载该插件时，现有应用 Schema 不会增加
+`proxy.*` 特征。安装布局中，插件位于 KTAG 库目录下的 `plugins/` 子目录。
 
 工具默认开启。在配置 KTAG 时也可显式选择：
 
@@ -88,9 +93,11 @@ output/kdadk_demo -r tools/demo/config.yaml -p sample.pcap \
 
 - `tools/demo/config.yaml` 保持应用分类示例：`ktag_legacy_v1`，53 个 Feature
   Descriptor、354 个数值，Hash 为 `0xdd48882b53bebfa5`。
-- `tools/demo/proxy_config.yaml` 是代理完整配置：加载
+- `tools/demo/proxy_config.yaml` 是代理 Schema 完整结构和两分类数据示例配置：加载
   `libktag_proxy_features.so`，组合 `ktag_proxy_v1`，118 个 Feature Descriptor、
-  619 个数值，Hash 为 `0xca1eae5086b41ee5`；数字标签由当前启用的数据组顺序决定，正式交付时扩展为目标 13 类。
+  619 个数值，Hash 为 `0xca1eae5086b41ee5`；数字标签由当前启用的数据组顺序决定。
+  当前文件实际启用两个 VMess 承载类别，只是增量训练示例；普通流量和其余代理类别
+  需要在具备相应数据后作为新的外层组加入并重新训练。
 
 生成 Schema CSV：
 
@@ -158,3 +165,6 @@ ONNX、Scaler、Schema manifest，以及 `output_dir/feature_importance.csv`。�
 评估阶段始终保留 RandomForest 原始数字标签并调用 `predict_proba`；预测明细增加
 `confidence`。配置中的 `classification_report_file` 同时包含 overall、IPv4、IPv6
 报告及每标签 support，并在相同目录派生输出 overall、IPv4、IPv6 混淆矩阵 CSV。
+
+完整操作顺序、标签语义、模型包结构、IPv6/QUIC 范围和当前已知限制参见
+[`docs/zh/demo_pipeline.md`](../docs/zh/demo_pipeline.md)。
