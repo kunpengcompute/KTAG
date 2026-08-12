@@ -255,6 +255,25 @@ std::string write_test_pcap()
         {make_proxy_test_udp_frame()}, "ipv4");
 }
 
+std::string write_truncated_test_pcap()
+{
+    const std::string path = write_test_pcap_frames(
+        {make_proxy_test_udp_frame()}, "truncated");
+    std::vector<uint8_t> truncated_record;
+    append_le32(&truncated_record, 2U);
+    append_le32(&truncated_record, 0U);
+    append_le32(&truncated_record, 64U);
+    append_le32(&truncated_record, 64U);
+    truncated_record.insert(
+        truncated_record.end(), {0x01U, 0x02U, 0x03U});
+    std::ofstream output(path, std::ios::binary | std::ios::app);
+    output.write(
+        reinterpret_cast<const char *>(truncated_record.data()),
+        static_cast<std::streamsize>(truncated_record.size()));
+    output.close();
+    return path;
+}
+
 std::string read_text_file(const std::string &path)
 {
     std::ifstream input(path, std::ios::binary);
@@ -1122,6 +1141,56 @@ TEST(KTAGDemoSchemaFeaturePipeline, FlushesSameApplicationCsvInAllModes)
             EXPECT_EQ(expected_csv, csv)
                 << ktag_demo_pipeline_mode_name(test_case.mode);
         }
+        std::remove(output_path.c_str());
+    }
+    std::remove(pcap_path.c_str());
+}
+
+TEST(KTAGDemoSchemaFeaturePipeline, FlushesTruncatedPcapInAllModes)
+{
+    struct mode_case {
+        ktag_demo_pipeline_mode mode;
+        uint32_t feature_threads;
+        uint32_t output_threads;
+    };
+    const std::array<mode_case, 4U> modes{{
+        {ktag_demo_pipeline_mode::single_thread, 1U, 1U},
+        {ktag_demo_pipeline_mode::staged, 1U, 1U},
+        {ktag_demo_pipeline_mode::feature_parallel, 3U, 1U},
+        {ktag_demo_pipeline_mode::full_parallel, 3U, 3U},
+    }};
+    const std::string pcap_path = write_truncated_test_pcap();
+    const char *pcap_files[] = {pcap_path.c_str()};
+
+    for (const auto &test_case : modes) {
+        ktag_demo_pipeline_config config;
+        config.enabled = true;
+        config.feature_only = true;
+        config.mode = test_case.mode;
+        config.feature_threads = test_case.feature_threads;
+        config.inference_threads = test_case.output_threads;
+        config.lifecycle_mode = ktag_demo_feature_lifecycle_mode::modern;
+        const std::string output_path =
+            "/tmp/ktag_schema_truncated_" + std::to_string(getpid()) + "_" +
+            ktag_demo_pipeline_mode_name(test_case.mode) + ".csv";
+
+        testing::internal::CaptureStderr();
+        const int result = ktag_demo_run_pipeline(
+            config,
+            "functest",
+            pcap_files,
+            1,
+            nullptr,
+            output_path.c_str(),
+            ktag_demo_pipeline_output_format::csv);
+        const std::string warning = testing::internal::GetCapturedStderr();
+
+        ASSERT_EQ(0, result) << ktag_demo_pipeline_mode_name(test_case.mode);
+        EXPECT_NE(std::string::npos, warning.find("WARNING:"));
+        EXPECT_EQ(warning.find("WARNING:"), warning.rfind("WARNING:"));
+        EXPECT_NE(std::string::npos, warning.find("truncated"));
+        const std::string csv = read_text_file(output_path);
+        EXPECT_EQ(2, std::count(csv.begin(), csv.end(), '\n'));
         std::remove(output_path.c_str());
     }
     std::remove(pcap_path.c_str());

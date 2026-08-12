@@ -227,6 +227,7 @@ struct pipeline_source_statistics {
     uint64_t elapsed_nanoseconds = 0U;
     uint64_t queue_drops = 0U;
     uint64_t queue_failures = 0U;
+    std::string partial_capture_error;
 };
 
 struct pipeline_run_statistics {
@@ -252,6 +253,16 @@ uint64_t elapsed_nanoseconds(
     return static_cast<uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now() - start).count());
+}
+
+bool is_recoverable_truncated_capture(
+    bool live,
+    ktag_status status,
+    uint64_t packet_count,
+    const char *message)
+{
+    return !live && status == KTAG_ERROR_IO && packet_count != 0U &&
+        message != nullptr && std::strstr(message, "truncated") != nullptr;
 }
 
 void add_source_statistics(
@@ -851,8 +862,16 @@ bool run_single_source(
             break;
         }
         if (capture_status != KTAG_SUCCESS) {
-            *error = std::string("capture read failed: ") +
-                ktag_capture_get_last_error();
+            const char *capture_error = ktag_capture_get_last_error();
+            const char *capture_message =
+                capture_error == nullptr ? "" : capture_error;
+            if (is_recoverable_truncated_capture(
+                    live, capture_status, packet_count, capture_message)) {
+                statistics->partial_capture_error = capture_message;
+                ktag_packet_release(&packet);
+                break;
+            }
+            *error = std::string("capture read failed: ") + capture_message;
             ktag_packet_release(&packet);
             return false;
         }
@@ -988,6 +1007,7 @@ public:
         *statistics = pipeline_source_statistics{};
         predictions_ = predictions;
         feature_records_ = feature_records;
+        live_ = live;
         if ((config_.feature_only && feature_records_ == nullptr) ||
             (!config_.feature_only && predictions_ == nullptr)) {
             *error = "parallel pipeline output storage is required";
@@ -1147,8 +1167,18 @@ private:
                 break;
             }
             if (status != KTAG_SUCCESS) {
-                fail(std::string("capture read failed: ") +
-                    ktag_capture_get_last_error());
+                const char *capture_error = ktag_capture_get_last_error();
+                const char *capture_message =
+                    capture_error == nullptr ? "" : capture_error;
+                if (is_recoverable_truncated_capture(
+                        live_,
+                        status,
+                        capture_stats_.packets,
+                        capture_message)) {
+                    partial_capture_error_ = capture_message;
+                    break;
+                }
+                fail(std::string("capture read failed: ") + capture_message);
                 break;
             }
 
@@ -1474,6 +1504,7 @@ private:
         statistics->queue_drops +=
             feature_queue.dropped_newest + feature_queue.dropped_oldest;
         statistics->queue_failures += feature_queue.failures;
+        statistics->partial_capture_error = partial_capture_error_;
         for (uint32_t index = 0U; index < inference_stats_.size(); ++index) {
             const auto &worker = inference_stats_[index];
             statistics->inference_inputs += worker.input_records;
@@ -1498,6 +1529,8 @@ private:
     std::mutex error_mutex_;
     std::string error_message_;
     capture_statistics capture_stats_;
+    std::string partial_capture_error_;
+    bool live_ = false;
     std::vector<feature_worker_statistics> feature_stats_;
     std::vector<inference_worker_statistics> inference_stats_;
     std::thread capture_thread_;
@@ -1902,6 +1935,7 @@ int ktag_demo_run_pipeline_internal(
 
     std::vector<pipeline_prediction> predictions;
     std::vector<ktag_demo_schema_feature_record> feature_records;
+    std::vector<std::pair<std::string, std::string>> partial_captures;
     pipeline_run_statistics run_statistics;
     const auto run_start = std::chrono::steady_clock::now();
     bool success = true;
@@ -1994,6 +2028,11 @@ int ktag_demo_run_pipeline_internal(
                     &error);
             if (success) {
                 add_source_statistics(&run_statistics, source_statistics);
+                if (!source_statistics.partial_capture_error.empty()) {
+                    partial_captures.emplace_back(
+                        pcap_files[index],
+                        source_statistics.partial_capture_error);
+                }
             }
         }
     }
@@ -2024,6 +2063,13 @@ int ktag_demo_run_pipeline_internal(
     if (!success) {
         std::fprintf(stderr, "pipeline: %s\n", error.c_str());
     } else {
+        for (const auto &partial : partial_captures) {
+            std::fprintf(
+                stderr,
+                "WARNING: PCAP文件截断，已保留此前完整报文并生成部分结果: %s (%s)\n",
+                partial.first.c_str(),
+                partial.second.c_str());
+        }
         PerformanceStats performance{};
         constexpr double nanoseconds_per_second = 1000000000.0;
         performance.pcap_read_time =
