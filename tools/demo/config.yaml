@@ -1,93 +1,69 @@
 training_data_paths:
 - [
-  '/data2/ktag_data_csv/aiqiyi/aiqiyi_20250715_093827_5h_android_16.csv',
-  '/data2/ktag_data_csv/aiqiyi/aiqiyi_20250718_101245_18000_android_17.csv',
-  '/data2/ktag_data_csv/aiqiyi/aiqiyi_20250717_162945_18000_android_18.csv',
-  '/data2/ktag_data_csv/aiqiyi/aiqiyi_20250721_141719_21600_android_19.csv',
+  '/data2/ipv4_ipv6_data/aiqiyi/video-aiqiyi-01.csv',
+  '/data2/ipv4_ipv6_data/aiqiyi/video-aiqiyi-02.csv',
+  '/data2/ipv4_ipv6_data/aiqiyi/video-aiqiyi-03.csv',
+  '/data2/ipv4_ipv6_data/aiqiyi/video-aiqiyi-04.csv',
 ]
 - [
-  '/data2/ktag_data_csv/doubao/doubao_20250718_165736_216000_android_16.csv',
-  '/data2/ktag_data_csv/doubao/doubao_20250721_201921_216000_android_17.csv',
-  '/data2/ktag_data_csv/doubao/doubao_20250717_100030_72000_android_18.csv',
-  '/data2/ktag_data_csv/doubao/doubao_20250718_172518_216000_android_19.csv',
+  '/data2/ipv4_ipv6_data/bilibili/video-bilibili-01_4k.csv',
+  '/data2/ipv4_ipv6_data/bilibili/video-bilibili-02.csv',
+  '/data2/ipv4_ipv6_data/bilibili/video-bilibili-03.csv',
+  '/data2/ipv4_ipv6_data/bilibili/video-bilibili-04.csv',
 ]
 - [
-  '/data2/ktag_data_csv/bilibili/bilibili_20250616_204043_10h_android_16.csv',
-  '/data2/ktag_data_csv/bilibili/bilibili_20250717_191237_50400_android_17.csv',
-  '/data2/ktag_data_csv/bilibili/bilibili_20250716_101749_5h_android_18.csv',
-  '/data2/ktag_data_csv/bilibili/bilibili_20250718_101704_25200_android_19.csv',
-]
-# - [
-#   '/data2/ktag_data_tls1.3_csv/youku/youku-16-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/youku/youku-17-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/youku/youku-20-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/youku/youku-19-tls1.3.csv',
-# ]
-# - [
-#   '/data2/ktag_data_tls1.3_csv/aiqiyi/aiqiyi-16-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/aiqiyi/aiqiyi-20-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/aiqiyi/aiqiyi-18-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/aiqiyi/aiqiyi-19-tls1.3.csv',
-# ]
-- [
-  '/data2/ktag_data_csv/wenxiaoyan/wenxiaoyan_20250726_172552_129600_android_16.csv',
-  '/data2/ktag_data_csv/wenxiaoyan/wenxiaoyan_20250804_204806_144000_android_17.csv',
-  '/data2/ktag_data_csv/wenxiaoyan/wenxiaoyan_20250804_205024_144000_android_18.csv',
-  '/data2/ktag_data_csv/wenxiaoyan/wenxiaoyan_20250804_205029_144000_android_19.csv',
+  '/data2/ipv4_ipv6_data/douyin/video-douyin-01.csv',
+  '/data2/ipv4_ipv6_data/douyin/video-douyin-02.csv',
+  '/data2/ipv4_ipv6_data/douyin/video-douyin-03.csv',
+  '/data2/ipv4_ipv6_data/douyin/video-douyin-04.csv',
 ]
 - [
-  '/data2/ktag_data_csv/tencent/tencent_20250730_172237_57600_android_16.csv',
-  '/data2/ktag_data_csv/tencent/tencent_20250730_172402_57600_android_17.csv',
-  '/data2/ktag_data_csv/tencent/tencent_20250730_172448_57600_android_18.csv',
-  '/data2/ktag_data_csv/tencent/tencent_20250730_172613_57600_android_19.csv',
+  '/data2/ipv4_ipv6_data/deepseek/text-ai-deepseek-01.csv',
+  '/data2/ipv4_ipv6_data/deepseek/text-ai-deepseek-02.csv',
+  '/data2/ipv4_ipv6_data/deepseek/text-ai-deepseek-03.csv',
+  '/data2/ipv4_ipv6_data/deepseek/text-ai-deepseek-04.csv',
 ]
 - [
-  '/data2/ktag_data_csv/yuanbao/yuanbao_20250717_103127_72000_android_16.csv',
-  '/data2/ktag_data_csv/yuanbao/yuanbao_20250718_155131_216000_android_17.csv',
-  '/data2/ktag_data_csv/yuanbao/yuanbao_20250721_142339_216000_android_18.csv',
-  '/data2/ktag_data_csv/yuanbao/yuanbao_20250717_105526_72000_android_19.csv',
+  '/data2/ipv4_ipv6_data/kimi/text-ai-kimi-01.csv',
+  '/data2/ipv4_ipv6_data/kimi/text-ai-kimi-02.csv',
+  '/data2/ipv4_ipv6_data/kimi/text-ai-kimi-03.csv',
+  '/data2/ipv4_ipv6_data/kimi/text-ai-kimi-04.csv',
 ]
 # - [
-#   '/data2/ktag_data_tls1.3_csv/deepseek/deepseek-16-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/deepseek/deepseek-17-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/deepseek/deepseek-18-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/deepseek/deepseek-19-tls1.3.csv',
+#   '/data2/ktag_data_csv_new/aiqiyi/aiqiyi_20250715_093827_5h_android_16.csv',
+#   '/data2/ktag_data_csv_new/aiqiyi/aiqiyi_20250718_101245_18000_android_17.csv',
+#   '/data2/ktag_data_csv_new/aiqiyi/aiqiyi_20250717_162945_18000_android_18.csv',
+#   '/data2/ktag_data_csv_new/aiqiyi/aiqiyi_20250721_141719_21600_android_19.csv',
 # ]
 # - [
-#   '/data2/ktag_data_tls1.3_csv/kimi/kimi-16-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/kimi/kimi-17-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/kimi/kimi-18-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/kimi/kimi-19-tls1.3.csv',
+#   '/data2/ktag_data_csv_new/doubao/doubao_20250718_165736_216000_android_16.csv',
+#   '/data2/ktag_data_csv_new/doubao/doubao_20250721_201921_216000_android_17.csv',
+#   '/data2/ktag_data_csv_new/doubao/doubao_20250717_100030_72000_android_18.csv',
+#   '/data2/ktag_data_csv_new/doubao/doubao_20250718_172518_216000_android_19.csv',
 # ]
 # - [
-#   '/data2/ktag_data_tls1.3_csv/doubao/doubao_16_tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/doubao/doubao_20_tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/doubao/doubao_18_tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/doubao/doubao_19_tls1.3.csv',
+#   '/data2/ktag_data_csv_new/bilibili/bilibili_20250616_204043_10h_android_16.csv',
+#   '/data2/ktag_data_csv_new/bilibili/bilibili_20250717_191237_50400_android_17.csv',
+#   '/data2/ktag_data_csv_new/bilibili/bilibili_20250716_101749_5h_android_18.csv',
+#   '/data2/ktag_data_csv_new/bilibili/bilibili_20250718_101704_25200_android_19.csv',
 # ]
 # - [
-#   '/data2/ktag_data_tls1.3_csv/qqmusic/qqmusic-20-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/qqmusic/qqmusic-21-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/qqmusic/qqmusic-22-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/qqmusic/qqmusic-23-tls1.3.csv',
+#   '/data2/ktag_data_csv_new/wenxiaoyan/wenxiaoyan_20250726_172552_129600_android_16.csv',
+#   '/data2/ktag_data_csv_new/wenxiaoyan/wenxiaoyan_20250804_204806_144000_android_17.csv',
+#   '/data2/ktag_data_csv_new/wenxiaoyan/wenxiaoyan_20250804_205024_144000_android_18.csv',
+#   '/data2/ktag_data_csv_new/wenxiaoyan/wenxiaoyan_20250804_205029_144000_android_19.csv',
 # ]
 # - [
-#   '/data2/ktag_data_tls1.3_csv/wymusic/wymusic-20-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/wymusic/wymusic-21-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/wymusic/wymusic-22-tls1.3.csv',
-#   '/data2/ktag_data_tls1.3_csv/wymusic/wymusic-23-tls1.3.csv',
+#   '/data2/ktag_data_csv_new/tencent/tencent_20250730_172237_57600_android_16.csv',
+#   '/data2/ktag_data_csv_new/tencent/tencent_20250730_172402_57600_android_17.csv',
+#   '/data2/ktag_data_csv_new/tencent/tencent_20250730_172448_57600_android_18.csv',
+#   '/data2/ktag_data_csv_new/tencent/tencent_20250730_172613_57600_android_19.csv',
 # ]
 # - [
-#   '/data2/ktag_data_tls1.3_csv/tls1.3_simulation/video/video-16.csv',
-#   '/data2/ktag_data_tls1.3_csv/tls1.3_simulation/video/video-17.csv',
-#   '/data2/ktag_data_tls1.3_csv/tls1.3_simulation/video/video-18.csv',
-#   '/data2/ktag_data_tls1.3_csv/tls1.3_simulation/video/video-19.csv',
-# ]
-# - [
-#   '/data2/ktag_data_tls1.3_csv/tls1.3_simulation/text-with-ethernet/first.csv',
-#   '/data2/ktag_data_tls1.3_csv/tls1.3_simulation/text-with-ethernet/second.csv',
-#   '/data2/ktag_data_tls1.3_csv/tls1.3_simulation/text-with-ethernet/third.csv',
-#   '/data2/ktag_data_tls1.3_csv/tls1.3_simulation/text-with-ethernet/forth.csv',
+#   '/data2/ktag_data_csv_new/yuanbao/yuanbao_20250717_103127_72000_android_16.csv',
+#   '/data2/ktag_data_csv_new/yuanbao/yuanbao_20250718_155131_216000_android_17.csv',
+#   '/data2/ktag_data_csv_new/yuanbao/yuanbao_20250721_142339_216000_android_18.csv',
+#   '/data2/ktag_data_csv_new/yuanbao/yuanbao_20250717_105526_72000_android_19.csv',
 # ]
 
 model_path_pkl: ../../result/model_classifier_2.pkl
@@ -96,47 +72,41 @@ model_path_onnx: ../../result/model_classifier_2.onnx
 scaler_path_json: ../../result/scaler_params_2.json
 
 evaluation_data_paths:
-  - ['/data2/ktag_data_csv/aiqiyi/aiqiyi_20250716_102837_5h_android_20.csv',]
-  - ['/data2/ktag_data_csv/doubao/doubao_20250717_162530_72000_android_20.csv',]
-  - ['/data2/ktag_data_csv/bilibili/bilibili_20250721_141827_21600_android_20.csv',]
-  # - ['/data2/ktag_data_tls1.3_csv/youku/youku-18-tls1.3.csv',]
-  # - ['/data2/ktag_data_tls1.3_csv/aiqiyi/aiqiyi-17-tls1.3.csv',]
-  - ['/data2/ktag_data_csv/wenxiaoyan/wenxiaoyan_20250804_205038_144000_android_20.csv',]
-  - ['/data2/ktag_data_csv/tencent/tencent_20250730_172737_57600_android_20.csv',]
-  - ['/data2/ktag_data_csv/yuanbao/yuanbao_20250718_155433_216000_android_20.csv',]
-  # - ['/data2/ktag_data_tls1.3_csv/deepseek/deepseek-20-tls1.3.csv',]
-  # - ['/data2/ktag_data_tls1.3_csv/kimi/kimi-20-tls1.3.csv',]
-  # - ['/data2/ktag_data_tls1.3_csv/doubao/doubao_17_tls1.3.csv',]
-  # - ['/data2/ktag_data_tls1.3_csv/qqmusic/qqmusic-24-tls1.3.csv',]
-  # - ['/data2/ktag_data_tls1.3_csv/wymusic/wymusic-24-tls1.3.csv',]
-  # - ['/data2/ktag_data_tls1.3_csv/tls1.3_simulation/video/video-20.csv',]
-  # - ['/data2/ktag_data_tls1.3_csv/tls1.3_simulation/text-with-ethernet/fifth.csv',]
+  - ['/data2/ipv4_ipv6_data/aiqiyi/video-aiqiyi-05.csv',]
+  - ['/data2/ipv4_ipv6_data/bilibili/video-bilibili-05.csv',]
+  - ['/data2/ipv4_ipv6_data/douyin/video-douyin-05.csv',]
+  - ['/data2/ipv4_ipv6_data/deepseek/text-ai-deepseek-05.csv',]
+  - ['/data2/ipv4_ipv6_data/kimi/text-ai-kimi-05.csv',]
+  # - ['/data2/ktag_data_csv_new/aiqiyi/aiqiyi_20250716_102837_5h_android_20.csv',]
+  # - ['/data2/ktag_data_csv_new/doubao/doubao_20250717_162530_72000_android_20.csv',]
+  # - ['/data2/ktag_data_csv_new/bilibili/bilibili_20250721_141827_21600_android_20.csv',]
+  # - ['/data2/ktag_data_csv_new/wenxiaoyan/wenxiaoyan_20250804_205038_144000_android_20.csv',]
+  # - ['/data2/ktag_data_csv_new/tencent/tencent_20250730_172737_57600_android_20.csv',]
+  # - ['/data2/ktag_data_csv_new/yuanbao/yuanbao_20250718_155433_216000_android_20.csv',]
+
 
 output_dir: ../../result
 classification_report_file: ../../result/classification_report_2.txt
 predictions_detail_file: ../../result/predictions_detail_2.csv
 
 onnx_log_level: WARNING
-# The active paths above are historical 354-column CSVs, so they keep the
-# historical [0, 1, 2] removal contract. Newly generated 366-column Schema
-# CSVs retain 12 meta.* columns and require [0..14] for application training;
-# do not change this value until training_data_paths/evaluation_data_paths are
-# replaced together. Training/evaluation now remove these columns in memory.
-columns_to_remove: []
+# 当前配置按现代应用 Schema CSV 使用：12 个 meta.* 列 + 354 个 Schema 值，共
+# 366 列；训练删除 [0..14] 后保留 351 个模型输入值。若改用不含 meta.* 的历史
+# 354 列 CSV，应恢复历史 [0, 1, 2] 删除规则，并同时替换训练和评估数据路径。
+# 训练/评估只在内存中删除这些列，不会覆盖原 CSV。
+columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 filter_packets: 16
 
-# New stage-7 orchestration is opt-in. With no pipeline CLI option this false
-# value preserves online_inference_mode and the existing model configuration.
-# Passing --pipeline-mode forces this block on for that invocation only.
+# 新 Pipeline 默认不启用，以保留原 online_inference_mode 和现有模型配置；命令行
+# 显式传入 --pipeline-mode 时，只为本次运行启用该 Pipeline。
 pipeline:
   enabled: false
   mode: feature_parallel
-  # When the schema selection below is the complete Legacy V1 contract,
-  # `kdadk_demo -t` automatically creates this Schema-bound model package
-  # after writing the legacy ONNX/scaler files.
+  # 选择完整 Legacy V1 契约时，kdadk_demo -t 在写出旧 ONNX/Scaler 后自动生成
+  # 与该 Schema 绑定的模型包。
   model_package_path: ../../result/legacy_model_package
-  # Online -c/-j output retains numeric label/confidence and explicit IPv4/IPv6
-  # flow metadata. confidence=0 is valid; -1 means probability unavailable.
+  # 在线 -c/-j 保留数字 label/confidence 和 IPv4/IPv6 流元数据。confidence=0
+  # 是合法值；-1 表示没有可用概率。
 
   capture:
     packet_pool_size: 65536
@@ -145,8 +115,7 @@ pipeline:
     threads: 4
     queue_capacity: 65536
     flow_hash_seed: 2026
-    # legacy makes all four new pipeline topologies reproduce the historical
-    # fixed-vector flow lifecycle used by the existing training data/model.
+    # legacy 使四种新 Pipeline 拓扑复现现有训练数据/模型使用的旧固定向量流生命周期。
     lifecycle_mode: legacy
     expire_interval_ms: 1000
 
@@ -162,12 +131,11 @@ pipeline:
 
   plugins: []
   schema:
-    # Official application contract: 53 Feature Descriptors / 354 values,
-    # Hash 0xdd48882b53bebfa5. Do not reuse this name for custom selections.
+    # 正式应用契约：53 个 Feature Descriptor / 354 个值，Hash
+    # 0xdd48882b53bebfa5。自定义选择不能复用该名称。
     name: ktag_legacy_v1
     version: 1
     remove_features: []
     add_features: []
 
-  # The complete official proxy training/evaluation/inference configuration is
-  # proxy_config.yaml. It uses this same YAML structure and parser.
+  # 代理训练、评估和推理示例见 proxy_config.yaml，仍使用相同 YAML 结构和解析入口。

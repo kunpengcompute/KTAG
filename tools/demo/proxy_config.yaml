@@ -1,84 +1,86 @@
-# ktag_proxy_v1 configuration for Schema CSV extraction, training, evaluation
-# and online inference. The active outer groups define the numeric labels; the
-# current file is a two-class incremental training example. Extend it to the
-# formal 13-class target as data becomes available, keeping train/evaluation
-# group order aligned. IPv4-only, IPv6-only and mixed groups are all valid;
-# missing-family coverage emits a warning instead of blocking training.
+# ktag_proxy_v1 的 Schema CSV、训练、评估和在线推理配置。
+# 当前实际启用的是两分类增量示例：label 0 为 VMess/WebSocket/TLS，label 1 为
+# VMess/XHTTP(H2)/TLS。外层数据组顺序就是当前模型的数字标签，训练和评估必须对齐。
+# 若要形成“普通流量 + 完整代理形态”的新模型，应重新确定并冻结整套外层组顺序，
+# 不能假定当前两分类标签与未来模型保持相同含义。IPv4-only、IPv6-only 和混合数据
+# 都允许训练；缺少地址族只告警，不阻止训练。
 
 training_data_paths:
-  # label 0: VMess / WebSocket / TLS
+  # 标签 0：VMess / WebSocket / TLS
   - [
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-01.csv,
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-02.csv,
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-03.csv,
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-04.csv,
     ]
-  # label 1: VMess / XHTTP(H2) / TLS
+  # 标签 1：VMess / XHTTP(H2) / TLS
   - [
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-01.csv,
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-02.csv,
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-03.csv,
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-04.csv,
     ]
-  # # label 2: shadowsocks/udp/aead2022
+  # 以下为候选数据组路径示意，不代表当前模型的 label，也不能直接接在当前两组后面
+  # 当作正式 13 类顺序；正式顺序应在数据齐备后一次性确定。
+  # # 候选: shadowsocks/udp/aead2022
   # - [
   #     /path/to/proxy_csv/shadowsocks_udp_aead2022/train_ipv4.csv,
   #     /path/to/proxy_csv/shadowsocks_udp_aead2022/train_ipv6.csv,
   #   ]
-  # # label 3: shadowsocksr/tcp/auth_aes128_md5/tls1.2_ticket_auth
+  # # 候选: shadowsocksr/tcp/auth_aes128_md5/tls1.2_ticket_auth
   # - [
   #     /path/to/proxy_csv/ssr_auth_aes128_md5_tls12_ticket_auth/train_ipv4.csv,
   #     /path/to/proxy_csv/ssr_auth_aes128_md5_tls12_ticket_auth/train_ipv6.csv,
   #   ]
-  # # label 4: shadowsocksr/tcp/auth_aes128_sha1/tls1.2_ticket_auth
+  # # 候选: shadowsocksr/tcp/auth_aes128_sha1/tls1.2_ticket_auth
   # - [
   #     /path/to/proxy_csv/ssr_auth_aes128_sha1_tls12_ticket_auth/train_ipv4.csv,
   #     /path/to/proxy_csv/ssr_auth_aes128_sha1_tls12_ticket_auth/train_ipv6.csv,
   #   ]
-  # # label 5: vmess/websocket/tls
+  # # 候选: vmess/websocket/tls
   # - [
   #     /path/to/proxy_csv/vmess_websocket_tls/train_ipv4.csv,
   #     /path/to/proxy_csv/vmess_websocket_tls/train_ipv6.csv,
   #   ]
-  # # label 6: vmess/http2/tls
+  # # 候选: vmess/http2/tls
   # - [
   #     /path/to/proxy_csv/vmess_http2_tls/train_ipv4.csv,
   #     /path/to/proxy_csv/vmess_http2_tls/train_ipv6.csv,
   #   ]
-  # # label 7: vless/raw/reality
+  # # 候选: vless/raw/reality
   # - [
   #     /path/to/proxy_csv/vless_raw_reality/train_ipv4.csv,
   #     /path/to/proxy_csv/vless_raw_reality/train_ipv6.csv,
   #   ]
-  # # label 8: vless/grpc/tls
+  # # 候选: vless/grpc/tls
   # - [
   #     /path/to/proxy_csv/vless_grpc_tls/train_ipv4.csv,
   #     /path/to/proxy_csv/vless_grpc_tls/train_ipv6.csv,
   #   ]
-  # # label 9: trojan/raw/tls
+  # # 候选: trojan/raw/tls
   # - [
   #     /path/to/proxy_csv/trojan_raw_tls/train_ipv4.csv,
   #     /path/to/proxy_csv/trojan_raw_tls/train_ipv6.csv,
   #   ]
-  # # label 10: trojan/websocket/tls
+  # # 候选: trojan/websocket/tls
   # - [
   #     /path/to/proxy_csv/trojan_websocket_tls/train_ipv4.csv,
   #     /path/to/proxy_csv/trojan_websocket_tls/train_ipv6.csv,
   #   ]
-  # # label 11: hysteria2/quic/tls
+  # # 候选: hysteria2/quic/tls
   # - [
   #     /path/to/proxy_csv/hysteria2_quic_tls/train_ipv4.csv,
   #     /path/to/proxy_csv/hysteria2_quic_tls/train_ipv6.csv,
   #   ]
-  # # label 12: hysteria2/quic_salamander/tls
+  # # 候选: hysteria2/quic_salamander/tls
   # - [
   #     /path/to/proxy_csv/hysteria2_quic_salamander_tls/train_ipv4.csv,
   #     /path/to/proxy_csv/hysteria2_quic_salamander_tls/train_ipv6.csv,
   #   ]
 
 evaluation_data_paths:
-  # Keep the same outer-group order as training_data_paths. Evaluation files
-  # must not reuse training files or server endpoints.
+  # 与 training_data_paths 保持相同外层组顺序。评估文件不能复用训练 CSV；服务器
+  # 端点重叠会告警但继续执行，需要结合采集记录人工判断泛化风险。
   - [
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-05.csv,
     ]
@@ -130,8 +132,7 @@ evaluation_data_paths:
   #     /path/to/proxy_csv/hysteria2_quic_salamander_tls/evaluation_ipv6.csv,
   #   ]
 
-# These are training artifacts. The formal deployable model package is the
-# directory configured by pipeline.model_package_path below.
+# 以下是训练中间产物；正式在线加载目录由 pipeline.model_package_path 指定。
 model_path_pkl: ../../result/proxy_two_class_v1_model/model.pkl
 scaler_path_pkl: ../../result/proxy_two_class_v1_model/scaler.pkl
 model_path_onnx: ../../result/proxy_two_class_v1_model/model.onnx
@@ -144,17 +145,15 @@ predictions_detail_file: ../../result/proxy_two_class_v1_model/predictions_detai
 onnx_log_level: WARNING
 filter_packets: 16
 
-# A proxy Schema CSV has 12 meta.* columns followed by 619 model values.
-# Remove only the metadata; ktag_proxy_v1 already excludes Flow ID and IP
-# Features at Schema composition time.
+# 代理 Schema CSV 为 12 个 meta.* 列 + 619 个模型值，共 631 列。
+# 这里只删除元数据；ktag_proxy_v1 已在 Schema 组合阶段排除 Flow ID 和 IP Feature。
 columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
 pipeline:
   enabled: true
   mode: full_parallel
 
-  # -t creates model.onnx, scaler.json and manifest.json here. The same
-  # directory is validated and loaded by -r.
+  # -t 在此生成 model.onnx、scaler.json 和 manifest.json；-r 校验并加载同一目录。
   model_package_path: ../../result/proxy_two_class_v1_model
 
   training:
@@ -195,14 +194,14 @@ pipeline:
 
   schema:
     # Frozen formal reference contract:
-    # 118 Feature Descriptors / 619 values / Hash 0xca1eae5086b41ee5
+    # 冻结契约：118 个 Feature Descriptor / 619 个值 / Hash 0xca1eae5086b41ee5
     name: ktag_proxy_v1
     version: 1
     remove_features:
       - legacy.flow_id
       - network.src_ip
       - network.dst_ip
-    # Order is part of the frozen Schema and must not be changed.
+    # 顺序属于冻结 Schema 契约，不得在 v1 名称和版本下改变。
     add_features:
       - proxy.sequence.signed_payload_length
       - proxy.sequence.relative_time_log2_us
