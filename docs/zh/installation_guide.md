@@ -67,9 +67,37 @@ export LD_LIBRARY_PATH=$ONNXRUNTIME_HOME/lib:$LD_LIBRARY_PATH
 ```
 sh build.sh
 ```
-编译得到可执行的二进制文件`libKDADK_feature_extract.so`和`libKDADK_inference.so`
-回显如下：
+完整构建会同时生成三层公共库、旧接口兼容库、demo 和 Feature Plugin。主要产物
+如下（实际文件还可能包含版本软链接）：
+
 ```
-[root@ceph1 output]# ls
-libKDADK_feature_extract.so  libKDADK_inference.so
+output/libktag_capture.so
+output/libktag_feature.so
+output/libktag_inference.so
+output/libKDADK_feature_extract.so
+output/libKDADK_inference.so
+output/kdadk_demo
+output/plugins/libktag_example_feature_plugin.so
+output/plugins/libktag_proxy_features.so
 ```
+
+`libKDADK_feature_extract.so` 和 `libKDADK_inference.so` 用于兼容旧固定向量接口；
+新接入推荐使用 Capture、Feature、Inference 三层公共库。代理分类需要构建并加载
+`libktag_proxy_features.so`。
+
+相关构建选项：
+
+```bash
+cmake -S . -B build \
+  -DKTAG_BUILD_TOOLS=ON \
+  -DKTAG_BUILD_PROXY_FEATURES=ON \
+  -DKTAG_INSTALL_LEGACY_COMPAT=ON
+cmake --build build
+```
+
+- `KTAG_BUILD_TOOLS`：构建 `kdadk_demo` 和示例插件。
+- `KTAG_BUILD_PROXY_FEATURES`：构建正式代理 Feature Plugin，默认开启。
+- `KTAG_INSTALL_LEGACY_COMPAT`：安装旧兼容库、头文件和依赖旧路径的 demo，默认开启。
+
+应用与代理分类的配置和运行命令参见
+《[应用分类与代理分类使用指南](demo_pipeline.md)》。
