@@ -13,21 +13,16 @@ namespace ktag_proxy_features {
 
 uint64_t saturating_add_u64(uint64_t left, uint64_t right);
 
-uint64_t timestamp_delta_us(
-    const ktag_timestamp &first,
-    const ktag_timestamp &last);
+uint64_t timestamp_delta_us(const ktag_timestamp &first,
+                            const ktag_timestamp &last);
 
 float bounded_float(uint64_t value);
 
-float signed_bounded_float(
-    uint64_t value,
-    ktag_direction direction);
+float signed_bounded_float(uint64_t value, ktag_direction direction);
 
 float log2_1p_u64(uint64_t value);
 
-float signed_log2_1p_u64(
-    uint64_t value,
-    ktag_direction direction);
+float signed_log2_1p_u64(uint64_t value, ktag_direction direction);
 
 float byte_entropy(const uint8_t *data, size_t length);
 

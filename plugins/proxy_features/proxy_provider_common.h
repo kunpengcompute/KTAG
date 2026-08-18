@@ -9,16 +9,14 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 namespace ktag_proxy_features {
 
-ktag_status register_provider(
-    ktag_feature_registry *registry,
-    const provider_catalog &catalog,
-    const ktag_feature_callbacks &callbacks,
-    ktag_feature_callback_error_policy error_policy,
-    void *user_data);
+ktag_status register_provider(ktag_feature_registry *registry,
+                              const provider_catalog &catalog,
+                              const ktag_feature_callbacks &callbacks,
+                              ktag_feature_callback_error_policy error_policy,
+                              void *user_data);
 
-ktag_status register_zero_provider(
-    ktag_feature_registry *registry,
-    const provider_catalog &catalog);
+ktag_status register_zero_provider(ktag_feature_registry *registry,
+                                   const provider_catalog &catalog);
 
 } // namespace ktag_proxy_features
 

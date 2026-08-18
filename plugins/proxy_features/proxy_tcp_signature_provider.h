@@ -8,8 +8,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 namespace ktag_proxy_features {
 
-ktag_status register_tcp_signature_provider(
-    ktag_feature_registry *registry);
+ktag_status register_tcp_signature_provider(ktag_feature_registry *registry);
 
 } // namespace ktag_proxy_features
 

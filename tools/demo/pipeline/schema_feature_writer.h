@@ -11,9 +11,9 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "ktag_feature.h"
 
 struct ktag_demo_schema_feature_record {
-    uint32_t source_index = 0U;
-    ktag_feature_record_details details{};
-    std::vector<float> values;
+  uint32_t source_index = 0U;
+  ktag_feature_record_details details{};
+  std::vector<float> values;
 };
 
 bool ktag_demo_schema_feature_record_less(
@@ -23,8 +23,7 @@ bool ktag_demo_schema_feature_record_less(
 std::string ktag_demo_schema_flow_key_text(const ktag_flow_key &key);
 
 bool ktag_demo_write_schema_feature_csv(
-    const char *path,
-    const ktag_feature_schema *schema,
+    const char *path, const ktag_feature_schema *schema,
     const std::vector<ktag_demo_schema_feature_record> &records,
     std::string *error);
 

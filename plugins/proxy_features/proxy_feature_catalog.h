@@ -14,23 +14,22 @@ namespace ktag_proxy_features {
 inline constexpr uint32_t KTAG_PROXY_PROVIDER_VERSION = 1U;
 
 struct feature_definition {
-    const char *feature_id;
-    uint32_t dimension;
+  const char *feature_id;
+  uint32_t dimension;
 };
 
 struct provider_catalog {
-    const char *provider_id;
-    uint32_t provider_version;
-    const feature_definition *features;
-    size_t feature_count;
+  const char *provider_id;
+  uint32_t provider_version;
+  const feature_definition *features;
+  size_t feature_count;
 };
 
 inline constexpr char KTAG_PROXY_SEQUENCE_PROVIDER_ID[] =
     "ktag.proxy.sequence.v1";
 inline constexpr char KTAG_PROXY_TCP_SIGNATURE_PROVIDER_ID[] =
     "ktag.proxy.tcp_signature.v1";
-inline constexpr char KTAG_PROXY_QUIC_PROVIDER_ID[] =
-    "ktag.proxy.quic.v1";
+inline constexpr char KTAG_PROXY_QUIC_PROVIDER_ID[] = "ktag.proxy.quic.v1";
 
 inline constexpr std::array<feature_definition, 10U>
     KTAG_PROXY_SEQUENCE_FEATURES{{
@@ -85,32 +84,31 @@ inline constexpr std::array<feature_definition, 35U>
         {"proxy.carrier.grpc_content_type", 1U},
     }};
 
-inline constexpr std::array<feature_definition, 23U>
-    KTAG_PROXY_QUIC_FEATURES{{
-        {"proxy.quic.packet_candidate_count", 1U},
-        {"proxy.quic.parse_success_count", 1U},
-        {"proxy.quic.parse_failure_count", 1U},
-        {"proxy.quic.fixed_bit_count", 1U},
-        {"proxy.quic.long_header_count", 1U},
-        {"proxy.quic.short_header_count", 1U},
-        {"proxy.quic.version_v1_count", 1U},
-        {"proxy.quic.version_v2_count", 1U},
-        {"proxy.quic.version_other_count", 1U},
-        {"proxy.quic.version_negotiation_count", 1U},
-        {"proxy.quic.initial_count", 1U},
-        {"proxy.quic.zero_rtt_count", 1U},
-        {"proxy.quic.handshake_count", 1U},
-        {"proxy.quic.retry_count", 1U},
-        {"proxy.quic.first_initial_length_log2", 1U},
-        {"proxy.quic.first_dcid_length", 1U},
-        {"proxy.quic.first_scid_length", 1U},
-        {"proxy.quic.first_token_length_log2", 1U},
-        {"proxy.quic.signed_datagram_length", 16U},
-        {"proxy.quic.header_type_sequence", 16U},
-        {"proxy.quic.sequence_valid_count", 1U},
-        {"proxy.quic.first_byte_high_nibble_histogram", 16U},
-        {"proxy.quic.payload_entropy_mean", 1U},
-    }};
+inline constexpr std::array<feature_definition, 23U> KTAG_PROXY_QUIC_FEATURES{{
+    {"proxy.quic.packet_candidate_count", 1U},
+    {"proxy.quic.parse_success_count", 1U},
+    {"proxy.quic.parse_failure_count", 1U},
+    {"proxy.quic.fixed_bit_count", 1U},
+    {"proxy.quic.long_header_count", 1U},
+    {"proxy.quic.short_header_count", 1U},
+    {"proxy.quic.version_v1_count", 1U},
+    {"proxy.quic.version_v2_count", 1U},
+    {"proxy.quic.version_other_count", 1U},
+    {"proxy.quic.version_negotiation_count", 1U},
+    {"proxy.quic.initial_count", 1U},
+    {"proxy.quic.zero_rtt_count", 1U},
+    {"proxy.quic.handshake_count", 1U},
+    {"proxy.quic.retry_count", 1U},
+    {"proxy.quic.first_initial_length_log2", 1U},
+    {"proxy.quic.first_dcid_length", 1U},
+    {"proxy.quic.first_scid_length", 1U},
+    {"proxy.quic.first_token_length_log2", 1U},
+    {"proxy.quic.signed_datagram_length", 16U},
+    {"proxy.quic.header_type_sequence", 16U},
+    {"proxy.quic.sequence_valid_count", 1U},
+    {"proxy.quic.first_byte_high_nibble_histogram", 16U},
+    {"proxy.quic.payload_entropy_mean", 1U},
+}};
 
 inline constexpr provider_catalog KTAG_PROXY_SEQUENCE_CATALOG{
     KTAG_PROXY_SEQUENCE_PROVIDER_ID,
@@ -140,68 +138,59 @@ inline constexpr std::array<const provider_catalog *, 3U>
         &KTAG_PROXY_QUIC_CATALOG,
     }};
 
-constexpr uint32_t proxy_feature_descriptor_count()
-{
-    uint32_t count = 0U;
-    for (const auto *provider : KTAG_PROXY_PROVIDER_CATALOG) {
-        count += static_cast<uint32_t>(provider->feature_count);
-    }
-    return count;
+constexpr uint32_t proxy_feature_descriptor_count() {
+  uint32_t count = 0U;
+  for (const auto *provider : KTAG_PROXY_PROVIDER_CATALOG) {
+    count += static_cast<uint32_t>(provider->feature_count);
+  }
+  return count;
 }
 
-constexpr uint32_t proxy_feature_value_count()
-{
-    uint32_t count = 0U;
-    for (const auto *provider : KTAG_PROXY_PROVIDER_CATALOG) {
-        for (size_t index = 0U; index < provider->feature_count; ++index) {
-            count += provider->features[index].dimension;
-        }
+constexpr uint32_t proxy_feature_value_count() {
+  uint32_t count = 0U;
+  for (const auto *provider : KTAG_PROXY_PROVIDER_CATALOG) {
+    for (size_t index = 0U; index < provider->feature_count; ++index) {
+      count += provider->features[index].dimension;
     }
-    return count;
+  }
+  return count;
 }
 
-constexpr bool proxy_feature_catalog_is_valid()
-{
-    for (size_t provider_index = 0U;
-         provider_index < KTAG_PROXY_PROVIDER_CATALOG.size();
-         ++provider_index) {
-        const auto *provider =
-            KTAG_PROXY_PROVIDER_CATALOG[provider_index];
-        if (provider == nullptr || provider->provider_id == nullptr ||
-            std::string_view(provider->provider_id).empty() ||
-            provider->provider_version == 0U ||
-            provider->features == nullptr || provider->feature_count == 0U) {
+constexpr bool proxy_feature_catalog_is_valid() {
+  for (size_t provider_index = 0U;
+       provider_index < KTAG_PROXY_PROVIDER_CATALOG.size(); ++provider_index) {
+    const auto *provider = KTAG_PROXY_PROVIDER_CATALOG[provider_index];
+    if (provider == nullptr || provider->provider_id == nullptr ||
+        std::string_view(provider->provider_id).empty() ||
+        provider->provider_version == 0U || provider->features == nullptr ||
+        provider->feature_count == 0U) {
+      return false;
+    }
+    for (size_t feature_index = 0U; feature_index < provider->feature_count;
+         ++feature_index) {
+      const auto &feature = provider->features[feature_index];
+      if (feature.feature_id == nullptr ||
+          std::string_view(feature.feature_id).empty() ||
+          feature.dimension == 0U) {
+        return false;
+      }
+      for (size_t previous_provider = 0U; previous_provider <= provider_index;
+           ++previous_provider) {
+        const auto *previous = KTAG_PROXY_PROVIDER_CATALOG[previous_provider];
+        const size_t previous_limit = previous_provider == provider_index
+                                          ? feature_index
+                                          : previous->feature_count;
+        for (size_t previous_feature = 0U; previous_feature < previous_limit;
+             ++previous_feature) {
+          if (std::string_view(feature.feature_id) ==
+              previous->features[previous_feature].feature_id) {
             return false;
+          }
         }
-        for (size_t feature_index = 0U;
-             feature_index < provider->feature_count;
-             ++feature_index) {
-            const auto &feature = provider->features[feature_index];
-            if (feature.feature_id == nullptr ||
-                std::string_view(feature.feature_id).empty() ||
-                feature.dimension == 0U) {
-                return false;
-            }
-            for (size_t previous_provider = 0U;
-                 previous_provider <= provider_index;
-                 ++previous_provider) {
-                const auto *previous =
-                    KTAG_PROXY_PROVIDER_CATALOG[previous_provider];
-                const size_t previous_limit =
-                    previous_provider == provider_index ?
-                    feature_index : previous->feature_count;
-                for (size_t previous_feature = 0U;
-                     previous_feature < previous_limit;
-                     ++previous_feature) {
-                    if (std::string_view(feature.feature_id) ==
-                        previous->features[previous_feature].feature_id) {
-                        return false;
-                    }
-                }
-            }
-        }
+      }
     }
-    return true;
+  }
+  return true;
 }
 
 inline constexpr uint32_t KTAG_PROXY_FEATURE_DESCRIPTOR_COUNT =
@@ -209,12 +198,10 @@ inline constexpr uint32_t KTAG_PROXY_FEATURE_DESCRIPTOR_COUNT =
 inline constexpr uint32_t KTAG_PROXY_FEATURE_VALUE_COUNT =
     proxy_feature_value_count();
 
-static_assert(
-    KTAG_PROXY_FEATURE_DESCRIPTOR_COUNT == 68U,
-    "proxy v1 must expose exactly 68 new Feature Descriptors");
-static_assert(
-    KTAG_PROXY_FEATURE_VALUE_COUNT == 268U,
-    "proxy v1 must expose exactly 268 new values");
+static_assert(KTAG_PROXY_FEATURE_DESCRIPTOR_COUNT == 68U,
+              "proxy v1 must expose exactly 68 new Feature Descriptors");
+static_assert(KTAG_PROXY_FEATURE_VALUE_COUNT == 268U,
+              "proxy v1 must expose exactly 268 new values");
 static_assert(
     proxy_feature_catalog_is_valid(),
     "proxy v1 Feature IDs must be non-empty, unique and non-zero dimensional");
