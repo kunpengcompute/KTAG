@@ -1,209 +1,94 @@
-# KDADK-APPID Fuzz 测试指南
+# KTAG 现有 Fuzz 测试说明
 
-## 1. 测试概述
+## 1. 当前覆盖范围
 
-KDADK-APPID Fuzz 测试是基于 LibFuzzer 框架实现的模糊测试，用于发现库中的潜在崩溃和安全漏洞。通过向库的核心 API 注入随机数据，测试系统在各种输入情况下的行为，确保库的健壮性和安全性。
+仓库当前只保留一个 LibFuzzer 目标：
 
-## 2. 测试覆盖范围
-
-Fuzz 测试覆盖了以下核心功能模块：
-
-### 2.1 特征提取器模块
-- `extractor_init` - 初始化特征提取器
-- `process_packet` - 处理单个数据包，提取特征向量
-- `process_packet_with_rawbow` - 处理单个数据包，提取特征向量和 rawbow
-- `extractor_get_statistics` - 获取统计信息
-- `extractor_reset_statistics` - 重置统计信息
-- `extractor_finalize` - 处理所有剩余的流，提取特征向量
-- `extractor_finalize_with_rawbow` - 处理所有剩余的流，提取特征向量和 rawbow
-- `extractor_destroy` - 销毁特征提取器
-
-### 2.2 推理引擎模块
-- `inference_init` - 初始化推理引擎
-- `inference_predict` - 批量推理
-- `inference_destroy` - 销毁推理引擎
-
-### 2.3 边界情况测试
-- 空指针输入测试
-- 随机链接类型测试
-- 不同大小的输入数据测试
-
-## 3. 技术实现
-
-### 3.1 测试框架
-- **测试框架**：LibFuzzer
-- **编译器**：GCC 10.3.1+
-- **构建系统**：CMake 3.10+
-
-### 3.2 核心测试函数
-
-测试的核心是 `LLVMFuzzerTestOneInput` 函数，它接收 LibFuzzer 生成的随机数据，并使用这些数据测试库的各种 API：
-
-```cpp
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    // 测试代码...
-    return 0;
-}
+```text
+kdadk_fuzzer
 ```
 
-### 3.3 测试策略
+它覆盖旧兼容接口边界：
 
-1. **随机数据注入**：使用 LibFuzzer 生成的随机数据作为输入
-2. **API 调用序列**：按照合理的顺序调用相关 API
-3. **资源管理**：确保所有分配的资源都被正确释放
-4. **错误处理**：测试 API 在各种输入情况下的行为
-5. **边界情况**：测试空指针、随机输入等边界情况
+- `extractor_init`、`process_packet`、`process_packet_with_rawbow`；
+- `extractor_finalize`、`extractor_finalize_with_rawbow`；
+- `extractor_get_statistics`、`extractor_reset_statistics`；
+- 可选的旧 `inference_init/inference_predict`；
+- 空指针、随机链路类型和随机长度输入。
 
-## 4. 构建指南
+该目标主要构造 Ethernet 或 Linux SLL 的 IPv4 候选帧，不能视为对现代双栈 Decoder、
+代理 TCP Signature Provider 或轻量级 QUIC Parser 的专项 Fuzz 覆盖。
 
-### 4.1 前提条件
+步骤十三规划中的以下目标因独立信息安全验收安排而暂未在仓库中实现：
 
-1. **构建 KDADK 库**：
-   - 首先需要构建 KDADK-APPID 库，生成 `KDADK_feature_extract` 和 `KDADK_inference` 库文件
+```text
+ktag_dual_stack_packet_decoder_fuzzer
+ktag_proxy_tcp_signature_fuzzer
+ktag_proxy_quic_fuzzer
+```
 
-2. **依赖项**：
-   - Clang/Clang++（带 LibFuzzer）
-   - CMake 3.16.3+
-   - LibFuzzer (随 LLVM 一起提供)
-   - yaml-cpp 0.8.0
-   - ONNX Runtime 1.22.0
+因此，当前仓库状态不能表述为已完成代理与双栈功能的完整 Fuzz、ASan/UBSan 安全
+验收。本文件只记录现有目标的真实用法。
 
-### 4.2 构建步骤
+## 2. 环境要求
 
-推荐从统一测试入口构建，它会先生成带 ASan 的兼容库，再配置正确的
-`test/fuzz/build` 目录：
+- Clang/Clang++，并包含 LibFuzzer；
+- CMake 3.16.3 或更高版本；
+- 已构建 `output/libKDADK_feature_extract.so` 和
+  `output/libKDADK_inference.so`；
+- yaml-cpp 0.8.0；
+- ONNX Runtime 1.22.0。
+
+## 3. 构建
+
+推荐从统一测试入口构建：
 
 ```bash
 cd test/build
 make fuzz
 ```
 
-手工构建时执行：
+该命令先以 ASan 选项构建产品库，再使用 Clang 配置
+`test/fuzz/build/kdadk_fuzzer`。
 
-1. **构建前准备**：
-
-   需要确保config.yaml文件中，model_path_onnx和scaler_path_json路径为真实训练模型路径。
-
-2. **进入 fuzz 测试目录**：
-   ```bash
-   cd test/fuzz
-   ```
-
-3. **创建构建目录**：
-   ```bash
-   mkdir build && cd build
-   ```
-
-4. **配置 CMake**：
-   ```bash
-   cmake .. \
-   -DCMAKE_C_COMPILER=clang \
-   -DCMAKE_CXX_COMPILER=clang++ \
-   -DCMAKE_CXX_FLAGS="-isystem /usr/include/c++/12 -isystem /usr/include/c++/12/aarch64-openEuler-linux" \
-   -DCMAKE_EXE_LINKER_FLAGS="-L/usr/lib/gcc/aarch64-openEuler-linux/12 -B/usr/lib/gcc/aarch64-openEuler-linux/12"
-   ```
-
-5. **编译测试**：
-   ```bash
-   make
-   ```
-
-   编译成功后，将生成 `kdadk_fuzzer` 可执行文件。
-
-## 5. 运行指南
-
-### 5.1 基本运行
-
-使用 LibFuzzer 运行测试：
+## 4. 运行
 
 ```bash
 cd test/build
 make rfuzz fuzzcount=10000 fuzzargs="-max_total_time=60"
 ```
 
-`rfuzz` 会设置兼容模型配置路径和运行时库路径。直接运行二进制时，可通过
-`KTAG_LEGACY_CONFIG` 指定旧推理配置；未设置时只执行 Feature 兼容 API 的
-Fuzz。
+`rfuzz` 会设置运行所需的 `LD_LIBRARY_PATH`，并把
+`tools/demo/config.yaml` 作为可选旧推理配置传入。配置中的 ONNX 与 Scaler 路径必须
+有效；如果不希望覆盖旧推理，可直接运行二进制且不设置 `KTAG_LEGACY_CONFIG`：
 
-### 5.2 运行选项
+```bash
+test/fuzz/build/kdadk_fuzzer -runs=10000 -max_total_time=60
+```
 
-LibFuzzer 支持多种运行选项，常用的选项包括：
+常用 LibFuzzer 参数：
 
-| 选项 | 描述 | 默认值 |
-|------|------|--------|
-| `-max_len` | 最大输入长度 | 4096 |
-| `-max_total_time` | 单个测试用例的超时时间（秒） | 10 |
-| `-runs` | 运行的测试用例数量 | 无限 |
+| 参数 | 说明 |
+|---|---|
+| `-runs=N` | 最多执行 N 次输入 |
+| `-max_total_time=N` | 最长运行 N 秒 |
+| `-max_len=N` | 限制单个输入长度 |
 
-## 6. 查看覆盖率
+发现崩溃后，应保存 LibFuzzer 生成的复现样本和完整 Sanitizer 回显。安全测试结果及
+样本按项目的信息安全流程保存，不应直接写入公开产品文档。
 
-由于 Fuzz 测试使用 Clang 编译，而主库使用 GCC 编译，两者生成的覆盖率数据格式不同，需要进行合并才能得到完整的覆盖率报告。
+## 5. 覆盖率
 
-### 6.1 生成 Clang 覆盖率数据
+现有目标使用 Clang 的 profile/coverage 选项。运行后可以生成覆盖率数据：
 
-1. **运行 Fuzz 测试**：
-   ```bash
-   ./kdadk_fuzzer -runs=10000
-   ```
+```bash
+cd test/fuzz/build
+llvm-profdata merge -sparse default.profraw -o kdadk.profdata
+llvm-cov export \
+  -format=lcov \
+  ./kdadk_fuzzer \
+  --instr-profile=kdadk.profdata \
+  > clang_coverage.info
+```
 
-2. **合并 .profraw 文件**：
-   ```bash
-   llvm-profdata merge -sparse default.profraw -o kdadk.profdata
-   ```
-
-3. **生成 lcov 格式的覆盖率数据**：
-   ```bash
-   llvm-cov export -format=lcov ./kdadk_fuzzer --instr-profile=kdadk.profdata > clang_coverage.info
-   ```
-
-### 6.2 生成 GCC 覆盖率数据
-
-1. **生成 lcov 格式的覆盖率数据**
-   ```bash
-   cd KDADK-APPID/build
-   lcov --capture --directory . --output-file gcc_coverage.info
-   ```
-
-### 6.3 合并覆盖率数据
-
-1. **合并两种格式的覆盖率数据**：
-   ```bash
-   cp ../test/fuzz/build/clang_coverage.info ./
-   lcov -a gcc_coverage.info -a clang_coverage.info -o combined_coverage.info
-   ```
-
-2. **生成 HTML 覆盖率报告**：
-   ```bash
-   genhtml combined_coverage.info --output-dir=coverage_report --show-details
-   ```
-
-### 6.4 查看覆盖率报告
-
-打开 `coverage_report/index.html` 文件，在浏览器中查看详细的覆盖率报告。报告将显示整个代码库的覆盖率情况，包括：
-
-- **行覆盖率**：被执行的代码行数占总代码行数的百分比
-- **函数覆盖率**：被执行的函数数占总函数数的百分比
-- **分支覆盖率**：被执行的分支数占总分支数的百分比
-
-通过分析覆盖率报告，你可以：
-1. 识别未被测试覆盖的代码区域
-2. 了解测试的有效性
-3. 发现潜在的代码问题
-
-## 7. 故障排除
-
-### 7.1 常见问题
-
-| 问题 | 原因 | 解决方案 |
-|------|------|----------|
-| Clang 编译错误 | 缺少 LibFuzzer 支持 | 确保 Clang 版本支持 LibFuzzer（Clang 6+） |
-| 覆盖率数据合并失败 | 缺少 lcov 工具 | 安装 lcov：`sudo apt install lcov` |
-| 报告生成失败 | 路径问题 | 确保所有路径正确，文件存在 |
-
-### 7.2 调试技巧
-
-1. **检查编译器版本**：确保 Clang 和 GCC 版本支持所需的功能
-2. **验证覆盖率选项**：确保编译时添加了正确的覆盖率选项
-3. **检查文件路径**：确保所有文件路径正确，特别是模型和配置文件的路径
-4. **查看错误信息**：仔细分析编译和运行时的错误信息，定位问题所在
-
+主库如使用 GCC coverage 构建，二者数据格式不同，需要通过相应工具分别生成后再合并。

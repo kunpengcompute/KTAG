@@ -61,6 +61,11 @@ make rperf
 
 ### 1.3 模糊测试（Fuzz Testing）
 
+> 当前仓库的 Fuzz 只覆盖旧特征提取/推理兼容边界。现代双栈 Decoder、代理 TCP
+> Signature 和 QUIC 的专项 Fuzz 属于后续独立安全验收，不能把现有结果等同于完整
+> 代理功能安全结论。详细现状和命令以
+> [`test/fuzz/README.md`](../../test/fuzz/README.md) 为准。
+
 KTAG Fuzz 测试是基于 LibFuzzer 框架实现的模糊测试，用于发现库中的潜在崩溃和安全漏洞。通过向库的核心 API 注入随机数据，测试系统在各种输入情况下的行为，确保库的健壮性和安全性。
 
 #### 1.3.1 测试覆盖范围

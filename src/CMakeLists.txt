@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Threads REQUIRED)
 
 add_library(ktag_capture SHARED
+    ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
     ${PROJECT_SOURCE_DIR}/src/capture/capture.cpp
     ${PROJECT_SOURCE_DIR}/src/capture/packet_buffer.cpp
     ${PROJECT_SOURCE_DIR}/src/capture/flow_key.cpp
@@ -21,7 +22,9 @@ target_include_directories(ktag_capture
     PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
-    PRIVATE ${PROJECT_SOURCE_DIR}/src/capture
+    PRIVATE
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/src/capture
 )
 set_target_properties(ktag_capture PROPERTIES
     EXPORT_NAME capture
@@ -75,6 +78,7 @@ message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 
 # ============= 生成特征提取动态链接库 =============
 add_library(ktag_feature SHARED
+    ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
     ${PROJECT_SOURCE_DIR}/src/decode.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp

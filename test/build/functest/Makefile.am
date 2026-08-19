@@ -18,6 +18,7 @@ KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/include/
 KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/src/
 KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/
 KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/tools/demo/plugin/
+KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/plugins/proxy_features/
 KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/include/
 CFLAGS += -DLIB_KDADK_APPID_NAME=\"libkdadk_appidlib.so\"
 CXXFLAGS += -DLIB_KDADK_APPID_NAME=\"libkdadk_appidlib.so\"
@@ -47,6 +48,8 @@ LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
 				-lKDADK_feature_extract \
 				-lktag_inference \
 				-lKDADK_inference \
+				-L$(KDADK_APPID_OUTPUT_DIR)/plugins \
+				-lktag_proxy_features \
 				-L$(ONNXRUNTIME_LIB_DIR) \
 				-lonnxruntime
 
@@ -70,7 +73,10 @@ SRCEXTS   := .c .cc .cpp
 
 SOURCES_MUD = $(foreach d,$(SRC_FILES_DIRS),$(wildcard $(addprefix $(d)/*,$(SRCEXTS))))
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_config.cpp
+SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_runner.cpp
+SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/schema_feature_writer.cpp
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/plugin/feature_plugin_loader.cpp
+SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/utils.cpp
 
 # The Provider Pipeline lifecycle test intentionally uses private headers and
 # symbols. Keep normal public-ABI functional builds independent of internals;
@@ -107,16 +113,19 @@ run:
 		(echo "missing $(KDADK_APPID_OUTPUT_DIR)/libkdadk_appidlib.so; run 'sh build.sh -lib' from the repository root"; exit 1)
 	@test -f "$(KDADK_APPID_OUTPUT_DIR)/libktag_feature.so" || \
 		(echo "missing $(KDADK_APPID_OUTPUT_DIR)/libktag_feature.so; rebuild phase-8 libraries"; exit 1)
-	env LD_LIBRARY_PATH=$(KDADK_APPID_OUTPUT_DIR):$(ONNXRUNTIME_LIB_DIR):/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_functest --gtest_filter=$(FILTER)
+	env LD_LIBRARY_PATH=$(KDADK_APPID_OUTPUT_DIR):$(KDADK_APPID_OUTPUT_DIR)/plugins:$(ONNXRUNTIME_LIB_DIR):/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_functest --gtest_filter=$(FILTER)
 rrun:
-	env LD_LIBRARY_PATH=/usr/local/ksl/lib/:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_functest --gtest_filter=$(FILTER)
+	env LD_LIBRARY_PATH=$(KDADK_APPID_OUTPUT_DIR)/plugins:/usr/local/ksl/lib/:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_functest --gtest_filter=$(FILTER)
 
 clean :
 	@-$(RM) *.d *.a *.so
 	@-$(RM)	./$(PROGRAM) $(SRC_DEPS)
 	@find $(TEST_modules_DIR)/common/functest/ -name '*.o' -exec $(RM) {} \;
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_config.o
+	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_runner.o
+	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/schema_feature_writer.o
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/plugin/feature_plugin_loader.o
+	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/utils.o
 
 # Builds a sample test.
 

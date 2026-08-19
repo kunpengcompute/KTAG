@@ -13,6 +13,12 @@ KTAG是鲲鹏数据分析开发套件的网络流分类库，包含流汇聚、�
 自定义特征、Schema 化模型契约和由 demo 组织的单线程/多线程流水线。旧固定
 `feature_vector` 与旧模型接口继续作为 deprecated 兼容层保留。
 
+当前仓库还提供 IPv4/IPv6 双栈 Schema 特征提取和独立的应用/代理分类配置。代理
+分类使用可选的 `libktag_proxy_features.so` 插件和 619 维 `ktag_proxy_v1` Schema。
+仓库中的代理配置目前是两个 VMess 承载类别的可运行示例，不代表已经随仓库交付
+普通流量及全部目标代理类别的正式模型。完整范围、命令和限制参见
+《[应用分类与代理分类使用指南](docs/zh/demo_pipeline.md)》。
+
 ## 2. 项目结构
 项目目录结构如下：
 ```
@@ -23,7 +29,7 @@ KTAG是鲲鹏数据分析开发套件的网络流分类库，包含流汇聚、�
 │       ├── installation_guide.md                             # 安装指南
 │       ├── user_guide.md                                     # 用户指南
 │       ├── api_reference.md                                  # API参考
-│       ├── migration_guide.md                                # 旧接口迁移指南
+│       ├── demo_pipeline.md                                  # 应用/代理分类使用指南
 |—— include                                                   # 头文件目录
 |—— src                                                       # 源码目录
 |—— test                                                      # 测试框架
@@ -61,8 +67,8 @@ KTAG当前适配的处理器和操作系统为鲲鹏920系列处理器，openEul
 | [编译指南](docs/zh/installation_guide.md#编译指南) | 提供了项目编译方法。 |
 | [用户指南](docs/zh/user_guide.md#用户指南) | 提供了测试框架说明及用法。 |
 | [API参考](docs/zh/api_reference.md#api参考) | 提供了特征提取和特征推理的接口说明。 |
-| [迁移指南](docs/zh/migration_guide.md) | 说明旧固定向量和旧模型到三层 API 的迁移方式。 |
-| [多线程 demo](docs/zh/demo_pipeline.md) | 说明四种管线模式、背压与 Feature Plugin。 |
+| [应用分类与代理分类使用指南](docs/zh/demo_pipeline.md) | 说明配置、特征提取、训练、评估、推理、双栈范围和当前限制。 |
+| [应用代理与加密代理流量分类功能设计](docs/zh/proxy_protocol_identification_design.md) | 说明应用与代理双栈分类、代理 Feature Plugin、轻量级 QUIC 与完整实施步骤。 |
 | [版本说明书](docs/zh/release_notes.md#版本说明书) | 提供了版本更新说明。 |
 
 ## 6. 贡献声明

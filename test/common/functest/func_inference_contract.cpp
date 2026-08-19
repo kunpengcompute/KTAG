@@ -268,6 +268,8 @@ TEST_F(InferenceContractTest, RejectsScalerSchemaMismatch)
 
 TEST(KTAGPredictionBatch, OwnsRecordsAndValidatesAccess)
 {
+    EXPECT_FLOAT_EQ(-1.0F, KTAG_INFERENCE_CONFIDENCE_UNAVAILABLE);
+    EXPECT_NE(0.0F, KTAG_INFERENCE_CONFIDENCE_UNAVAILABLE);
     ktag_prediction_batch *batch = ktag_prediction_batch_create(2U);
     ASSERT_NE(nullptr, batch);
     EXPECT_EQ(0U, ktag_prediction_batch_get_count(batch));

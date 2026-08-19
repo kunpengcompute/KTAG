@@ -27,6 +27,7 @@ add_executable(
     utils.cpp
     pipeline/pipeline_config.cpp
     pipeline/pipeline_runner.cpp
+    pipeline/schema_feature_writer.cpp
     plugin/feature_plugin_loader.cpp
 )
 
@@ -75,6 +76,9 @@ set_target_properties(ktag_example_feature_plugin PROPERTIES
     INSTALL_RPATH "$ORIGIN/.."
 )
 add_dependencies(kdadk_demo ktag_example_feature_plugin)
+if(TARGET ktag_proxy_features)
+    add_dependencies(kdadk_demo ktag_proxy_features)
+endif()
 
 if(ENABLE_BUILD_LIB)
     function(ktag_add_plugin_fixture target source)

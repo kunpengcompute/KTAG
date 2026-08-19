@@ -55,6 +55,9 @@ endif()
 set(EXECUTABLE_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/output")
 option(KTAG_BUILD_TOOLS "Build KTAG command-line tools and demos" ON)
 option(KTAG_BUILD_EXAMPLES "Build public three-layer integration examples" ON)
+option(KTAG_BUILD_PROXY_FEATURES
+       "Build the official proxy protocol Feature Provider plugin"
+       ON)
 option(KTAG_INSTALL_LEGACY_COMPAT
        "Install the deprecated fixed-vector compatibility libraries and headers"
        ON)
@@ -66,6 +69,9 @@ set(KTAG_INSTALL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/KDADK_APPID")
 set(KTAG_INSTALL_CMAKEDIR "lib/cmake/KTAG")
 
 ADD_SUBDIRECTORY(src)
+if(KTAG_BUILD_PROXY_FEATURES)
+    ADD_SUBDIRECTORY(plugins)
+endif()
 if(KTAG_BUILD_EXAMPLES)
     ADD_SUBDIRECTORY(examples/three_layer)
 endif()

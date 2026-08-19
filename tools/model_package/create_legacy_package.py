@@ -105,10 +105,19 @@ def create_package(config_path, output_path):
     scale = old_scaler.get("scale")
     if not isinstance(mean, list) or not isinstance(scale, list):
         raise ValueError("legacy scaler must contain mean and scale arrays")
-    if config.get("columns_to_remove", []) != [0, 1, 2]:
+    pipeline = config.get("pipeline")
+    schema = pipeline.get("schema") if isinstance(pipeline, dict) else None
+    if isinstance(schema, dict) and schema.get("name") not in (
+            None, "ktag_legacy_v1"):
         raise ValueError(
-            "this LegacyModelAdapter supports the frozen [0, 1, 2] "
-            "metadata-column contract only"
+            "create_legacy_package.py only accepts ktag_legacy_v1"
+        )
+    columns_to_remove = config.get("columns_to_remove", [])
+    supported_removals = ([0, 1, 2], list(range(15)))
+    if columns_to_remove not in supported_removals:
+        raise ValueError(
+            "this LegacyModelAdapter supports historical [0, 1, 2] or "
+            "Schema CSV [0..14] removal contracts only"
         )
 
     descriptors = _legacy_descriptors()
