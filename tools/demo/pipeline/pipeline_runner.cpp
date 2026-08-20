@@ -2517,9 +2517,8 @@ int ktag_demo_run_pipeline_internal(
 
   ktag_demo_feature_plugin_loader plugin_loader;
   registry_ptr registry(ktag_feature_registry_create());
-  if (!registry || ktag_feature_registry_register_legacy_builtins(
-                       registry.get()) != KTAG_SUCCESS) {
-    std::fprintf(stderr, "pipeline: failed to register built-in Providers\n");
+  if (!registry) {
+    std::fprintf(stderr, "pipeline: failed to create Feature Registry\n");
     return -1;
   }
 
