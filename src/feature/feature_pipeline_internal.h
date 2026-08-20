@@ -75,6 +75,4 @@ ktag_feature_flow_runtime_finish_internal(ktag_feature_flow_runtime *runtime,
 void ktag_feature_flow_runtime_destroy_internal(
     ktag_feature_flow_runtime *runtime);
 
-ktag_feature_pipeline *ktag_feature_legacy_pipeline_create_internal(void);
-
 #endif /* KTAG_FEATURE_PIPELINE_INTERNAL_H */

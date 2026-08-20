@@ -147,15 +147,14 @@ add_library(ktag_feature SHARED
     ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
     ${PROJECT_SOURCE_DIR}/src/decode.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
-    ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
     ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_schema.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_batch.cpp
+    ${PROJECT_SOURCE_DIR}/plugins/traffic_features/traffic_feature_catalog.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/legacy_schema.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/provider_registry.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_view.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_pipeline.cpp
-    ${PROJECT_SOURCE_DIR}/src/feature/builtin_features.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/domain_store.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_context.cpp
 )

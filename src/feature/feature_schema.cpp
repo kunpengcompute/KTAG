@@ -4,10 +4,12 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "feature_schema_internal.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
+#include <string_view>
 #include <utility>
 
 namespace {
@@ -49,6 +51,37 @@ void hash_string(uint64_t &hash, const std::string &value)
     }
 }
 
+const std::string &hash_provider_contract_id(
+    const ktag_feature_descriptor_storage &descriptor)
+{
+    static const std::string legacy_traffic_contract =
+        "builtin.legacy.traffic_statistics";
+    static constexpr std::array<std::string_view, 8U> split_traffic_slots{{
+        "builtin.legacy.send.counters",
+        "builtin.legacy.send.header",
+        "builtin.legacy.send.payload",
+        "builtin.legacy.send.interval",
+        "builtin.legacy.receive.counters",
+        "builtin.legacy.receive.header",
+        "builtin.legacy.receive.payload",
+        "builtin.legacy.receive.interval",
+    }};
+
+    /*
+     * Provider IDs are runtime ownership identities. These eight built-in
+     * Providers are a zero-algorithm-change decomposition of the historical
+     * traffic-statistics family, so their stable model-contract identity stays
+     * unchanged. A replacement Provider uses another ID/version and therefore
+     * still produces a different Schema Hash.
+    */
+    for (const std::string_view slot : split_traffic_slots) {
+        if (std::string_view(descriptor.provider_id) == slot) {
+            return legacy_traffic_contract;
+        }
+    }
+    return descriptor.provider_id;
+}
+
 uint64_t calculate_schema_hash(const ktag_feature_schema &schema)
 {
     uint64_t hash = FNV1A_OFFSET_BASIS;
@@ -60,7 +93,7 @@ uint64_t calculate_schema_hash(const ktag_feature_schema &schema)
         const auto &descriptor = schema.descriptors[index];
         hash_u32(hash, index);
         hash_string(hash, descriptor.feature_id);
-        hash_string(hash, descriptor.provider_id);
+        hash_string(hash, hash_provider_contract_id(descriptor));
         hash_u32(hash, descriptor.provider_version);
         hash_u32(hash, static_cast<uint32_t>(descriptor.value_type));
         hash_u32(hash, descriptor.dimension);
@@ -71,14 +104,6 @@ uint64_t calculate_schema_hash(const ktag_feature_schema &schema)
 auto find_descriptor(ktag_feature_schema *schema, const char *feature_id)
 {
     return std::find_if(schema->descriptors.begin(), schema->descriptors.end(),
-                        [feature_id](const ktag_feature_descriptor_storage &item) {
-                            return item.feature_id == feature_id;
-                        });
-}
-
-auto find_descriptor(const ktag_feature_schema *schema, const char *feature_id)
-{
-    return std::find_if(schema->descriptors.cbegin(), schema->descriptors.cend(),
                         [feature_id](const ktag_feature_descriptor_storage &item) {
                             return item.feature_id == feature_id;
                         });
