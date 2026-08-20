@@ -13,6 +13,7 @@
 
 #include "kdadk_feature_extract.h"
 #include "ktag_feature.h"
+#include "ktag_traffic_features.h"
 
 namespace {
 
@@ -1090,6 +1091,12 @@ TEST(KTAGFeatureContext, CapacityUdpAndTcpExpireFlushAndThreadOwnership)
     ktag_feature_registry_destroy(registry);
 }
 
+/*
+ * This is the migration gate: the Provider path and the frozen fixed-vector
+ * extractor receive the same bidirectional flow and must agree on every one
+ * of the 354 Legacy V1 values. Representative-value tests cannot replace this
+ * differential check.
+ */
 TEST(KTAGFeatureContext, LegacySchemaMatchesCompatibilityExtractor)
 {
     ktag_feature_registry *registry = ktag_feature_registry_create();
@@ -1098,7 +1105,7 @@ TEST(KTAGFeatureContext, LegacySchemaMatchesCompatibilityExtractor)
     ASSERT_NE(nullptr, schema);
     ASSERT_EQ(
         KTAG_SUCCESS,
-        ktag_feature_registry_register_legacy_builtins(registry));
+        ktag_traffic_features_register(registry));
     ktag_feature_context *context = make_context(
         schema, registry, 8U, 100U, 1000U, 1000U);
     ktag_feature_batch *batch = ktag_feature_batch_create(schema, 1U);
@@ -1107,32 +1114,43 @@ TEST(KTAGFeatureContext, LegacySchemaMatchesCompatibilityExtractor)
     ASSERT_NE(nullptr, batch);
     ASSERT_NE(nullptr, legacy);
 
-    auto frame = udp_frame(
-        {10U, 10U, 0U, 1U}, 12345U,
-        {10U, 10U, 0U, 2U}, 443U);
-    frame.resize(frame.size() + 18U, 0U);
-    const auto packet = packet_view(frame, 1U, 7U, 8U);
-    ASSERT_EQ(
-        KTAG_SUCCESS,
-        ktag_feature_process_packet(context, &packet, batch));
+    const std::array<uint8_t, 4> first{10U, 10U, 0U, 1U};
+    const std::array<uint8_t, 4> second{10U, 10U, 0U, 2U};
+    const std::vector<std::vector<uint8_t>> frames = {
+        udp_frame_with_payload(first, 12345U, second, 443U, {1U, 2U, 3U}),
+        udp_frame_with_payload(
+            second, 443U, first, 12345U,
+            {4U, 5U, 6U, 7U, 8U, 9U, 10U}),
+        udp_frame_with_payload(
+            first, 12345U, second, 443U,
+            {11U, 12U, 13U, 14U, 15U, 16U, 17U, 18U, 19U, 20U, 21U}),
+        udp_frame_with_payload(second, 443U, first, 12345U, {22U})};
+    const std::array<int32_t, 4U> microseconds = {8, 108, 2008, 102008};
+    for (size_t index = 0U; index < frames.size(); ++index) {
+        const auto packet = packet_view(
+            frames[index], index + 1U, 7U, microseconds[index]);
+        ASSERT_EQ(
+            KTAG_SUCCESS,
+            ktag_feature_process_packet(context, &packet, batch));
+
+        feature_vector packet_output{};
+        int has_feature = 0;
+        timeval timestamp{};
+        timestamp.tv_sec = 7;
+        timestamp.tv_usec = microseconds[index];
+        ASSERT_EQ(
+            EXTRACTOR_SUCCESS,
+            process_packet(
+                legacy,
+                frames[index].data(),
+                static_cast<uint32_t>(frames[index].size()),
+                &timestamp,
+                &packet_output,
+                &has_feature));
+        EXPECT_EQ(0, has_feature);
+    }
     ASSERT_EQ(KTAG_SUCCESS, ktag_feature_flush(context, batch));
     ASSERT_EQ(1U, ktag_feature_batch_get_count(batch));
-
-    feature_vector packet_output{};
-    int has_feature = 0;
-    timeval timestamp{};
-    timestamp.tv_sec = 7;
-    timestamp.tv_usec = 8;
-    ASSERT_EQ(
-        EXTRACTOR_SUCCESS,
-        process_packet(
-            legacy,
-            frame.data(),
-            static_cast<uint32_t>(frame.size()),
-            &timestamp,
-            &packet_output,
-            &has_feature));
-    EXPECT_EQ(0, has_feature);
     feature_vector legacy_output{};
     feature_vector_list legacy_list{};
     legacy_list.vectors = &legacy_output;
@@ -1165,7 +1183,7 @@ TEST(KTAGFeatureContext, LegacySchemaKeepsIPv6IpFeaturesAtZero)
     ASSERT_NE(nullptr, schema);
     ASSERT_EQ(
         KTAG_SUCCESS,
-        ktag_feature_registry_register_legacy_builtins(registry));
+        ktag_traffic_features_register(registry));
     ktag_feature_context *context = make_context(
         schema, registry, 8U, 100U, 1000U, 1000U);
     ktag_feature_batch *batch =
@@ -1222,7 +1240,7 @@ TEST(KTAGFeatureContext, LegacySchemaKeepsIPv6IpFeaturesAtZero)
     ktag_feature_registry_destroy(registry);
 }
 
-TEST(KTAGFeatureContext, LegacyLifecycleMatchesExtractorPastUdpLimit)
+TEST(KTAGFeatureContext, LegacySchemaNativeProvidersProduceStableValues)
 {
     ktag_feature_registry *registry = ktag_feature_registry_create();
     ktag_feature_schema *schema = ktag_feature_schema_create_legacy_v1();
@@ -1230,15 +1248,75 @@ TEST(KTAGFeatureContext, LegacyLifecycleMatchesExtractorPastUdpLimit)
     ASSERT_NE(nullptr, schema);
     ASSERT_EQ(
         KTAG_SUCCESS,
-        ktag_feature_registry_register_legacy_builtins(registry));
+        ktag_traffic_features_register(registry));
     ktag_feature_context *context = make_context(
-        schema,
-        registry,
-        8U,
-        100U,
-        10U,
-        10U,
-        nullptr,
+        schema, registry, 8U, 100U, 1000U, 1000U);
+    ktag_feature_batch *batch = ktag_feature_batch_create(schema, 1U);
+    ASSERT_NE(nullptr, context);
+    ASSERT_NE(nullptr, batch);
+
+    const std::array<uint8_t, 4> first{10U, 10U, 0U, 1U};
+    const std::array<uint8_t, 4> second{10U, 10U, 0U, 2U};
+    const std::vector<std::vector<uint8_t>> frames = {
+        udp_frame_with_payload(first, 12345U, second, 443U, {1U, 2U, 3U}),
+        udp_frame_with_payload(
+            second, 443U, first, 12345U,
+            {4U, 5U, 6U, 7U, 8U, 9U, 10U}),
+        udp_frame_with_payload(
+            first, 12345U, second, 443U,
+            {11U, 12U, 13U, 14U, 15U, 16U, 17U, 18U, 19U, 20U, 21U}),
+        udp_frame_with_payload(second, 443U, first, 12345U, {22U})};
+    const std::array<int32_t, 4U> microseconds = {8, 108, 2008, 102008};
+    for (size_t index = 0U; index < frames.size(); ++index) {
+        const auto packet = packet_view(
+            frames[index], index + 1U, 7U, microseconds[index]);
+        ASSERT_EQ(
+            KTAG_SUCCESS,
+            ktag_feature_process_packet(context, &packet, batch));
+    }
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_flush(context, batch));
+    ASSERT_EQ(1U, ktag_feature_batch_get_count(batch));
+
+    ktag_feature_record record{};
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_batch_get_record(batch, 0U, &record));
+    ASSERT_EQ(KTAG_LEGACY_V1_VALUE_COUNT, record.value_count);
+    const auto value = [schema, &record](const char *feature_id) {
+        ktag_feature_descriptor descriptor{};
+        uint32_t offset = 0U;
+        EXPECT_EQ(
+            KTAG_SUCCESS,
+            ktag_feature_schema_find(
+                schema, feature_id, &descriptor, &offset));
+        EXPECT_EQ(1U, descriptor.dimension);
+        return record.values[offset];
+    };
+    EXPECT_FLOAT_EQ(17.0F, value("network.protocol"));
+    EXPECT_FLOAT_EQ(2.0F, value("traffic.send.packet_count"));
+    EXPECT_FLOAT_EQ(2.0F, value("traffic.receive.packet_count"));
+    EXPECT_FLOAT_EQ(3.0F, value("traffic.send.payload.minimum"));
+    EXPECT_FLOAT_EQ(11.0F, value("traffic.send.payload.maximum"));
+    EXPECT_FLOAT_EQ(7.0F, value("traffic.send.payload.mean"));
+    EXPECT_FLOAT_EQ(1.0F, value("traffic.receive.payload.minimum"));
+    EXPECT_FLOAT_EQ(7.0F, value("traffic.receive.payload.maximum"));
+    EXPECT_FLOAT_EQ(4.0F, value("traffic.receive.payload.mean"));
+
+    ktag_feature_batch_destroy(batch);
+    ktag_feature_destroy(context);
+    ktag_feature_schema_destroy(schema);
+    ktag_feature_registry_destroy(registry);
+}
+
+TEST(KTAGFeatureContext, LegacyLifecycleStopsAccumulatingPastUdpLimit)
+{
+    ktag_feature_registry *registry = ktag_feature_registry_create();
+    ktag_feature_schema *schema = ktag_feature_schema_create_legacy_v1();
+    ASSERT_NE(nullptr, registry);
+    ASSERT_NE(nullptr, schema);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_traffic_features_register(registry));
+    ktag_feature_context *context = make_context(
+        schema, registry, 8U, 100U, 10U, 10U, nullptr,
         KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT);
     ktag_feature_batch *batch = ktag_feature_batch_create(schema, 1U);
     feature_extractor *legacy = extractor_init(DLT_EN10MB);
@@ -1288,14 +1366,70 @@ TEST(KTAGFeatureContext, LegacyLifecycleMatchesExtractorPastUdpLimit)
 
     ktag_feature_record record{};
     ASSERT_EQ(KTAG_SUCCESS, ktag_feature_batch_get_record(batch, 0U, &record));
-    ASSERT_EQ(KTAG_LEGACY_V1_VALUE_COUNT, record.value_count);
     EXPECT_EQ(100U, record.metadata.last_packet_sequence);
+    ASSERT_EQ(KTAG_LEGACY_V1_VALUE_COUNT, record.value_count);
     for (uint32_t index = 0U; index < record.value_count; ++index) {
         EXPECT_FLOAT_EQ(legacy_output.features[index], record.values[index])
             << "legacy UDP-limit value mismatch at index " << index;
     }
+    ktag_feature_descriptor descriptor{};
+    uint32_t offset = 0U;
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_schema_find(
+            schema, "traffic.send.packet_count", &descriptor, &offset));
+    EXPECT_FLOAT_EQ(100.0F, record.values[offset]);
 
     extractor_destroy(legacy);
+    ktag_feature_batch_destroy(batch);
+    ktag_feature_destroy(context);
+    ktag_feature_schema_destroy(schema);
+    ktag_feature_registry_destroy(registry);
+}
+
+TEST(KTAGFeatureContext, SelectedLegacySlotRunsWithoutFull354Schema)
+{
+    ktag_feature_registry *registry = ktag_feature_registry_create();
+    ASSERT_NE(nullptr, registry);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_traffic_features_register(registry));
+
+    /* Selecting one descriptor must activate only its owning feature-family
+     * Provider; the other 353 legacy values are not part of this schema. */
+    ktag_feature_schema *schema =
+        ktag_feature_schema_create("selected_payload_slot", 1U);
+    ASSERT_NE(nullptr, schema);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_schema_add_registered(
+            schema, registry, "traffic.send.payload.mean"));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(schema));
+    ASSERT_EQ(1U, ktag_feature_schema_get_feature_count(schema));
+    ASSERT_EQ(1U, ktag_feature_schema_get_value_count(schema));
+
+    ktag_feature_context *context = make_context(
+        schema, registry, 8U, 100U, 1000U, 1000U);
+    ktag_feature_batch *batch = ktag_feature_batch_create(schema, 1U);
+    ASSERT_NE(nullptr, context);
+    ASSERT_NE(nullptr, batch);
+
+    const auto frame = udp_frame_with_payload(
+        {10U, 40U, 0U, 1U}, 12345U,
+        {10U, 40U, 0U, 2U}, 443U,
+        {1U, 2U, 3U, 4U, 5U});
+    const auto packet = packet_view(frame, 1U, 7U, 8U);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_process_packet(context, &packet, batch));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_flush(context, batch));
+    ASSERT_EQ(1U, ktag_feature_batch_get_count(batch));
+
+    ktag_feature_record record{};
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_batch_get_record(batch, 0U, &record));
+    ASSERT_EQ(1U, record.value_count);
+    EXPECT_FLOAT_EQ(5.0F, record.values[0U]);
+
     ktag_feature_batch_destroy(batch);
     ktag_feature_destroy(context);
     ktag_feature_schema_destroy(schema);

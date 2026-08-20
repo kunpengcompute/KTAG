@@ -20,6 +20,7 @@
 
 #include "bounded_queue.h"
 #include "feature_plugin_loader.h"
+#include "ktag_traffic_features.h"
 #include "pipeline_config.h"
 #include "pipeline_runner.h"
 #include "proxy_feature_catalog.h"
@@ -34,6 +35,8 @@ const char *const EXAMPLE_PLUGIN =
     "../../../output/plugins/libktag_example_feature_plugin.so";
 const char *const PROXY_PLUGIN =
     "../../../output/plugins/libktag_proxy_features.so";
+const char *const TRAFFIC_PLUGIN =
+    "../../../output/plugins/libktag_traffic_features.so";
 const char *const OFFICIAL_PROXY_CONFIG =
     "../../../tools/demo/proxy_config.yaml";
 const char *const BAD_ABI_PLUGIN =
@@ -437,7 +440,7 @@ ktag_feature_schema *make_proxy_v1_schema()
         ktag_feature_schema_create("ktag_proxy_v1", 1U);
     const auto plugin = query_proxy_plugin();
     if (registry == nullptr || legacy == nullptr || schema == nullptr ||
-        ktag_feature_registry_register_legacy_builtins(registry) !=
+        ktag_traffic_features_register(registry) !=
             KTAG_SUCCESS ||
         plugin.register_providers == nullptr ||
         plugin.register_providers(nullptr, registry) != KTAG_SUCCESS) {
@@ -1084,6 +1087,7 @@ TEST(KTAGDemoOnlineInferenceContract, PreflightsApplicationAndProxySeparately)
     application_config.feature_threads = 1U;
     application_config.inference_threads = 1U;
     application_config.model_package_path = application_package.string();
+    application_config.plugin_paths = {TRAFFIC_PLUGIN};
     const std::string application_output =
         (root / "application.csv").string();
     EXPECT_EQ(
@@ -1139,7 +1143,7 @@ TEST(KTAGDemoOnlineInferenceContract, PreflightsApplicationAndProxySeparately)
     proxy_config.model_package_path = proxy_package.string();
     proxy_config.schema_name = "ktag_proxy_v1";
     proxy_config.schema_version = 1U;
-    proxy_config.plugin_paths = {PROXY_PLUGIN};
+    proxy_config.plugin_paths = {TRAFFIC_PLUGIN, PROXY_PLUGIN};
     proxy_config.remove_features = {
         "legacy.flow_id", "network.src_ip", "network.dst_ip"};
     add_proxy_feature_ids(&proxy_config);
@@ -1450,6 +1454,7 @@ TEST(KTAGDemoSchemaFeaturePipeline, FlushesSameApplicationCsvInAllModes)
         config.feature_threads = test_case.feature_threads;
         config.inference_threads = test_case.output_threads;
         config.lifecycle_mode = ktag_demo_feature_lifecycle_mode::modern;
+        config.plugin_paths = {TRAFFIC_PLUGIN};
 
         const std::string output_path =
             "/tmp/ktag_schema_pipeline_" + std::to_string(getpid()) + "_" +
@@ -1511,6 +1516,7 @@ TEST(KTAGDemoSchemaFeaturePipeline, FlushesTruncatedPcapInAllModes)
         config.feature_threads = test_case.feature_threads;
         config.inference_threads = test_case.output_threads;
         config.lifecycle_mode = ktag_demo_feature_lifecycle_mode::modern;
+        config.plugin_paths = {TRAFFIC_PLUGIN};
         const std::string output_path =
             "/tmp/ktag_schema_truncated_" + std::to_string(getpid()) + "_" +
             ktag_demo_pipeline_mode_name(test_case.mode) + ".csv";
@@ -1566,6 +1572,7 @@ TEST(KTAGDemoDualStackPipeline, SkipsUnsupportedIpv6AndContinues)
         config.feature_threads = test_case.feature_threads;
         config.inference_threads = test_case.output_threads;
         config.lifecycle_mode = ktag_demo_feature_lifecycle_mode::modern;
+        config.plugin_paths = {TRAFFIC_PLUGIN};
         const std::string output_path =
             "/tmp/ktag_dual_stack_skip_" + std::to_string(getpid()) + "_" +
             ktag_demo_pipeline_mode_name(test_case.mode) + ".csv";
@@ -1641,7 +1648,7 @@ TEST(KTAGDemoSchemaFeaturePipeline, RejectsReorderedProxyV1Contract)
     config.inference_threads = 1U;
     config.schema_name = "ktag_proxy_v1";
     config.schema_version = 1U;
-    config.plugin_paths = {PROXY_PLUGIN};
+    config.plugin_paths = {TRAFFIC_PLUGIN, PROXY_PLUGIN};
     config.remove_features = {
         "legacy.flow_id",
         "network.src_ip",
@@ -1685,7 +1692,7 @@ TEST(KTAGDemoSchemaFeaturePipeline, Writes619ValueProxyCsv)
     EXPECT_TRUE(config.feature_only);
     EXPECT_EQ("ktag_proxy_v1", config.schema_name);
     EXPECT_EQ(1U, config.schema_version);
-    EXPECT_EQ(1U, config.plugin_paths.size());
+    EXPECT_EQ(2U, config.plugin_paths.size());
     EXPECT_EQ(3U, config.remove_features.size());
     EXPECT_EQ(68U, config.add_features.size());
 
@@ -1756,7 +1763,7 @@ TEST(KTAGDemoSchemaFeaturePipeline, WritesFrozenProxyAblationCsvs)
         config.inference_threads = 1U;
         config.schema_name = test_case.schema_name;
         config.schema_version = 1U;
-        config.plugin_paths = {PROXY_PLUGIN};
+        config.plugin_paths = {TRAFFIC_PLUGIN, PROXY_PLUGIN};
         config.remove_features = test_case.remove_features;
         add_proxy_feature_ids(&config);
         ASSERT_EQ(68U, config.add_features.size());
@@ -1904,6 +1911,22 @@ TEST(KTAGProxyFeaturePlugin, LoadsOnceAndUnloadsAfterRegistry)
     EXPECT_EQ(0U, loader.size());
 }
 
+TEST(KTAGTrafficFeaturePlugin, LoadsAndRegistersElevenProviders)
+{
+    ktag_feature_registry *registry = ktag_feature_registry_create();
+    ASSERT_NE(nullptr, registry);
+    ktag_demo_feature_plugin_loader loader;
+    std::string error;
+    ASSERT_TRUE(loader.load(TRAFFIC_PLUGIN, registry, &error)) << error;
+    EXPECT_EQ(1U, loader.size());
+    EXPECT_EQ("ktag.traffic.features", loader.plugin_id(0U));
+    EXPECT_EQ(11U, ktag_feature_registry_get_provider_count(registry));
+
+    ktag_feature_registry_destroy(registry);
+    loader.unload_all();
+    EXPECT_EQ(0U, loader.size());
+}
+
 TEST(KTAGProxyFeaturePlugin, BuildsLegacyProxyAndAvailableSchemas)
 {
     const auto descriptor = query_proxy_plugin();
@@ -1912,11 +1935,13 @@ TEST(KTAGProxyFeaturePlugin, BuildsLegacyProxyAndAvailableSchemas)
     ASSERT_NE(nullptr, registry);
     ASSERT_EQ(
         KTAG_SUCCESS,
-        ktag_feature_registry_register_legacy_builtins(registry));
+        ktag_traffic_features_register(registry));
     ASSERT_EQ(
         KTAG_SUCCESS,
         descriptor.register_providers(nullptr, registry));
-    EXPECT_EQ(7U, ktag_feature_registry_get_provider_count(registry));
+    // The traffic plugin contributes eleven independently replaceable slots;
+    // the proxy plugin still contributes its original three Providers.
+    EXPECT_EQ(14U, ktag_feature_registry_get_provider_count(registry));
 
     ktag_feature_schema *legacy =
         ktag_feature_schema_create_legacy_v1();

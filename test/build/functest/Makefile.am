@@ -50,6 +50,7 @@ LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
 				-lKDADK_inference \
 				-L$(KDADK_APPID_OUTPUT_DIR)/plugins \
 				-lktag_proxy_features \
+				-lktag_traffic_features \
 				-L$(ONNXRUNTIME_LIB_DIR) \
 				-lonnxruntime
 
