@@ -14,6 +14,7 @@ add_executable(
 target_link_libraries(ktag_external_consumer PRIVATE
     KTAG::capture
     KTAG::feature
+    KTAG::traffic_features
     KTAG::inference
 )
 

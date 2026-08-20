@@ -11,6 +11,7 @@
 
 #include "ktag_capture.h"
 #include "ktag_feature.h"
+#include "ktag_traffic_features.h"
 #include "ktag_inference.h"
 
 static int print_predictions(
@@ -70,7 +71,7 @@ int main(int argc, char **argv)
     schema = ktag_feature_schema_create_legacy_v1();
     registry = ktag_feature_registry_create();
     if (schema == NULL || registry == NULL ||
-        ktag_feature_registry_register_legacy_builtins(registry) !=
+        ktag_traffic_features_register(registry) !=
             KTAG_SUCCESS) {
         fprintf(stderr, "Could not create the Legacy V1 feature contract\n");
         goto cleanup;
