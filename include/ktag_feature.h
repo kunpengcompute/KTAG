@@ -219,7 +219,8 @@ typedef struct {
 
 /*
  * MODERN ends UDP flows at udp_packet_limit and lets expire() apply idle
- * timeouts. LEGACY_COMPAT preserves the historical fixed-vector extractor:
+ * timeouts. LEGACY_COMPAT preserves the historical application-model flow
+ * lifecycle:
  * a UDP flow keeps only its first udp_packet_limit packets and is emitted once
  * by flush(), while expire() performs DomainStore maintenance without ending
  * flows. TCP protocol close handling is identical in both modes.
@@ -393,8 +394,9 @@ KTAG_API ktag_status ktag_feature_schema_find(
     const ktag_feature_schema *schema, const char *feature_id,
     ktag_feature_descriptor *descriptor, uint32_t *value_offset);
 
-/* Factory for the exact 354-value CSV/model contract used before refactoring.
- */
+/* Factory for the frozen 354-value application-traffic value/CSV contract.
+ * Runtime ownership is decomposed into independently replaceable Provider
+ * slots without changing the stable model-contract hash. */
 KTAG_API ktag_feature_schema *ktag_feature_schema_create_legacy_v1(void);
 
 /*
@@ -420,10 +422,6 @@ KTAG_API ktag_status ktag_feature_schema_add_registered(
     ktag_feature_schema *schema, const ktag_feature_registry *registry,
     const char *feature_id);
 
-/* Registers the providers required by ktag_feature_schema_create_legacy_v1. */
-KTAG_API ktag_status
-ktag_feature_registry_register_legacy_builtins(ktag_feature_registry *registry);
-
 /* Feature callbacks use this writer to populate their declared outputs. */
 KTAG_API ktag_status ktag_feature_output_set(ktag_feature_output *output,
                                              const char *feature_id,
@@ -445,6 +443,13 @@ KTAG_API uint32_t ktag_flow_view_get_packet_count(const ktag_flow_view *flow,
 
 KTAG_API uint64_t ktag_flow_view_get_total_bytes(const ktag_flow_view *flow,
                                                  ktag_direction direction);
+
+/* Borrowed zero-copy packet-length arrays. Pointers remain valid only for the
+ * duration of the current Provider callback. */
+KTAG_API ktag_status ktag_flow_view_get_length_samples(
+    const ktag_flow_view *flow, ktag_direction direction,
+    const uint32_t **header_lengths, const uint32_t **payload_lengths,
+    uint32_t *sample_count);
 
 KTAG_API ktag_status ktag_flow_view_get_packet_sample(
     const ktag_flow_view *flow, ktag_direction direction, uint32_t index,

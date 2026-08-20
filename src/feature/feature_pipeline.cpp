@@ -250,7 +250,6 @@ ktag_status ktag_feature_flow_runtime_create_with_key_internal(
       runtime->flow.forward_is_node_source =
           node->flow_src_ip == node->tuple.src_ip;
     }
-    runtime->flow.stream_feature_ready = false;
     runtime->flow_states.clear();
     runtime->flow_state_created.clear();
     runtime->provider_failed.clear();
@@ -326,7 +325,6 @@ ktag_status ktag_feature_flow_runtime_on_packet_view_internal(
     view.transport.struct_size = sizeof(view.transport);
     view.transport.api_version = KTAG_API_VERSION;
   }
-  runtime->flow.stream_feature_ready = false;
   try {
     for (size_t index = 0; index < runtime->pipeline->providers.size();
          ++index) {
@@ -359,7 +357,6 @@ ktag_feature_flow_runtime_finish_internal(ktag_feature_flow_runtime *runtime,
     return KTAG_ERROR_INVALID_ARGUMENT;
   }
   try {
-    runtime->flow.stream_feature_ready = false;
     std::memset(output, 0,
                 runtime->pipeline->schema->value_count * sizeof(float));
     auto &written = runtime->pipeline->written_scratch;

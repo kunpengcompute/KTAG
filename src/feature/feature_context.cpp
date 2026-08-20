@@ -283,6 +283,7 @@ struct ktag_feature_context {
   uint32_t udp_packet_limit = KTAG_FEATURE_DEFAULT_UDP_PACKET_LIMIT;
   ktag_feature_lifecycle_mode lifecycle_mode = KTAG_FEATURE_LIFECYCLE_MODERN;
   uint64_t next_flow_id = 1U;
+  uint64_t next_legacy_emission_id = 1U;
   ktag_feature_statistics stats{};
   std::atomic<size_t> owner_thread{0U};
   std::atomic<uint64_t> thread_violations{0U};
@@ -460,6 +461,20 @@ ktag_status finish_flow(ktag_feature_context *context,
                         feature_context_flow *flow, flow_finish_reason reason,
                         ktag_feature_batch *output) {
   try {
+    const bool legacy_identity =
+        context->lifecycle_mode == KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT;
+    if (legacy_identity) {
+      if (context->next_legacy_emission_id ==
+          std::numeric_limits<uint64_t>::max()) {
+        ++context->stats.dropped_flows;
+        return KTAG_ERROR_CAPACITY;
+      }
+      /* The fixed-vector extractor assigned flow_id when a row was emitted,
+       * not when the flow was first observed. Preserve that CSV contract while
+       * modern lifecycle mode keeps stable creation-time identities. */
+      flow->flow_id = context->next_legacy_emission_id;
+      flow->runtime.flow.flow_id = flow->flow_id;
+    }
     record_finish_reason(context, reason);
     ktag_status status = refresh_flow_domains(context, flow, true);
     if (status != KTAG_SUCCESS) {
@@ -497,6 +512,9 @@ ktag_status finish_flow(ktag_feature_context *context,
         static_cast<uint32_t>(context->output_values.size()));
     if (status == KTAG_SUCCESS) {
       ++context->stats.emitted_flows;
+      if (legacy_identity) {
+        ++context->next_legacy_emission_id;
+      }
     } else {
       ++context->stats.dropped_flows;
     }

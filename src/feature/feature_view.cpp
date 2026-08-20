@@ -21,21 +21,10 @@ const flow_raw_data *get_direction_data(const ktag_flow_view *flow,
 
 } // namespace
 
-ktag_status
-ktag_flow_view_get_stream_feature_internal(const ktag_flow_view *flow,
-                                           const stream_feature **feature) {
-  if (flow == nullptr || flow->node == nullptr || feature == nullptr) {
-    return KTAG_ERROR_INVALID_ARGUMENT;
-  }
-  if (!flow->stream_feature_ready) {
-    if (cal_stream_feature(const_cast<flow_hash_node *>(flow->node),
-                           flow->cached_stream_feature) != KDADK_STS_NO_ERR) {
-      return KTAG_ERROR_INTERNAL;
-    }
-    flow->stream_feature_ready = true;
-  }
-  *feature = &flow->cached_stream_feature;
-  return KTAG_SUCCESS;
+const flow_raw_data *ktag_flow_view_get_direction_data_internal(
+    const ktag_flow_view *flow,
+    ktag_direction direction) {
+  return get_direction_data(flow, direction);
 }
 
 extern "C" {
@@ -82,6 +71,23 @@ KTAG_API uint64_t ktag_flow_view_get_total_bytes(const ktag_flow_view *flow,
                                                  ktag_direction direction) {
   const auto *data = get_direction_data(flow, direction);
   return data == nullptr ? 0U : data->total_size;
+}
+
+KTAG_API ktag_status ktag_flow_view_get_length_samples(
+    const ktag_flow_view *flow, ktag_direction direction,
+    const uint32_t **header_lengths, const uint32_t **payload_lengths,
+    uint32_t *sample_count) {
+  const auto *data = get_direction_data(flow, direction);
+  if (data == nullptr || header_lengths == nullptr ||
+      payload_lengths == nullptr || sample_count == nullptr ||
+      data->header_len.size() < data->packets_cnt ||
+      data->payload_len.size() < data->packets_cnt) {
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
+  *header_lengths = data->header_len.data();
+  *payload_lengths = data->payload_len.data();
+  *sample_count = data->packets_cnt;
+  return KTAG_SUCCESS;
 }
 
 KTAG_API ktag_status ktag_flow_view_get_packet_sample(
