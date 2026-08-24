@@ -20,7 +20,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 #include "feature_batch_internal.h"
 #include "feature_pipeline_internal.h"
-#include "src/domain/dns_update_parser.h"
+#include "src/capture/dns_parser.h"
 #include "src/packet_decode_internal.h"
 
 namespace {

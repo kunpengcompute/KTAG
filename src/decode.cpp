@@ -3,7 +3,7 @@
    reserved.
 */
 #include "decode.h"
-#include "src/domain/dns_update_parser.h"
+#include "src/capture/dns_parser.h"
 #include <algorithm>
 #include <arpa/inet.h>
 #include <cstdio>

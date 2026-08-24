@@ -11,7 +11,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <string_view>
 #include <unordered_set>
 
-#include "traffic_feature_catalog.h"
+#include "feature/traffic_contract.h"
 #include "traffic_provider_common.h"
 
 namespace ktag_traffic_features {

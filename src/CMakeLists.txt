@@ -145,11 +145,10 @@ message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 # ============= 生成特征提取动态链接库 =============
 add_library(ktag_feature SHARED
     ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
-    ${PROJECT_SOURCE_DIR}/src/domain/dns_update_parser.cpp
+    ${PROJECT_SOURCE_DIR}/src/capture/dns_parser.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_schema.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_batch.cpp
-    ${PROJECT_SOURCE_DIR}/plugins/traffic_features/traffic_feature_catalog.cpp
-    ${PROJECT_SOURCE_DIR}/src/feature/legacy_schema.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/traffic_schema.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/provider_registry.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_view.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_pipeline.cpp
@@ -175,6 +174,7 @@ target_include_directories(ktag_feature
     $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
     PRIVATE
     ${PROJECT_SOURCE_DIR}/
+    ${PROJECT_SOURCE_DIR}/src
 )
 set_target_properties(ktag_feature PROPERTIES
     EXPORT_NAME feature
@@ -186,7 +186,7 @@ set_target_properties(ktag_feature PROPERTIES
 # remain isolated here; only the bounded DNS parser is shared with the modern
 # Feature host.
 set(KTAG_LEGACY_FEATURE_ADAPTER_SOURCES
-    ${PROJECT_SOURCE_DIR}/src/domain/dns_update_parser.cpp
+    ${PROJECT_SOURCE_DIR}/src/capture/dns_parser.cpp
     ${PROJECT_SOURCE_DIR}/src/decode.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp

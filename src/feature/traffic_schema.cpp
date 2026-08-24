@@ -3,7 +3,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "ktag_feature.h"
 
-#include "plugins/traffic_features/traffic_feature_catalog.h"
+#include "feature/traffic_contract.h"
 
 namespace {
 

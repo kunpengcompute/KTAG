@@ -1,7 +1,8 @@
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
-#include "traffic_feature_catalog.h"
+#ifndef KTAG_TRAFFIC_CONTRACT_H
+#define KTAG_TRAFFIC_CONTRACT_H
 
 #include <array>
 #include <cstddef>
@@ -9,48 +10,64 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 namespace ktag_traffic_features {
 
+inline constexpr uint32_t KTAG_LEGACY_HISTOGRAM_DIMENSION = 16U;
+inline constexpr uint32_t KTAG_LEGACY_RAWBOW_DIMENSION = 32U;
+
+struct feature_definition {
+  const char *feature_id;
+  const char *display_name;
+  uint32_t dimension;
+};
+
+struct provider_catalog {
+  const char *provider_id;
+  uint32_t provider_version;
+  const feature_definition *features;
+  size_t feature_count;
+};
+
 /*
  * A Provider is a replaceable feature-family slot, not a wrapper around the
  * complete historical vector. The catalog order is also the frozen Legacy V1
  * CSV order; changing it requires a new schema version.
  */
-const char KTAG_METADATA_PROVIDER_ID[] =
+inline constexpr char KTAG_METADATA_PROVIDER_ID[] =
     "builtin.legacy.metadata";
-const uint32_t KTAG_METADATA_PROVIDER_VERSION = 1U;
-const char KTAG_TUPLE_PROVIDER_ID[] = "builtin.legacy.tuple";
-const uint32_t KTAG_TUPLE_PROVIDER_VERSION = 1U;
-const char KTAG_SEND_COUNTERS_PROVIDER_ID[] =
+inline constexpr uint32_t KTAG_METADATA_PROVIDER_VERSION = 1U;
+inline constexpr char KTAG_TUPLE_PROVIDER_ID[] = "builtin.legacy.tuple";
+inline constexpr uint32_t KTAG_TUPLE_PROVIDER_VERSION = 1U;
+inline constexpr char KTAG_SEND_COUNTERS_PROVIDER_ID[] =
     "builtin.legacy.send.counters";
-const uint32_t KTAG_SEND_COUNTERS_PROVIDER_VERSION = 1U;
-const char KTAG_SEND_HEADER_PROVIDER_ID[] =
+inline constexpr uint32_t KTAG_SEND_COUNTERS_PROVIDER_VERSION = 1U;
+inline constexpr char KTAG_SEND_HEADER_PROVIDER_ID[] =
     "builtin.legacy.send.header";
-const uint32_t KTAG_SEND_HEADER_PROVIDER_VERSION = 1U;
-const char KTAG_SEND_PAYLOAD_PROVIDER_ID[] =
+inline constexpr uint32_t KTAG_SEND_HEADER_PROVIDER_VERSION = 1U;
+inline constexpr char KTAG_SEND_PAYLOAD_PROVIDER_ID[] =
     "builtin.legacy.send.payload";
-const uint32_t KTAG_SEND_PAYLOAD_PROVIDER_VERSION = 1U;
-const char KTAG_SEND_INTERVAL_PROVIDER_ID[] =
+inline constexpr uint32_t KTAG_SEND_PAYLOAD_PROVIDER_VERSION = 1U;
+inline constexpr char KTAG_SEND_INTERVAL_PROVIDER_ID[] =
     "builtin.legacy.send.interval";
-const uint32_t KTAG_SEND_INTERVAL_PROVIDER_VERSION = 1U;
-const char KTAG_RECEIVE_COUNTERS_PROVIDER_ID[] =
+inline constexpr uint32_t KTAG_SEND_INTERVAL_PROVIDER_VERSION = 1U;
+inline constexpr char KTAG_RECEIVE_COUNTERS_PROVIDER_ID[] =
     "builtin.legacy.receive.counters";
-const uint32_t KTAG_RECEIVE_COUNTERS_PROVIDER_VERSION = 1U;
-const char KTAG_RECEIVE_HEADER_PROVIDER_ID[] =
+inline constexpr uint32_t KTAG_RECEIVE_COUNTERS_PROVIDER_VERSION = 1U;
+inline constexpr char KTAG_RECEIVE_HEADER_PROVIDER_ID[] =
     "builtin.legacy.receive.header";
-const uint32_t KTAG_RECEIVE_HEADER_PROVIDER_VERSION = 1U;
-const char KTAG_RECEIVE_PAYLOAD_PROVIDER_ID[] =
+inline constexpr uint32_t KTAG_RECEIVE_HEADER_PROVIDER_VERSION = 1U;
+inline constexpr char KTAG_RECEIVE_PAYLOAD_PROVIDER_ID[] =
     "builtin.legacy.receive.payload";
-const uint32_t KTAG_RECEIVE_PAYLOAD_PROVIDER_VERSION = 1U;
-const char KTAG_RECEIVE_INTERVAL_PROVIDER_ID[] =
+inline constexpr uint32_t KTAG_RECEIVE_PAYLOAD_PROVIDER_VERSION = 1U;
+inline constexpr char KTAG_RECEIVE_INTERVAL_PROVIDER_ID[] =
     "builtin.legacy.receive.interval";
-const uint32_t KTAG_RECEIVE_INTERVAL_PROVIDER_VERSION = 1U;
-const char KTAG_RAWBOW_PROVIDER_ID[] = "builtin.legacy.rawbow";
-const uint32_t KTAG_RAWBOW_PROVIDER_VERSION = 1U;
+inline constexpr uint32_t KTAG_RECEIVE_INTERVAL_PROVIDER_VERSION = 1U;
+inline constexpr char KTAG_RAWBOW_PROVIDER_ID[] = "builtin.legacy.rawbow";
+inline constexpr uint32_t KTAG_RAWBOW_PROVIDER_VERSION = 1U;
 
-const std::array<feature_definition, 1U> KTAG_METADATA_FEATURES{{
+inline constexpr std::array<feature_definition, 1U> KTAG_METADATA_FEATURES{{
     {"legacy.flow_id", "flow_id", 1U},
 }};
 
-const std::array<feature_definition, 5U> KTAG_TUPLE_FEATURES{{
+inline constexpr std::array<feature_definition, 5U> KTAG_TUPLE_FEATURES{{
     {"network.src_ip", "src_ip", 1U},
     {"network.dst_ip", "dst_ip", 1U},
     {"network.src_port", "src_port", 1U},
@@ -59,17 +76,17 @@ const std::array<feature_definition, 5U> KTAG_TUPLE_FEATURES{{
 }};
 
 /*
- * Keep every slot's contract explicit.  Apart from being easier to review,
+ * Keep every slot's contract explicit. Apart from being easier to review,
  * this avoids compiler-dependent aggregate initialization through macros.
  * The entry order below is the historical 354-value vector order.
  */
-const std::array<feature_definition, 2U>
+inline constexpr std::array<feature_definition, 2U>
     KTAG_SEND_COUNTERS_FEATURES{{
         {"traffic.send.byte_count", "send_byte_nums", 1U},
         {"traffic.send.packet_count", "send_packet_nums", 1U},
     }};
 
-const std::array<feature_definition, 7U>
+inline constexpr std::array<feature_definition, 7U>
     KTAG_SEND_HEADER_FEATURES{{
         {"traffic.send.header.minimum", "send_hdr_min", 1U},
         {"traffic.send.header.maximum", "send_hdr_max", 1U},
@@ -83,7 +100,7 @@ const std::array<feature_definition, 7U>
          KTAG_LEGACY_HISTOGRAM_DIMENSION},
     }};
 
-const std::array<feature_definition, 7U>
+inline constexpr std::array<feature_definition, 7U>
     KTAG_SEND_PAYLOAD_FEATURES{{
         {"traffic.send.payload.minimum", "send_pld_min", 1U},
         {"traffic.send.payload.maximum", "send_pld_max", 1U},
@@ -97,7 +114,7 @@ const std::array<feature_definition, 7U>
          KTAG_LEGACY_HISTOGRAM_DIMENSION},
     }};
 
-const std::array<feature_definition, 7U>
+inline constexpr std::array<feature_definition, 7U>
     KTAG_SEND_INTERVAL_FEATURES{{
         {"traffic.send.interval.minimum", "send_interval_min", 1U},
         {"traffic.send.interval.maximum", "send_interval_max", 1U},
@@ -111,13 +128,13 @@ const std::array<feature_definition, 7U>
          KTAG_LEGACY_HISTOGRAM_DIMENSION},
     }};
 
-const std::array<feature_definition, 2U>
+inline constexpr std::array<feature_definition, 2U>
     KTAG_RECEIVE_COUNTERS_FEATURES{{
         {"traffic.receive.byte_count", "receive_byte_nums", 1U},
         {"traffic.receive.packet_count", "receive_packet_nums", 1U},
     }};
 
-const std::array<feature_definition, 7U>
+inline constexpr std::array<feature_definition, 7U>
     KTAG_RECEIVE_HEADER_FEATURES{{
         {"traffic.receive.header.minimum", "receive_hdr_min", 1U},
         {"traffic.receive.header.maximum", "receive_hdr_max", 1U},
@@ -131,7 +148,7 @@ const std::array<feature_definition, 7U>
          KTAG_LEGACY_HISTOGRAM_DIMENSION},
     }};
 
-const std::array<feature_definition, 7U>
+inline constexpr std::array<feature_definition, 7U>
     KTAG_RECEIVE_PAYLOAD_FEATURES{{
         {"traffic.receive.payload.minimum", "receive_pld_min", 1U},
         {"traffic.receive.payload.maximum", "receive_pld_max", 1U},
@@ -145,7 +162,7 @@ const std::array<feature_definition, 7U>
          KTAG_LEGACY_HISTOGRAM_DIMENSION},
     }};
 
-const std::array<feature_definition, 7U>
+inline constexpr std::array<feature_definition, 7U>
     KTAG_RECEIVE_INTERVAL_FEATURES{{
         {"traffic.receive.interval.minimum", "receive_interval_min", 1U},
         {"traffic.receive.interval.maximum", "receive_interval_max", 1U},
@@ -159,7 +176,7 @@ const std::array<feature_definition, 7U>
          "receive_interval_hist_nor", KTAG_LEGACY_HISTOGRAM_DIMENSION},
     }};
 
-const std::array<feature_definition, 1U> KTAG_RAWBOW_FEATURES{{
+inline constexpr std::array<feature_definition, 1U> KTAG_RAWBOW_FEATURES{{
     {"rawbow.crc_histogram", "raw_bow_crc_hist",
      KTAG_LEGACY_RAWBOW_DIMENSION},
 }};
@@ -172,46 +189,46 @@ constexpr provider_catalog make_catalog(
   return {provider_id, provider_version, features.data(), features.size()};
 }
 
-const provider_catalog KTAG_METADATA_CATALOG =
+inline constexpr provider_catalog KTAG_METADATA_CATALOG =
     make_catalog(KTAG_METADATA_PROVIDER_ID, KTAG_METADATA_PROVIDER_VERSION,
                  KTAG_METADATA_FEATURES);
-const provider_catalog KTAG_TUPLE_CATALOG =
+inline constexpr provider_catalog KTAG_TUPLE_CATALOG =
     make_catalog(KTAG_TUPLE_PROVIDER_ID, KTAG_TUPLE_PROVIDER_VERSION,
                  KTAG_TUPLE_FEATURES);
-const provider_catalog KTAG_SEND_COUNTERS_CATALOG =
+inline constexpr provider_catalog KTAG_SEND_COUNTERS_CATALOG =
     make_catalog(KTAG_SEND_COUNTERS_PROVIDER_ID,
                  KTAG_SEND_COUNTERS_PROVIDER_VERSION,
                  KTAG_SEND_COUNTERS_FEATURES);
-const provider_catalog KTAG_SEND_HEADER_CATALOG =
+inline constexpr provider_catalog KTAG_SEND_HEADER_CATALOG =
     make_catalog(KTAG_SEND_HEADER_PROVIDER_ID,
                  KTAG_SEND_HEADER_PROVIDER_VERSION,
                  KTAG_SEND_HEADER_FEATURES);
-const provider_catalog KTAG_SEND_PAYLOAD_CATALOG =
+inline constexpr provider_catalog KTAG_SEND_PAYLOAD_CATALOG =
     make_catalog(KTAG_SEND_PAYLOAD_PROVIDER_ID,
                  KTAG_SEND_PAYLOAD_PROVIDER_VERSION,
                  KTAG_SEND_PAYLOAD_FEATURES);
-const provider_catalog KTAG_SEND_INTERVAL_CATALOG =
+inline constexpr provider_catalog KTAG_SEND_INTERVAL_CATALOG =
     make_catalog(KTAG_SEND_INTERVAL_PROVIDER_ID,
                  KTAG_SEND_INTERVAL_PROVIDER_VERSION,
                  KTAG_SEND_INTERVAL_FEATURES);
-const provider_catalog KTAG_RECEIVE_COUNTERS_CATALOG = make_catalog(
+inline constexpr provider_catalog KTAG_RECEIVE_COUNTERS_CATALOG = make_catalog(
     KTAG_RECEIVE_COUNTERS_PROVIDER_ID,
     KTAG_RECEIVE_COUNTERS_PROVIDER_VERSION,
     KTAG_RECEIVE_COUNTERS_FEATURES);
-const provider_catalog KTAG_RECEIVE_HEADER_CATALOG = make_catalog(
+inline constexpr provider_catalog KTAG_RECEIVE_HEADER_CATALOG = make_catalog(
     KTAG_RECEIVE_HEADER_PROVIDER_ID, KTAG_RECEIVE_HEADER_PROVIDER_VERSION,
     KTAG_RECEIVE_HEADER_FEATURES);
-const provider_catalog KTAG_RECEIVE_PAYLOAD_CATALOG = make_catalog(
+inline constexpr provider_catalog KTAG_RECEIVE_PAYLOAD_CATALOG = make_catalog(
     KTAG_RECEIVE_PAYLOAD_PROVIDER_ID, KTAG_RECEIVE_PAYLOAD_PROVIDER_VERSION,
     KTAG_RECEIVE_PAYLOAD_FEATURES);
-const provider_catalog KTAG_RECEIVE_INTERVAL_CATALOG = make_catalog(
+inline constexpr provider_catalog KTAG_RECEIVE_INTERVAL_CATALOG = make_catalog(
     KTAG_RECEIVE_INTERVAL_PROVIDER_ID, KTAG_RECEIVE_INTERVAL_PROVIDER_VERSION,
     KTAG_RECEIVE_INTERVAL_FEATURES);
-const provider_catalog KTAG_RAWBOW_CATALOG =
+inline constexpr provider_catalog KTAG_RAWBOW_CATALOG =
     make_catalog(KTAG_RAWBOW_PROVIDER_ID, KTAG_RAWBOW_PROVIDER_VERSION,
                  KTAG_RAWBOW_FEATURES);
 
-const std::array<const provider_catalog *, 11U>
+inline constexpr std::array<const provider_catalog *, 11U>
     KTAG_TRAFFIC_PROVIDER_CATALOG{{
         &KTAG_METADATA_CATALOG,
         &KTAG_TUPLE_CATALOG,
@@ -226,9 +243,9 @@ const std::array<const provider_catalog *, 11U>
         &KTAG_RAWBOW_CATALOG,
     }};
 
-constexpr uint32_t TRAFFIC_FEATURE_DESCRIPTOR_COUNT =
+inline constexpr uint32_t TRAFFIC_FEATURE_DESCRIPTOR_COUNT =
     1U + 5U + 2U + 7U + 7U + 7U + 2U + 7U + 7U + 7U + 1U;
-constexpr uint32_t TRAFFIC_FEATURE_VALUE_COUNT =
+inline constexpr uint32_t TRAFFIC_FEATURE_VALUE_COUNT =
     1U + 5U + 2U + (6U * (4U + 3U * KTAG_LEGACY_HISTOGRAM_DIMENSION)) +
     2U + KTAG_LEGACY_RAWBOW_DIMENSION;
 
@@ -238,3 +255,5 @@ static_assert(TRAFFIC_FEATURE_VALUE_COUNT == 354U,
               "Legacy V1 must expose exactly 354 values");
 
 } // namespace ktag_traffic_features
+
+#endif /* KTAG_TRAFFIC_CONTRACT_H */

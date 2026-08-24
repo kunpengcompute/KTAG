@@ -4,7 +4,6 @@ if(NOT TARGET ktag_feature)
 endif()
 
 add_library(ktag_traffic_features SHARED
-    traffic_feature_catalog.cpp
     traffic_feature_plugin.cpp
     traffic_provider_common.cpp
     metadata_provider.cpp
@@ -16,6 +15,7 @@ add_library(KTAG::traffic_features ALIAS ktag_traffic_features)
 
 target_include_directories(ktag_traffic_features PRIVATE
     ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

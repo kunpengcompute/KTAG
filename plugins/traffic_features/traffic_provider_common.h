@@ -4,7 +4,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #ifndef KTAG_TRAFFIC_PROVIDER_COMMON_H
 #define KTAG_TRAFFIC_PROVIDER_COMMON_H
 
-#include "traffic_feature_catalog.h"
+#include "feature/traffic_contract.h"
 #include "ktag_feature.h"
 
 namespace ktag_traffic_features {

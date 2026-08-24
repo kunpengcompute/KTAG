@@ -6,7 +6,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <arpa/inet.h>
 #include <cstring>
 
-#include "traffic_feature_catalog.h"
+#include "feature/traffic_contract.h"
 #include "traffic_provider_common.h"
 
 namespace ktag_traffic_features {

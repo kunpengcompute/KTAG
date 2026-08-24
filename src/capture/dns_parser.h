@@ -1,8 +1,8 @@
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
-#ifndef KTAG_DNS_UPDATE_PARSER_H
-#define KTAG_DNS_UPDATE_PARSER_H
+#ifndef KTAG_DNS_PARSER_H
+#define KTAG_DNS_PARSER_H
 
 #include <cstdint>
 #include <string>
@@ -22,4 +22,4 @@ ktag_status ktag_parse_dns_updates_internal(
     const uint8_t *dns, uint32_t dns_length, uint64_t timestamp_us,
     ktag_dns_update_callback callback, void *user_data);
 
-#endif /* KTAG_DNS_UPDATE_PARSER_H */
+#endif /* KTAG_DNS_PARSER_H */
