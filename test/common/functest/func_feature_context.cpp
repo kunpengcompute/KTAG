@@ -244,6 +244,31 @@ std::vector<uint8_t> dns_aaaa_response(
     return dns;
 }
 
+std::vector<uint8_t> dns_a_response(const std::array<uint8_t, 4> &address)
+{
+    std::vector<uint8_t> dns(44U, 0U);
+    write_be16(&dns, 0U, 0x1234U);
+    write_be16(&dns, 2U, 0x8180U);
+    write_be16(&dns, 4U, 1U);
+    write_be16(&dns, 6U, 1U);
+    dns[12U] = 2U;
+    dns[13U] = 'v';
+    dns[14U] = '4';
+    dns[15U] = 7U;
+    std::memcpy(dns.data() + 16U, "example", 7U);
+    dns[23U] = 0U;
+    write_be16(&dns, 24U, 1U);
+    write_be16(&dns, 26U, 1U);
+    dns[28U] = 0xc0U;
+    dns[29U] = 0x0cU;
+    write_be16(&dns, 30U, 1U);
+    write_be16(&dns, 32U, 1U);
+    write_be32(&dns, 34U, 60U);
+    write_be16(&dns, 38U, 4U);
+    std::memcpy(dns.data() + 40U, address.data(), address.size());
+    return dns;
+}
+
 std::vector<uint8_t> tcp_frame(
     const std::array<uint8_t, 4> &source,
     uint16_t source_port,
@@ -894,6 +919,66 @@ TEST(KTAGFeatureContext, DnsAaaaAssociatesDomainAndRawBowWithIPv6Flow)
         }
     }
     EXPECT_TRUE(found_ipv6);
+    ktag_feature_batch_destroy(batch);
+    ktag_feature_destroy(context);
+    ktag_domain_store_destroy(store);
+    ktag_feature_schema_destroy(schema);
+    ktag_feature_registry_destroy(registry);
+}
+
+TEST(KTAGFeatureContext, DnsAAssociatesDomainWithIPv4Flow)
+{
+    callback_counts counts;
+    ktag_feature_registry *registry = nullptr;
+    ktag_feature_schema *schema = nullptr;
+    ASSERT_TRUE(make_contract(&counts, &registry, &schema));
+    ktag_domain_store_config store_config{};
+    store_config.struct_size = sizeof(store_config);
+    store_config.api_version = KTAG_API_VERSION;
+    store_config.max_entries = 16U;
+    store_config.journal_capacity = 8U;
+    ktag_domain_store *store = ktag_domain_store_create(&store_config);
+    ASSERT_NE(nullptr, store);
+    ktag_feature_context *context = make_context(
+        schema, registry, 8U, 100U, 1000U, 1000U, store);
+    ktag_feature_batch *batch = ktag_feature_batch_create(schema, 2U);
+    ASSERT_NE(nullptr, context);
+    ASSERT_NE(nullptr, batch);
+
+    const std::array<uint8_t, 4> client{192U, 0U, 2U, 10U};
+    const std::array<uint8_t, 4> resolver{192U, 0U, 2U, 53U};
+    const std::array<uint8_t, 4> server{198U, 51U, 100U, 7U};
+    const auto dns_frame = udp_frame_with_payload(
+        resolver, 53U, client, 53000U, dns_a_response(server));
+    const auto application_frame = udp_frame_with_payload(
+        client, 54000U, server, 443U, {0x01U});
+    const auto dns_packet = packet_view(dns_frame, 1U, 1U);
+    const auto application_packet = packet_view(application_frame, 2U, 2U);
+
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_process_packet(context, &dns_packet, batch));
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_process_packet(context, &application_packet, batch));
+    EXPECT_EQ(
+        1U,
+        counts.packet_domain_present.load(std::memory_order_relaxed));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_flush(context, batch));
+    ASSERT_EQ(2U, ktag_feature_batch_get_count(batch));
+
+    bool found_ipv4 = false;
+    for (uint32_t index = 0U; index < 2U; ++index) {
+        ktag_feature_record record{};
+        ASSERT_EQ(
+            KTAG_SUCCESS,
+            ktag_feature_batch_get_record(batch, index, &record));
+        if (record.metadata.flow_key.address_a.version == 4U &&
+            record.values[1] == 1.0F) {
+            found_ipv4 = true;
+        }
+    }
+    EXPECT_TRUE(found_ipv4);
     ktag_feature_batch_destroy(batch);
     ktag_feature_destroy(context);
     ktag_domain_store_destroy(store);

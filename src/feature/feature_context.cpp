@@ -7,10 +7,10 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <atomic>
 #include <cstddef>
 #include <cstring>
-#include <ctime>
 #include <limits>
 #include <memory>
 #include <new>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -18,9 +18,9 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 
-#include "decode.h"
 #include "feature_batch_internal.h"
 #include "feature_pipeline_internal.h"
+#include "src/domain/dns_update_parser.h"
 #include "src/packet_decode_internal.h"
 
 namespace {
@@ -28,6 +28,7 @@ namespace {
 constexpr uint64_t FEATURE_FLOW_HASH_SEED = 0x4b544147464c4f57ULL;
 constexpr uint64_t FEATURE_FLOW_HASH_GOLDEN_RATIO = 0x9e3779b97f4a7c15ULL;
 constexpr uint32_t FEATURE_FLOW_INITIAL_CAPACITY = 10000U;
+constexpr uint16_t DNS_PORT = 53U;
 
 uint64_t load_flow_address_word(const uint8_t *address,
                                 size_t length) noexcept {
@@ -135,40 +136,6 @@ size_t current_thread_token() {
   return token == 0U ? std::numeric_limits<size_t>::max() : token;
 }
 
-ktag_status translate_decode_status(KDADKResult status) {
-  switch (status) {
-  case KDADK_STS_NO_ERR:
-    return KTAG_SUCCESS;
-  case KDADK_STS_NOT_SUPPORT:
-    return KTAG_ERROR_NOT_SUPPORTED;
-  case KDADK_STS_MALLOC_FAILED:
-    return KTAG_ERROR_OUT_OF_MEMORY;
-  case KDADK_STS_VECTOR_INDEX_OVERFLOW:
-    return KTAG_ERROR_CAPACITY;
-  case KDADK_STS_NULL_PTR_ERR:
-  case KDADK_STS_PARAMETER_ERR:
-  case KDADK_STS_INVALID_PCAP_PACKET:
-    return KTAG_ERROR_INVALID_ARGUMENT;
-  default:
-    return KTAG_ERROR_INTERNAL;
-  }
-}
-
-KDADKResult translate_domain_status(ktag_status status) {
-  switch (status) {
-  case KTAG_SUCCESS:
-    return KDADK_STS_NO_ERR;
-  case KTAG_ERROR_INVALID_ARGUMENT:
-    return KDADK_STS_PARAMETER_ERR;
-  case KTAG_ERROR_OUT_OF_MEMORY:
-    return KDADK_STS_MALLOC_FAILED;
-  case KTAG_ERROR_CAPACITY:
-    return KDADK_STS_VECTOR_INDEX_OVERFLOW;
-  default:
-    return KDADK_STS_UNKNOWN_ERR;
-  }
-}
-
 bool valid_feature_config(const ktag_feature_config *config) {
   const size_t legacy_config_size =
       offsetof(ktag_feature_config, lifecycle_mode);
@@ -199,12 +166,12 @@ uint64_t packet_timestamp_us(const ktag_packet &packet) {
 }
 
 void add_packet_to_flow_direction(ktag_flow_direction_summary *directions,
-                                  const packet_info &info,
+                                  uint32_t packet_size,
                                   ktag_direction direction) {
   const size_t index =
       direction == KTAG_DIRECTION_FORWARD ? 0U : 1U;
   auto &summary = directions[index];
-  summary.total_bytes += info.packet_size;
+  summary.total_bytes += packet_size;
   ++summary.packet_count;
 }
 
@@ -285,21 +252,21 @@ ktag_status prepare_output(ktag_feature_context *context,
   return KTAG_SUCCESS;
 }
 
-KDADKResult context_domain_update(void *user_data,
-                                  const ktag_ip_address *address,
+ktag_status context_domain_update(void *user_data,
+                                  const ktag_ip_address &address,
                                   const std::string &domain,
                                   uint64_t expire_at_us) {
   auto *context = static_cast<ktag_feature_context *>(user_data);
   if (context == nullptr || context->domain_store == nullptr ||
-      context->domain_cache == nullptr || address == nullptr) {
-    return KDADK_STS_NULL_PTR_ERR;
+      context->domain_cache == nullptr) {
+    return KTAG_ERROR_INVALID_ARGUMENT;
   }
   ktag_status status = ktag_domain_store_put(
-      context->domain_store, address, domain.c_str(), expire_at_us, nullptr);
+      context->domain_store, &address, domain.c_str(), expire_at_us, nullptr);
   if (status == KTAG_SUCCESS) {
     status = ktag_domain_cache_sync(context->domain_cache);
   }
-  return translate_domain_status(status);
+  return status;
 }
 
 ktag_status lookup_domain(ktag_feature_context *context,
@@ -519,44 +486,25 @@ make_transport_view(const ktag_decoded_transport_packet &decoded,
   return view;
 }
 
-ktag_status build_packet_info(ktag_feature_context *context,
-                              const ktag_packet &packet,
-                              const ktag_decoded_transport_packet &decoded,
-                              packet_info *info) {
-  if (context == nullptr || info == nullptr) {
+ktag_status observe_dns_updates(
+    ktag_feature_context *context, const ktag_packet &packet,
+    const ktag_decoded_transport_packet &decoded) {
+  if (context == nullptr) {
     return KTAG_ERROR_INVALID_ARGUMENT;
   }
-  *info = {};
-  /*
-   * Preserve the Legacy Provider's captured-byte statistics for IPv4.
-   * The shared decoder separately supplies the bounded L4 Payload View.
-   */
-  info->packet_size = packet.captured_length;
-  info->header_len = decoded.link_header_length + decoded.network_header_length;
-  info->tuple.protocol = decoded.transport_protocol;
-  if (decoded.network_version == 4U) {
-    std::memcpy(&info->tuple.src_ip, decoded.source_address.bytes,
-                sizeof(info->tuple.src_ip));
-    std::memcpy(&info->tuple.dst_ip, decoded.destination_address.bytes,
-                sizeof(info->tuple.dst_ip));
+  if (decoded.transport_protocol != IPPROTO_UDP ||
+      (decoded.source_port != DNS_PORT &&
+       decoded.destination_port != DNS_PORT)) {
+    return KTAG_SUCCESS;
   }
-  if (static_cast<uint64_t>(packet.timestamp.seconds) >
-      static_cast<uint64_t>(std::numeric_limits<time_t>::max())) {
-    return KTAG_ERROR_INVALID_ARGUMENT;
-  }
-  info->ts.tv_sec = static_cast<time_t>(packet.timestamp.seconds);
-  info->ts.tv_usec = packet.timestamp.microseconds;
-  const KDADKResult decode_status =
-      decode_transport_payload_with_domain_callback(
-          decoded.transport, decoded.transport_packet_length,
-          decoded.transport_protocol, info, context_domain_update, context);
-  return translate_decode_status(decode_status);
+  return ktag_parse_dns_updates_internal(
+      decoded.payload, decoded.payload_length, packet_timestamp_us(packet),
+      context_domain_update, context);
 }
 
 ktag_status create_flow(ktag_feature_context *context,
                         const ktag_decoded_transport_packet &decoded,
-                        const packet_info &info, const ktag_packet &packet,
-                        uint64_t now_us,
+                        const ktag_packet &packet, uint64_t now_us,
                         feature_flow_table::iterator *created) {
   if (context->flows.size() >= context->flow_capacity) {
     ++context->stats.capacity_rejections;
@@ -582,7 +530,7 @@ ktag_status create_flow(ktag_feature_context *context,
   flow->last_seen_us = now_us;
   ktag_flow_direction_summary initial_directions[2];
   add_packet_to_flow_direction(
-      initial_directions, info, KTAG_DIRECTION_FORWARD);
+      initial_directions, packet.captured_length, KTAG_DIRECTION_FORWARD);
   ktag_status status = refresh_flow_domains(
       context, flow.get(), initial_directions);
   if (status != KTAG_SUCCESS) {
@@ -645,8 +593,7 @@ ktag_status process_packet_internal(ktag_feature_context *context,
     return KTAG_SUCCESS;
   }
 
-  packet_info info{};
-  status = build_packet_info(context, *packet, decoded, &info);
+  status = observe_dns_updates(context, *packet, decoded);
   if (status != KTAG_SUCCESS) {
     ++context->stats.rejected_packets;
     return status;
@@ -657,7 +604,7 @@ ktag_status process_packet_internal(ktag_feature_context *context,
   auto position = context->flows.find(decoded.flow_key);
   const bool tcp_control_without_flow =
       decoded.flow_key.protocol == IPPROTO_TCP &&
-      (info.tcp_flag & (TH_RST | TH_FIN)) != 0U &&
+      (decoded.tcp_flags & (TH_RST | TH_FIN)) != 0U &&
       position == context->flows.end();
   if (tcp_control_without_flow) {
     return KTAG_SUCCESS;
@@ -666,7 +613,7 @@ ktag_status process_packet_internal(ktag_feature_context *context,
   bool packet_belongs_to_flow = true;
   ktag_direction direction = KTAG_DIRECTION_FORWARD;
   if (position == context->flows.end()) {
-    status = create_flow(context, decoded, info, *packet, now_us, &position);
+    status = create_flow(context, decoded, *packet, now_us, &position);
     if (status != KTAG_SUCCESS) {
       return status;
     }
@@ -680,18 +627,19 @@ ktag_status process_packet_internal(ktag_feature_context *context,
       }
       packet_belongs_to_flow =
           flow->lifecycle == flow_lifecycle_state::connected &&
-                               (decoded.flow_key.protocol == IPPROTO_UDP ||
-                                (info.tcp_flag & (TH_RST | TH_FIN)) == 0U);
+          (decoded.flow_key.protocol == IPPROTO_UDP ||
+           (decoded.tcp_flags & (TH_RST | TH_FIN)) == 0U);
       if (context->lifecycle_mode != KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT ||
           packet_belongs_to_flow) {
         flow->last_packet_sequence = packet->sequence;
         flow->last_seen_us = now_us;
       }
       if (decoded.flow_key.protocol == IPPROTO_UDP ||
-          (info.tcp_flag & (TH_RST | TH_FIN)) == 0U) {
+          (decoded.tcp_flags & (TH_RST | TH_FIN)) == 0U) {
         if (packet_belongs_to_flow) {
           add_packet_to_flow_direction(
-              flow->runtime.flow.directions, info, direction);
+              flow->runtime.flow.directions, packet->captured_length,
+              direction);
         }
       }
       status = refresh_flow_domains_if_needed(context, flow);
@@ -725,17 +673,17 @@ ktag_status process_packet_internal(ktag_feature_context *context,
   }
   bool should_finish = false;
   if (decoded.flow_key.protocol == IPPROTO_TCP) {
-    if ((info.tcp_flag & TH_RST) != 0U) {
+    if ((decoded.tcp_flags & TH_RST) != 0U) {
       flow->lifecycle = flow_lifecycle_state::closed;
       should_finish = true;
-    } else if ((info.tcp_flag & TH_FIN) != 0U) {
+    } else if ((decoded.tcp_flags & TH_FIN) != 0U) {
       if (flow->lifecycle == flow_lifecycle_state::connected) {
         flow->lifecycle = flow_lifecycle_state::closing;
       } else if (flow->lifecycle == flow_lifecycle_state::closing) {
         flow->lifecycle = flow_lifecycle_state::closed;
       }
     } else if (flow->lifecycle == flow_lifecycle_state::closed &&
-               (info.tcp_flag & TH_ACK) != 0U) {
+               (decoded.tcp_flags & TH_ACK) != 0U) {
       should_finish = true;
     }
   } else if (flow->runtime.flow.directions[0U].packet_count +
@@ -750,10 +698,13 @@ ktag_status process_packet_internal(ktag_feature_context *context,
       packet_belongs_to_flow) {
     const ktag_packet_transport_view transport =
         make_transport_view(decoded, direction);
+    const uint32_t captured_header_length =
+        decoded.link_header_length + decoded.network_header_length +
+        decoded.transport_header_length;
     status = ktag_feature_flow_runtime_on_packet_view_internal(
         &flow->runtime, packet->data, packet->captured_length,
         &packet->timestamp, decoded.payload, decoded.payload_length,
-        info.header_len, &transport);
+        captured_header_length, &transport);
     if (status != KTAG_SUCCESS) {
       ++context->stats.callback_failures;
       ++context->stats.dropped_flows;

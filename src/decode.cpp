@@ -3,6 +3,7 @@
    reserved.
 */
 #include "decode.h"
+#include "src/domain/dns_update_parser.h"
 #include <algorithm>
 #include <arpa/inet.h>
 #include <cstdio>
@@ -414,8 +415,7 @@ std::string parse_domain(const u_char *data, size_t &pos, size_t data_len) {
   return domain;
 }
 
-static uint64_t dns_expire_at_us(const timeval &timestamp,
-                                 uint32_t ttl_seconds) {
+static uint64_t dns_timestamp_us(const timeval &timestamp) {
   uint64_t now_us = 0U;
   if (timestamp.tv_sec >= 0 && timestamp.tv_usec >= 0) {
     const uint64_t seconds = static_cast<uint64_t>(timestamp.tv_sec);
@@ -425,6 +425,12 @@ static uint64_t dns_expire_at_us(const timeval &timestamp,
       now_us = seconds * 1000000U + microseconds;
     }
   }
+  return now_us;
+}
+
+static uint64_t dns_expire_at_us(const timeval &timestamp,
+                                 uint32_t ttl_seconds) {
+  const uint64_t now_us = dns_timestamp_us(timestamp);
   if (ttl_seconds == 0U) {
     return now_us == std::numeric_limits<uint64_t>::max() ? now_us
                                                           : now_us + 1U;
@@ -435,135 +441,40 @@ static uint64_t dns_expire_at_us(const timeval &timestamp,
              : now_us + ttl_us;
 }
 
-static uint16_t dns_read_u16(const uint8_t *data) {
-  return static_cast<uint16_t>((static_cast<uint16_t>(data[0]) << 8U) |
-                               static_cast<uint16_t>(data[1]));
-}
+struct bounded_dns_callback_context {
+  domain_ip_update_callback callback = nullptr;
+  void *user_data = nullptr;
+  KDADKResult result = KDADK_STS_NO_ERR;
+};
 
-static uint32_t dns_read_u32(const uint8_t *data) {
-  return (static_cast<uint32_t>(data[0]) << 24U) |
-         (static_cast<uint32_t>(data[1]) << 16U) |
-         (static_cast<uint32_t>(data[2]) << 8U) |
-         static_cast<uint32_t>(data[3]);
-}
-
-static bool dns_read_name_bounded(const uint8_t *data, size_t length,
-                                  size_t *position, std::string *domain) {
-  if (data == nullptr || position == nullptr || domain == nullptr ||
-      *position >= length) {
-    return false;
+static ktag_status publish_bounded_dns_update(
+    void *user_data, const ktag_ip_address &address,
+    const std::string &domain, uint64_t expire_at_us) {
+  auto *context = static_cast<bounded_dns_callback_context *>(user_data);
+  if (context == nullptr || context->callback == nullptr) {
+    return KTAG_ERROR_INVALID_ARGUMENT;
   }
-  size_t cursor = *position;
-  bool jumped = false;
-  uint32_t steps = 0U;
-  domain->clear();
-  while (cursor < length && steps++ < 128U) {
-    const uint8_t label_length = data[cursor];
-    if (label_length == 0U) {
-      if (!jumped) {
-        *position = cursor + 1U;
-      }
-      return true;
-    }
-    if ((label_length & 0xc0U) == 0xc0U) {
-      if (cursor + 1U >= length) {
-        return false;
-      }
-      const uint16_t pointer = static_cast<uint16_t>(
-          (static_cast<uint16_t>(label_length & 0x3fU) << 8U) |
-          data[cursor + 1U]);
-      if (pointer >= length) {
-        return false;
-      }
-      if (!jumped) {
-        *position = cursor + 2U;
-        jumped = true;
-      }
-      cursor = pointer;
-      continue;
-    }
-    if ((label_length & 0xc0U) != 0U || label_length > 63U ||
-        cursor + 1U + label_length > length) {
-      return false;
-    }
-    if (!domain->empty()) {
-      domain->push_back('.');
-    }
-    domain->append(reinterpret_cast<const char *>(data + cursor + 1U),
-                   label_length);
-    cursor += 1U + label_length;
-    if (!jumped) {
-      *position = cursor;
-    }
-  }
-  return false;
+  context->result = context->callback(context->user_data, &address, domain,
+                                      expire_at_us);
+  return context->result == KDADK_STS_NO_ERR ? KTAG_SUCCESS
+                                             : KTAG_ERROR_INTERNAL;
 }
 
-static KDADKResult parse_dns_updates_bounded(const uint8_t *dns,
-                                             uint32_t dns_length,
-                                             const packet_info &info,
-                                             domain_ip_update_callback callback,
-                                             void *user_data) {
-  constexpr uint32_t DNS_HEADER_LENGTH = 12U;
-  if (dns == nullptr || dns_length < DNS_HEADER_LENGTH || callback == nullptr) {
+static KDADKResult legacy_dns_status(ktag_status status) {
+  switch (status) {
+  case KTAG_SUCCESS:
     return KDADK_STS_NO_ERR;
+  case KTAG_ERROR_NOT_SUPPORTED:
+    return KDADK_STS_NOT_SUPPORT;
+  case KTAG_ERROR_OUT_OF_MEMORY:
+    return KDADK_STS_MALLOC_FAILED;
+  case KTAG_ERROR_CAPACITY:
+    return KDADK_STS_VECTOR_INDEX_OVERFLOW;
+  case KTAG_ERROR_INVALID_ARGUMENT:
+    return KDADK_STS_PARAMETER_ERR;
+  default:
+    return KDADK_STS_UNKNOWN_ERR;
   }
-  const uint16_t question_count = dns_read_u16(dns + 4U);
-  const uint16_t answer_count =
-      std::min<uint16_t>(dns_read_u16(dns + 6U), 1024U);
-  size_t position = DNS_HEADER_LENGTH;
-  std::string question_domain;
-  for (uint16_t index = 0U; index < question_count; ++index) {
-    std::string current_domain;
-    if (!dns_read_name_bounded(dns, dns_length, &position, &current_domain) ||
-        position + 4U > dns_length) {
-      return KDADK_STS_NO_ERR;
-    }
-    if (question_domain.empty()) {
-      question_domain = std::move(current_domain);
-    }
-    position += 4U;
-  }
-  if (question_domain.empty()) {
-    return KDADK_STS_NO_ERR;
-  }
-  question_domain.push_back('.');
-
-  for (uint16_t index = 0U; index < answer_count; ++index) {
-    std::string answer_name;
-    if (!dns_read_name_bounded(dns, dns_length, &position, &answer_name) ||
-        position + 10U > dns_length) {
-      break;
-    }
-    const uint16_t type = dns_read_u16(dns + position);
-    const uint16_t record_class = dns_read_u16(dns + position + 2U);
-    const uint32_t ttl = dns_read_u32(dns + position + 4U);
-    const uint16_t record_length = dns_read_u16(dns + position + 8U);
-    position += 10U;
-    if (position + record_length > dns_length) {
-      break;
-    }
-
-    ktag_ip_address address{};
-    if (record_class == 1U && type == DNS_RESPOND_IPV4_TYPE &&
-        record_length == 4U) {
-      address.version = 4U;
-      std::memcpy(address.bytes, dns + position, 4U);
-    } else if (record_class == 1U && type == DNS_RESPOND_IPV6_TYPE &&
-               record_length == KTAG_IPV6_ADDRESS_SIZE) {
-      address.version = 6U;
-      std::memcpy(address.bytes, dns + position, KTAG_IPV6_ADDRESS_SIZE);
-    }
-    if (address.version != 0U) {
-      const KDADKResult status = callback(user_data, &address, question_domain,
-                                          dns_expire_at_us(info.ts, ttl));
-      if (status != KDADK_STS_NO_ERR) {
-        return status;
-      }
-    }
-    position += record_length;
-  }
-  return KDADK_STS_NO_ERR;
 }
 
 static KDADKResult best_effort_application_status(KDADKResult status) {
@@ -647,9 +558,18 @@ static KDADKResult decode_udp_transport_bounded(
   info->payload_len = info->packet_size - info->header_len;
   if (udp_header->uh_sport == htons(DNS_PROTOCOL_PORT) ||
       udp_header->uh_dport == htons(DNS_PROTOCOL_PORT)) {
-    return parse_dns_updates_bounded(transport + UDP_HEADER_LEN,
-                                     info->payload_len, *info, callback,
-                                     user_data);
+    if (callback == nullptr) {
+      return KDADK_STS_NO_ERR;
+    }
+    bounded_dns_callback_context callback_context{callback, user_data,
+                                                  KDADK_STS_NO_ERR};
+    const uint32_t dns_length = transport_length - UDP_HEADER_LEN;
+    const ktag_status parse_status = ktag_parse_dns_updates_internal(
+        transport + UDP_HEADER_LEN, dns_length, dns_timestamp_us(info->ts),
+        publish_bounded_dns_update, &callback_context);
+    return callback_context.result == KDADK_STS_NO_ERR
+               ? legacy_dns_status(parse_status)
+               : callback_context.result;
   }
   return KDADK_STS_NO_ERR;
 }

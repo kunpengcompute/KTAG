@@ -145,9 +145,7 @@ message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 # ============= 生成特征提取动态链接库 =============
 add_library(ktag_feature SHARED
     ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
-    ${PROJECT_SOURCE_DIR}/src/decode.cpp
-    ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
-    ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
+    ${PROJECT_SOURCE_DIR}/src/domain/dns_update_parser.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_schema.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_batch.cpp
     ${PROJECT_SOURCE_DIR}/plugins/traffic_features/traffic_feature_catalog.cpp
@@ -184,10 +182,11 @@ set_target_properties(ktag_feature PROPERTIES
     INSTALL_RPATH "$ORIGIN"
 )
 
-# Deprecated fixed-vector Feature compatibility layer. Keep adapter-only
-# sources under src/legacy; the shared algorithms above remain in the Feature
-# layer because they implement the verified Legacy V1 provider semantics.
+# Deprecated fixed-vector Feature compatibility layer. Old flow/decode sources
+# remain isolated here; only the bounded DNS parser is shared with the modern
+# Feature host.
 set(KTAG_LEGACY_FEATURE_ADAPTER_SOURCES
+    ${PROJECT_SOURCE_DIR}/src/domain/dns_update_parser.cpp
     ${PROJECT_SOURCE_DIR}/src/decode.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
