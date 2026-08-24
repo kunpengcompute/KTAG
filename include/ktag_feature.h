@@ -159,12 +159,6 @@ typedef struct {
 } ktag_packet_transport_view;
 
 typedef struct {
-  uint32_t header_length;
-  uint32_t payload_length;
-  ktag_timestamp timestamp;
-} ktag_flow_packet_sample;
-
-typedef struct {
   uint32_t struct_size;
   uint32_t api_version;
   const char *provider_id;
@@ -444,24 +438,8 @@ KTAG_API uint32_t ktag_flow_view_get_packet_count(const ktag_flow_view *flow,
 KTAG_API uint64_t ktag_flow_view_get_total_bytes(const ktag_flow_view *flow,
                                                  ktag_direction direction);
 
-/* Borrowed zero-copy packet-length arrays. Pointers remain valid only for the
- * duration of the current Provider callback. */
-KTAG_API ktag_status ktag_flow_view_get_length_samples(
-    const ktag_flow_view *flow, ktag_direction direction,
-    const uint32_t **header_lengths, const uint32_t **payload_lengths,
-    uint32_t *sample_count);
-
-KTAG_API ktag_status ktag_flow_view_get_packet_sample(
-    const ktag_flow_view *flow, ktag_direction direction, uint32_t index,
-    ktag_flow_packet_sample *sample);
-
 KTAG_API const char *ktag_flow_view_get_domain(const ktag_flow_view *flow,
                                                ktag_direction direction);
-
-KTAG_API uint32_t ktag_flow_view_get_rawbow_count(const ktag_flow_view *flow);
-
-KTAG_API const char *ktag_flow_view_get_rawbow_token(const ktag_flow_view *flow,
-                                                     uint32_t index);
 
 /* Read-only packet view accessors for on_packet callbacks. */
 KTAG_API const uint8_t *
@@ -475,6 +453,12 @@ KTAG_API ktag_status ktag_packet_view_get_transport(
 
 KTAG_API const uint8_t *
 ktag_packet_view_get_payload(const ktag_packet_view *packet, uint32_t *length);
+
+/* Captured packet/header/payload lengths preserve link padding semantics while
+ * keeping per-packet histories inside the owning Provider flow_state. */
+KTAG_API ktag_status ktag_packet_view_get_capture_lengths(
+    const ktag_packet_view *packet, uint32_t *packet_length,
+    uint32_t *header_length, uint32_t *payload_length);
 
 /* Dynamic feature batch. Values are copied when a record is appended. */
 KTAG_API ktag_feature_batch *

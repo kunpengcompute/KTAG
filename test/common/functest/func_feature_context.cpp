@@ -39,7 +39,6 @@ struct callback_counts {
     std::atomic<uint32_t> tcp_flags{0U};
     std::atomic<uint32_t> tcp_sequence{0U};
     std::atomic<uint32_t> tcp_acknowledgment{0U};
-    std::atomic<uint32_t> ipv6_rawbow_present{0U};
 };
 
 void write_be16(std::vector<uint8_t> *data, size_t offset, uint16_t value)
@@ -272,6 +271,27 @@ std::vector<uint8_t> tcp_frame(
     return frame;
 }
 
+std::vector<uint8_t> tcp_frame_with_payload(
+    const std::array<uint8_t, 4> &source,
+    uint16_t source_port,
+    const std::array<uint8_t, 4> &destination,
+    uint16_t destination_port,
+    uint8_t flags,
+    const std::vector<uint8_t> &payload)
+{
+    std::vector<uint8_t> frame = tcp_frame(
+        source, source_port, destination, destination_port, flags);
+    constexpr size_t network_offset = 14U;
+    constexpr size_t ip_length = 20U;
+    constexpr size_t tcp_length = 20U;
+    write_be16(
+        &frame,
+        network_offset + 2U,
+        static_cast<uint16_t>(ip_length + tcp_length + payload.size()));
+    frame.insert(frame.end(), payload.begin(), payload.end());
+    return frame;
+}
+
 ktag_packet packet_view(
     const std::vector<uint8_t> &frame,
     uint64_t sequence,
@@ -409,13 +429,6 @@ ktag_status flow_finish(
         forward_domain != nullptr && forward_domain[0] != '\0';
     const bool has_reverse_domain =
         reverse_domain != nullptr && reverse_domain[0] != '\0';
-    ktag_flow_key key{};
-    if (ktag_flow_view_get_flow_key(flow, &key) == KTAG_SUCCESS &&
-        key.address_a.version == 6U &&
-        ktag_flow_view_get_rawbow_count(flow) != 0U) {
-        counts->ipv6_rawbow_present.fetch_add(
-            1U, std::memory_order_relaxed);
-    }
     counts->forward_domain_present.store(
         has_forward_domain ? 1U : 0U, std::memory_order_relaxed);
     counts->reverse_domain_present.store(
@@ -883,11 +896,6 @@ TEST(KTAGFeatureContext, DnsAaaaAssociatesDomainAndRawBowWithIPv6Flow)
         }
     }
     EXPECT_TRUE(found_ipv6);
-    EXPECT_EQ(
-        1U,
-        counts.ipv6_rawbow_present.load(
-            std::memory_order_relaxed));
-
     ktag_feature_batch_destroy(batch);
     ktag_feature_destroy(context);
     ktag_domain_store_destroy(store);
@@ -1429,6 +1437,52 @@ TEST(KTAGFeatureContext, SelectedLegacySlotRunsWithoutFull354Schema)
     ASSERT_EQ(KTAG_SUCCESS, ktag_feature_batch_get_record(batch, 0U, &record));
     ASSERT_EQ(1U, record.value_count);
     EXPECT_FLOAT_EQ(5.0F, record.values[0U]);
+
+    ktag_feature_batch_destroy(batch);
+    ktag_feature_destroy(context);
+    ktag_feature_schema_destroy(schema);
+    ktag_feature_registry_destroy(registry);
+}
+
+TEST(KTAGFeatureContext, SelectedRawbowSlotOwnsHttpPacketState)
+{
+    ktag_feature_registry *registry = ktag_feature_registry_create();
+    ASSERT_NE(nullptr, registry);
+    ASSERT_EQ(KTAG_SUCCESS, ktag_traffic_features_register(registry));
+    ktag_feature_schema *schema =
+        ktag_feature_schema_create("selected_rawbow_slot", 1U);
+    ASSERT_NE(nullptr, schema);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_schema_add_registered(
+            schema, registry, "rawbow.crc_histogram"));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(schema));
+    ASSERT_EQ(32U, ktag_feature_schema_get_value_count(schema));
+
+    ktag_feature_context *context = make_context(
+        schema, registry, 8U, 100U, 1000U, 1000U);
+    ktag_feature_batch *batch = ktag_feature_batch_create(schema, 1U);
+    ASSERT_NE(nullptr, context);
+    ASSERT_NE(nullptr, batch);
+    const std::string request =
+        "GET /video/123 HTTP/1.1\r\nHost: api.bilibili.com\r\n\r\n";
+    const auto frame = tcp_frame_with_payload(
+        {10U, 50U, 0U, 1U}, 12345U,
+        {10U, 50U, 0U, 2U}, 80U, TH_ACK,
+        std::vector<uint8_t>(request.begin(), request.end()));
+    const auto packet = packet_view(frame, 1U, 7U, 8U);
+    ASSERT_EQ(KTAG_SUCCESS,
+              ktag_feature_process_packet(context, &packet, batch));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_flush(context, batch));
+    ASSERT_EQ(1U, ktag_feature_batch_get_count(batch));
+
+    ktag_feature_record record{};
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_batch_get_record(batch, 0U, &record));
+    float histogram_sum = 0.0F;
+    for (uint32_t index = 0U; index < record.value_count; ++index) {
+        histogram_sum += record.values[index];
+    }
+    EXPECT_FLOAT_EQ(40.0F, histogram_sum);
 
     ktag_feature_batch_destroy(batch);
     ktag_feature_destroy(context);

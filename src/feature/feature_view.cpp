@@ -73,40 +73,6 @@ KTAG_API uint64_t ktag_flow_view_get_total_bytes(const ktag_flow_view *flow,
   return data == nullptr ? 0U : data->total_size;
 }
 
-KTAG_API ktag_status ktag_flow_view_get_length_samples(
-    const ktag_flow_view *flow, ktag_direction direction,
-    const uint32_t **header_lengths, const uint32_t **payload_lengths,
-    uint32_t *sample_count) {
-  const auto *data = get_direction_data(flow, direction);
-  if (data == nullptr || header_lengths == nullptr ||
-      payload_lengths == nullptr || sample_count == nullptr ||
-      data->header_len.size() < data->packets_cnt ||
-      data->payload_len.size() < data->packets_cnt) {
-    return KTAG_ERROR_INVALID_ARGUMENT;
-  }
-  *header_lengths = data->header_len.data();
-  *payload_lengths = data->payload_len.data();
-  *sample_count = data->packets_cnt;
-  return KTAG_SUCCESS;
-}
-
-KTAG_API ktag_status ktag_flow_view_get_packet_sample(
-    const ktag_flow_view *flow, ktag_direction direction, uint32_t index,
-    ktag_flow_packet_sample *sample) {
-  const auto *data = get_direction_data(flow, direction);
-  if (data == nullptr || sample == nullptr || index >= data->packets_cnt ||
-      index >= data->header_len.size() || index >= data->payload_len.size() ||
-      index >= data->ts.size()) {
-    return KTAG_ERROR_INVALID_ARGUMENT;
-  }
-  sample->header_length = data->header_len[index];
-  sample->payload_length = data->payload_len[index];
-  sample->timestamp.seconds = data->ts[index].tv_sec;
-  sample->timestamp.microseconds =
-      static_cast<int32_t>(data->ts[index].tv_usec);
-  return KTAG_SUCCESS;
-}
-
 KTAG_API const char *ktag_flow_view_get_domain(const ktag_flow_view *flow,
                                                ktag_direction direction) {
   if (flow == nullptr || flow->node == nullptr) {
@@ -124,23 +90,6 @@ KTAG_API const char *ktag_flow_view_get_domain(const ktag_flow_view *flow,
                                    : flow->node->src_ip_domain_name.c_str();
   }
   return nullptr;
-}
-
-KTAG_API uint32_t ktag_flow_view_get_rawbow_count(const ktag_flow_view *flow) {
-  if (flow == nullptr || flow->node == nullptr) {
-    return 0U;
-  }
-  return flow->node->rawbow_cnt > MAX_RAWBOW_CNT ? MAX_RAWBOW_CNT
-                                                 : flow->node->rawbow_cnt;
-}
-
-KTAG_API const char *ktag_flow_view_get_rawbow_token(const ktag_flow_view *flow,
-                                                     uint32_t index) {
-  if (flow == nullptr || flow->node == nullptr || index >= MAX_RAWBOW_CNT ||
-      index >= flow->node->rawbow_cnt) {
-    return nullptr;
-  }
-  return flow->node->rawbow[index].c_str();
 }
 
 KTAG_API const uint8_t *
@@ -179,6 +128,20 @@ ktag_packet_view_get_payload(const ktag_packet_view *packet, uint32_t *length) {
   }
   *length = packet->payload_length;
   return packet->payload;
+}
+
+KTAG_API ktag_status ktag_packet_view_get_capture_lengths(
+    const ktag_packet_view *packet, uint32_t *packet_length,
+    uint32_t *header_length, uint32_t *payload_length) {
+  if (packet == nullptr || packet_length == nullptr ||
+      header_length == nullptr || payload_length == nullptr ||
+      packet->captured_header_length > packet->length) {
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
+  *packet_length = packet->length;
+  *header_length = packet->captured_header_length;
+  *payload_length = packet->length - packet->captured_header_length;
+  return KTAG_SUCCESS;
 }
 
 } // extern "C"

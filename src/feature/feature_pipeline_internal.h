@@ -65,6 +65,7 @@ ktag_status ktag_feature_flow_runtime_on_packet_view_internal(
     ktag_feature_flow_runtime *runtime, const uint8_t *packet,
     uint32_t packet_length, const ktag_timestamp *timestamp,
     const uint8_t *payload, uint32_t payload_length,
+    uint32_t captured_header_length,
     const ktag_packet_transport_view *transport);
 
 ktag_status

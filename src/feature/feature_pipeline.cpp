@@ -298,16 +298,18 @@ ktag_status ktag_feature_flow_runtime_on_packet_internal(
     ktag_feature_flow_runtime *runtime, const uint8_t *packet,
     uint32_t packet_length, const ktag_timestamp *timestamp) {
   return ktag_feature_flow_runtime_on_packet_view_internal(
-      runtime, packet, packet_length, timestamp, nullptr, 0U, nullptr);
+      runtime, packet, packet_length, timestamp, nullptr, 0U, 0U, nullptr);
 }
 
 ktag_status ktag_feature_flow_runtime_on_packet_view_internal(
     ktag_feature_flow_runtime *runtime, const uint8_t *packet,
     uint32_t packet_length, const ktag_timestamp *timestamp,
     const uint8_t *payload, uint32_t payload_length,
+    uint32_t captured_header_length,
     const ktag_packet_transport_view *transport) {
   if (runtime == nullptr || !runtime->active || packet == nullptr ||
       timestamp == nullptr || (payload == nullptr && payload_length != 0U) ||
+      captured_header_length > packet_length ||
       (transport != nullptr && (transport->struct_size < sizeof(*transport) ||
                                 transport->api_version != KTAG_API_VERSION))) {
     return KTAG_ERROR_INVALID_ARGUMENT;
@@ -317,6 +319,7 @@ ktag_status ktag_feature_flow_runtime_on_packet_view_internal(
   view.length = packet_length;
   view.payload = payload;
   view.payload_length = payload_length;
+  view.captured_header_length = captured_header_length;
   view.timestamp = *timestamp;
   view.transport.struct_size = sizeof(view.transport);
   view.transport.api_version = KTAG_API_VERSION;

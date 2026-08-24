@@ -246,26 +246,19 @@ void initialize_legacy_node_tuple(flow_hash_node *node, const packet_info &info,
   }
 }
 
-void append_packet_sample(flow_raw_data *data, const packet_info &info) {
-  data->header_len.push_back(info.header_len);
-  data->http_uris.push_back(info.http_uri);
-  data->http_hosts.push_back(info.http_host);
-  data->http_urls.push_back(info.http_url);
-  data->payload_len.push_back(info.payload_len);
-  data->ts.push_back(info.ts);
-  if (info.tls_info.client_version != 0U) {
-    data->tls_infos.push_back(info.tls_info);
-  }
+/* The host retains only lifecycle counters. Packet histories are owned by
+ * whichever Provider slot is selected by the Schema. */
+void append_lifecycle_counters(flow_raw_data *data, const packet_info &info) {
   data->total_size += info.packet_size;
   ++data->packets_cnt;
 }
 
 void add_packet_to_flow_direction(flow_hash_node *node, const packet_info &info,
                                   ktag_direction direction) {
-  append_packet_sample(direction == KTAG_DIRECTION_FORWARD
-                           ? &node->raw_data
-                           : &node->reverse_raw_data,
-                       info);
+  append_lifecycle_counters(direction == KTAG_DIRECTION_FORWARD
+                                ? &node->raw_data
+                                : &node->reverse_raw_data,
+                            info);
 }
 
 } // namespace
@@ -383,10 +376,7 @@ ktag_status lookup_domain(ktag_feature_context *context,
 }
 
 ktag_status refresh_flow_domains(ktag_feature_context *context,
-                                 feature_context_flow *flow,
-                                 bool add_new_tokens) {
-  const bool already_had_domain = !flow->node.src_ip_domain_name.empty() ||
-                                  !flow->node.dst_ip_domain_name.empty();
+                                 feature_context_flow *flow) {
   flow->node.src_ip_domain_name.clear();
   flow->node.dst_ip_domain_name.clear();
 
@@ -407,34 +397,22 @@ ktag_status refresh_flow_domains(ktag_feature_context *context,
   flow->domain_lookup_version =
       ktag_domain_cache_get_applied_version(context->domain_cache);
   flow->domain_lookup_initialized = true;
-  if (add_new_tokens && !already_had_domain &&
-      (found_source || found_destination)) {
-    add_rawbow_to_node(nullptr, &flow->node, flow->node.src_ip_domain_name);
-    add_rawbow_to_node(nullptr, &flow->node, flow->node.dst_ip_domain_name);
-  }
   return KTAG_SUCCESS;
 }
 
-ktag_status process_flow_rawbow(ktag_feature_context *context,
-                                feature_context_flow *flow,
-                                const packet_info &info) {
-  if (flow->node.rawbow_cnt >= MAX_RAWBOW_CNT) {
-    return KTAG_SUCCESS;
-  }
+ktag_status refresh_flow_domains_if_needed(ktag_feature_context *context,
+                                           feature_context_flow *flow) {
   if (flow->node.src_ip_domain_name.empty() &&
       flow->node.dst_ip_domain_name.empty()) {
     const uint64_t published_version =
         ktag_domain_store_get_version(context->domain_store);
     if (!flow->domain_lookup_initialized ||
         flow->domain_lookup_version != published_version) {
-      const ktag_status status = refresh_flow_domains(context, flow, true);
+      const ktag_status status = refresh_flow_domains(context, flow);
       if (status != KTAG_SUCCESS) {
         return status;
       }
     }
-  }
-  if (!info.http_url.empty()) {
-    add_rawbow_to_node(nullptr, &flow->node, info.http_url);
   }
   return KTAG_SUCCESS;
 }
@@ -476,7 +454,7 @@ ktag_status finish_flow(ktag_feature_context *context,
       flow->runtime.flow.flow_id = flow->flow_id;
     }
     record_finish_reason(context, reason);
-    ktag_status status = refresh_flow_domains(context, flow, true);
+    ktag_status status = refresh_flow_domains(context, flow);
     if (status != KTAG_SUCCESS) {
       ++context->stats.dropped_flows;
       return status;
@@ -655,7 +633,7 @@ ktag_status create_flow(ktag_feature_context *context,
       &flow->node_destination_address, &flow->forward_is_node_source);
   add_packet_to_flow_direction(&flow->node, info, KTAG_DIRECTION_FORWARD);
 
-  ktag_status status = process_flow_rawbow(context, flow.get(), info);
+  ktag_status status = refresh_flow_domains_if_needed(context, flow.get());
   if (status != KTAG_SUCCESS) {
     return status;
   }
@@ -764,7 +742,7 @@ ktag_status process_packet_internal(ktag_feature_context *context,
           add_packet_to_flow_direction(&flow->node, info, direction);
         }
       }
-      status = process_flow_rawbow(context, flow, info);
+      status = refresh_flow_domains_if_needed(context, flow);
       if (status != KTAG_SUCCESS) {
         context->flows.erase(position);
         ++context->stats.dropped_flows;
@@ -822,7 +800,7 @@ ktag_status process_packet_internal(ktag_feature_context *context,
     status = ktag_feature_flow_runtime_on_packet_view_internal(
         &flow->runtime, packet->data, packet->captured_length,
         &packet->timestamp, decoded.payload, decoded.payload_length,
-        &transport);
+        info.header_len, &transport);
     if (status != KTAG_SUCCESS) {
       ++context->stats.callback_failures;
       ++context->stats.dropped_flows;

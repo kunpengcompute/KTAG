@@ -22,12 +22,9 @@ struct ktag_packet_view {
   uint32_t length = 0;
   const uint8_t *payload = nullptr;
   uint32_t payload_length = 0U;
+  uint32_t captured_header_length = 0U;
   ktag_timestamp timestamp{};
   ktag_packet_transport_view transport{};
 };
-
-const flow_raw_data *ktag_flow_view_get_direction_data_internal(
-    const ktag_flow_view *flow,
-    ktag_direction direction);
 
 #endif /* KTAG_FEATURE_VIEW_INTERNAL_H */
