@@ -4,17 +4,23 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #ifndef KTAG_FEATURE_VIEW_INTERNAL_H
 #define KTAG_FEATURE_VIEW_INTERNAL_H
 
-#include "flow_hash.h"
 #include "ktag_feature.h"
 
+#include <string>
+
+struct ktag_flow_direction_summary {
+  uint64_t total_bytes = 0U;
+  uint32_t packet_count = 0U;
+  std::string domain;
+};
+
 struct ktag_flow_view {
-  const flow_hash_node *node = nullptr;
   uint64_t flow_id = 0;
   ktag_flow_key flow_key{};
   ktag_ip_address forward_address{};
+  ktag_flow_direction_summary directions[2];
   uint16_t forward_port = 0U;
   bool has_flow_key = false;
-  bool forward_is_node_source = true;
 };
 
 struct ktag_packet_view {

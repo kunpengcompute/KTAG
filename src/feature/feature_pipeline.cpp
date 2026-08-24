@@ -217,38 +217,40 @@ void ktag_feature_pipeline_destroy_internal(ktag_feature_pipeline *pipeline) {
 }
 
 ktag_status ktag_feature_flow_runtime_create_internal(
-    ktag_feature_pipeline *pipeline, const flow_hash_node *node,
-    uint64_t flow_id, ktag_feature_flow_runtime *runtime) {
+    ktag_feature_pipeline *pipeline, uint64_t flow_id,
+    ktag_feature_flow_runtime *runtime) {
   return ktag_feature_flow_runtime_create_with_key_internal(
-      pipeline, node, flow_id, nullptr, nullptr, 0U, true, runtime);
+      pipeline, flow_id, nullptr, nullptr, 0U, nullptr, runtime);
 }
 
 ktag_status ktag_feature_flow_runtime_create_with_key_internal(
-    ktag_feature_pipeline *pipeline, const flow_hash_node *node,
-    uint64_t flow_id, const ktag_flow_key *flow_key,
-    const ktag_ip_address *forward_address, uint16_t forward_port,
-    bool forward_is_node_source, ktag_feature_flow_runtime *runtime) {
-  if (pipeline == nullptr || node == nullptr || runtime == nullptr ||
-      runtime->active) {
+    ktag_feature_pipeline *pipeline, uint64_t flow_id,
+    const ktag_flow_key *flow_key, const ktag_ip_address *forward_address,
+    uint16_t forward_port,
+    const ktag_flow_direction_summary *initial_directions,
+    ktag_feature_flow_runtime *runtime) {
+  if (pipeline == nullptr || runtime == nullptr || runtime->active) {
     return KTAG_ERROR_INVALID_ARGUMENT;
   }
   try {
     runtime->pipeline = pipeline;
-    runtime->flow.node = node;
     runtime->flow.flow_id = flow_id;
     runtime->flow.has_flow_key =
         flow_key != nullptr && forward_address != nullptr;
+    runtime->flow.directions[0U] =
+        initial_directions == nullptr ? ktag_flow_direction_summary{}
+                                      : initial_directions[0U];
+    runtime->flow.directions[1U] =
+        initial_directions == nullptr ? ktag_flow_direction_summary{}
+                                      : initial_directions[1U];
     if (runtime->flow.has_flow_key) {
       runtime->flow.flow_key = *flow_key;
       runtime->flow.forward_address = *forward_address;
       runtime->flow.forward_port = forward_port;
-      runtime->flow.forward_is_node_source = forward_is_node_source;
     } else {
       runtime->flow.flow_key = {};
       runtime->flow.forward_address = {};
       runtime->flow.forward_port = 0U;
-      runtime->flow.forward_is_node_source =
-          node->flow_src_ip == node->tuple.src_ip;
     }
     runtime->flow_states.clear();
     runtime->flow_state_created.clear();

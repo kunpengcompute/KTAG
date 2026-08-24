@@ -428,9 +428,10 @@ KTAG_API uint64_t ktag_flow_view_get_flow_id(const ktag_flow_view *flow);
 KTAG_API ktag_status ktag_flow_view_get_flow_key(const ktag_flow_view *flow,
                                                  ktag_flow_key *key);
 
-KTAG_API ktag_status ktag_flow_view_get_legacy_tuple(
-    const ktag_flow_view *flow, uint32_t *src_ip, uint16_t *src_port,
-    uint32_t *dst_ip, uint16_t *dst_port, uint8_t *protocol);
+/* Returns the endpoint observed in the requested packet direction. */
+KTAG_API ktag_status ktag_flow_view_get_endpoint(
+    const ktag_flow_view *flow, ktag_direction direction,
+    ktag_ip_address *address, uint16_t *port);
 
 KTAG_API uint32_t ktag_flow_view_get_packet_count(const ktag_flow_view *flow,
                                                   ktag_direction direction);

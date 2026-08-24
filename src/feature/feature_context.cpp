@@ -21,7 +21,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "decode.h"
 #include "feature_batch_internal.h"
 #include "feature_pipeline_internal.h"
-#include "flow_hash.h"
 #include "src/packet_decode_internal.h"
 
 namespace {
@@ -51,6 +50,7 @@ uint64_t finalize_flow_hash(uint64_t hash) noexcept {
 }
 
 enum class flow_finish_reason { protocol, tcp_expire, udp_expire, flush };
+enum class flow_lifecycle_state { connected, closing, closed };
 
 struct feature_flow_key_hash {
   size_t operator()(const ktag_flow_key &key) const noexcept {
@@ -104,11 +104,8 @@ struct feature_flow_key_equal {
 
 struct feature_context_flow {
   ktag_flow_key key{};
-  ktag_ip_address node_source_address{};
-  ktag_ip_address node_destination_address{};
   ktag_ip_address forward_address{};
   ktag_ip_address reverse_address{};
-  flow_hash_node node{};
   ktag_feature_flow_runtime runtime{};
   uint16_t forward_port = 0U;
   uint16_t reverse_port = 0U;
@@ -120,7 +117,7 @@ struct feature_context_flow {
   uint32_t ipv6_extension_packet_count = 0U;
   uint32_t ip_fragment_first_packet_count = 0U;
   bool domain_lookup_initialized = false;
-  bool forward_is_node_source = true;
+  flow_lifecycle_state lifecycle = flow_lifecycle_state::connected;
 
   ~feature_context_flow() {
     ktag_feature_flow_runtime_destroy_internal(&runtime);
@@ -201,64 +198,14 @@ uint64_t packet_timestamp_us(const ktag_packet &packet) {
   return seconds * 1000000U + microseconds;
 }
 
-void initialize_legacy_node_tuple(flow_hash_node *node, const packet_info &info,
-                                  const ktag_decoded_transport_packet &decoded,
-                                  ktag_ip_address *node_source_address,
-                                  ktag_ip_address *node_destination_address,
-                                  bool *forward_is_node_source) {
-  if (decoded.network_version == 4U && info.tuple.src_ip <= info.tuple.dst_ip) {
-    node->tuple.src_ip = info.tuple.src_ip;
-    node->tuple.src_port = info.tuple.src_port;
-    node->tuple.dst_ip = info.tuple.dst_ip;
-    node->tuple.dst_port = info.tuple.dst_port;
-  } else if (decoded.network_version == 4U) {
-    node->tuple.src_ip = info.tuple.dst_ip;
-    node->tuple.src_port = info.tuple.dst_port;
-    node->tuple.dst_ip = info.tuple.src_ip;
-    node->tuple.dst_port = info.tuple.src_port;
-  } else {
-    node->tuple.src_ip = 0U;
-    node->tuple.src_port = htons(decoded.flow_key.port_a);
-    node->tuple.dst_ip = 0U;
-    node->tuple.dst_port = htons(decoded.flow_key.port_b);
-  }
-  node->tuple.protocol = info.tuple.protocol;
-  node->flow_src_ip = decoded.network_version == 4U ? info.tuple.src_ip : 0U;
-
-  if (decoded.network_version == 4U) {
-    std::memset(node_source_address, 0, sizeof(*node_source_address));
-    std::memset(node_destination_address, 0, sizeof(*node_destination_address));
-    std::memcpy(node_source_address->bytes, &node->tuple.src_ip,
-                sizeof(node->tuple.src_ip));
-    std::memcpy(node_destination_address->bytes, &node->tuple.dst_ip,
-                sizeof(node->tuple.dst_ip));
-    node_source_address->version = 4U;
-    node_destination_address->version = 4U;
-    *forward_is_node_source = info.tuple.src_ip == node->tuple.src_ip &&
-                              info.tuple.src_port == node->tuple.src_port;
-  } else {
-    *node_source_address = decoded.flow_key.address_a;
-    *node_destination_address = decoded.flow_key.address_b;
-    *forward_is_node_source = decoded.source_port == decoded.flow_key.port_a &&
-                              std::memcmp(decoded.source_address.bytes,
-                                          decoded.flow_key.address_a.bytes,
-                                          KTAG_IPV6_ADDRESS_SIZE) == 0;
-  }
-}
-
-/* The host retains only lifecycle counters. Packet histories are owned by
- * whichever Provider slot is selected by the Schema. */
-void append_lifecycle_counters(flow_raw_data *data, const packet_info &info) {
-  data->total_size += info.packet_size;
-  ++data->packets_cnt;
-}
-
-void add_packet_to_flow_direction(flow_hash_node *node, const packet_info &info,
+void add_packet_to_flow_direction(ktag_flow_direction_summary *directions,
+                                  const packet_info &info,
                                   ktag_direction direction) {
-  append_lifecycle_counters(direction == KTAG_DIRECTION_FORWARD
-                                ? &node->raw_data
-                                : &node->reverse_raw_data,
-                            info);
+  const size_t index =
+      direction == KTAG_DIRECTION_FORWARD ? 0U : 1U;
+  auto &summary = directions[index];
+  summary.total_bytes += info.packet_size;
+  ++summary.packet_count;
 }
 
 } // namespace
@@ -376,21 +323,24 @@ ktag_status lookup_domain(ktag_feature_context *context,
 }
 
 ktag_status refresh_flow_domains(ktag_feature_context *context,
-                                 feature_context_flow *flow) {
-  flow->node.src_ip_domain_name.clear();
-  flow->node.dst_ip_domain_name.clear();
+                                 feature_context_flow *flow,
+                                 ktag_flow_direction_summary *directions) {
+  auto &forward = directions[0U];
+  auto &reverse = directions[1U];
+  forward.domain.clear();
+  reverse.domain.clear();
 
   bool found_source = false;
   bool found_destination = false;
   ktag_status status =
-      lookup_domain(context, flow->node_source_address, flow->last_seen_us,
-                    &flow->node.src_ip_domain_name, &found_source);
+      lookup_domain(context, flow->forward_address, flow->last_seen_us,
+                    &forward.domain, &found_source);
   if (status != KTAG_SUCCESS) {
     return status;
   }
   status =
-      lookup_domain(context, flow->node_destination_address, flow->last_seen_us,
-                    &flow->node.dst_ip_domain_name, &found_destination);
+      lookup_domain(context, flow->reverse_address, flow->last_seen_us,
+                    &reverse.domain, &found_destination);
   if (status != KTAG_SUCCESS) {
     return status;
   }
@@ -402,13 +352,14 @@ ktag_status refresh_flow_domains(ktag_feature_context *context,
 
 ktag_status refresh_flow_domains_if_needed(ktag_feature_context *context,
                                            feature_context_flow *flow) {
-  if (flow->node.src_ip_domain_name.empty() &&
-      flow->node.dst_ip_domain_name.empty()) {
+  if (flow->runtime.flow.directions[0U].domain.empty() &&
+      flow->runtime.flow.directions[1U].domain.empty()) {
     const uint64_t published_version =
         ktag_domain_store_get_version(context->domain_store);
     if (!flow->domain_lookup_initialized ||
         flow->domain_lookup_version != published_version) {
-      const ktag_status status = refresh_flow_domains(context, flow);
+      const ktag_status status = refresh_flow_domains(
+          context, flow, flow->runtime.flow.directions);
       if (status != KTAG_SUCCESS) {
         return status;
       }
@@ -454,7 +405,8 @@ ktag_status finish_flow(ktag_feature_context *context,
       flow->runtime.flow.flow_id = flow->flow_id;
     }
     record_finish_reason(context, reason);
-    ktag_status status = refresh_flow_domains(context, flow);
+    ktag_status status = refresh_flow_domains(
+        context, flow, flow->runtime.flow.directions);
     if (status != KTAG_SUCCESS) {
       ++context->stats.dropped_flows;
       return status;
@@ -628,19 +580,17 @@ ktag_status create_flow(ktag_feature_context *context,
   flow->first_packet_sequence = packet.sequence;
   flow->last_packet_sequence = packet.sequence;
   flow->last_seen_us = now_us;
-  initialize_legacy_node_tuple(
-      &flow->node, info, decoded, &flow->node_source_address,
-      &flow->node_destination_address, &flow->forward_is_node_source);
-  add_packet_to_flow_direction(&flow->node, info, KTAG_DIRECTION_FORWARD);
-
-  ktag_status status = refresh_flow_domains_if_needed(context, flow.get());
+  ktag_flow_direction_summary initial_directions[2];
+  add_packet_to_flow_direction(
+      initial_directions, info, KTAG_DIRECTION_FORWARD);
+  ktag_status status = refresh_flow_domains(
+      context, flow.get(), initial_directions);
   if (status != KTAG_SUCCESS) {
     return status;
   }
   status = ktag_feature_flow_runtime_create_with_key_internal(
-      context->pipeline, &flow->node, flow->flow_id, &flow->key,
-      &flow->forward_address, flow->forward_port, flow->forward_is_node_source,
-      &flow->runtime);
+      context->pipeline, flow->flow_id, &flow->key, &flow->forward_address,
+      flow->forward_port, initial_directions, &flow->runtime);
   if (status != KTAG_SUCCESS) {
     ++context->stats.callback_failures;
     ++context->stats.dropped_flows;
@@ -728,7 +678,8 @@ ktag_status process_packet_internal(ktag_feature_context *context,
         ++context->stats.rejected_packets;
         return KTAG_SUCCESS;
       }
-      packet_belongs_to_flow = flow->node.status == CONNECTED &&
+      packet_belongs_to_flow =
+          flow->lifecycle == flow_lifecycle_state::connected &&
                                (decoded.flow_key.protocol == IPPROTO_UDP ||
                                 (info.tcp_flag & (TH_RST | TH_FIN)) == 0U);
       if (context->lifecycle_mode != KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT ||
@@ -739,7 +690,8 @@ ktag_status process_packet_internal(ktag_feature_context *context,
       if (decoded.flow_key.protocol == IPPROTO_UDP ||
           (info.tcp_flag & (TH_RST | TH_FIN)) == 0U) {
         if (packet_belongs_to_flow) {
-          add_packet_to_flow_direction(&flow->node, info, direction);
+          add_packet_to_flow_direction(
+              flow->runtime.flow.directions, info, direction);
         }
       }
       status = refresh_flow_domains_if_needed(context, flow);
@@ -774,21 +726,22 @@ ktag_status process_packet_internal(ktag_feature_context *context,
   bool should_finish = false;
   if (decoded.flow_key.protocol == IPPROTO_TCP) {
     if ((info.tcp_flag & TH_RST) != 0U) {
-      flow->node.status = CLOSED;
+      flow->lifecycle = flow_lifecycle_state::closed;
       should_finish = true;
     } else if ((info.tcp_flag & TH_FIN) != 0U) {
-      if (flow->node.status == CONNECTED) {
-        flow->node.status = CLOSING;
-      } else if (flow->node.status == CLOSING) {
-        flow->node.status = CLOSED;
+      if (flow->lifecycle == flow_lifecycle_state::connected) {
+        flow->lifecycle = flow_lifecycle_state::closing;
+      } else if (flow->lifecycle == flow_lifecycle_state::closing) {
+        flow->lifecycle = flow_lifecycle_state::closed;
       }
-    } else if (flow->node.status == CLOSED && (info.tcp_flag & TH_ACK) != 0U) {
+    } else if (flow->lifecycle == flow_lifecycle_state::closed &&
+               (info.tcp_flag & TH_ACK) != 0U) {
       should_finish = true;
     }
-  } else if (flow->node.raw_data.packets_cnt +
-                 flow->node.reverse_raw_data.packets_cnt >=
+  } else if (flow->runtime.flow.directions[0U].packet_count +
+                 flow->runtime.flow.directions[1U].packet_count >=
              context->udp_packet_limit) {
-    flow->node.status = CLOSED;
+    flow->lifecycle = flow_lifecycle_state::closed;
     should_finish =
         context->lifecycle_mode != KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT;
   }

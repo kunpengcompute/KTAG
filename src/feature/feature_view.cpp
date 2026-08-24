@@ -3,29 +3,25 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "feature_view_internal.h"
 
+#include <cstring>
+
 namespace {
 
-const flow_raw_data *get_direction_data(const ktag_flow_view *flow,
-                                        ktag_direction direction) {
-  if (flow == nullptr || flow->node == nullptr) {
+const ktag_flow_direction_summary *get_direction_summary(
+    const ktag_flow_view *flow, ktag_direction direction) {
+  if (flow == nullptr) {
     return nullptr;
   }
   if (direction == KTAG_DIRECTION_FORWARD) {
-    return &flow->node->raw_data;
+    return &flow->directions[0U];
   }
   if (direction == KTAG_DIRECTION_REVERSE) {
-    return &flow->node->reverse_raw_data;
+    return &flow->directions[1U];
   }
   return nullptr;
 }
 
 } // namespace
-
-const flow_raw_data *ktag_flow_view_get_direction_data_internal(
-    const ktag_flow_view *flow,
-    ktag_direction direction) {
-  return get_direction_data(flow, direction);
-}
 
 extern "C" {
 
@@ -42,54 +38,48 @@ KTAG_API ktag_status ktag_flow_view_get_flow_key(const ktag_flow_view *flow,
   return KTAG_SUCCESS;
 }
 
-KTAG_API ktag_status ktag_flow_view_get_legacy_tuple(
-    const ktag_flow_view *flow, uint32_t *src_ip, uint16_t *src_port,
-    uint32_t *dst_ip, uint16_t *dst_port, uint8_t *protocol) {
-  if (flow == nullptr || flow->node == nullptr || src_ip == nullptr ||
-      src_port == nullptr || dst_ip == nullptr || dst_port == nullptr ||
-      protocol == nullptr) {
+KTAG_API ktag_status ktag_flow_view_get_endpoint(
+    const ktag_flow_view *flow, ktag_direction direction,
+    ktag_ip_address *address, uint16_t *port) {
+  if (flow == nullptr || !flow->has_flow_key || address == nullptr ||
+      port == nullptr || (direction != KTAG_DIRECTION_FORWARD &&
+                          direction != KTAG_DIRECTION_REVERSE)) {
     return KTAG_ERROR_INVALID_ARGUMENT;
   }
-  if (flow->has_flow_key && flow->flow_key.address_a.version == 6U) {
-    return KTAG_ERROR_NOT_SUPPORTED;
+  const bool forward_is_a =
+      flow->forward_address.version == flow->flow_key.address_a.version &&
+      std::memcmp(flow->forward_address.bytes, flow->flow_key.address_a.bytes,
+                  KTAG_IPV6_ADDRESS_SIZE) == 0 &&
+      flow->forward_port == flow->flow_key.port_a;
+  if (direction == KTAG_DIRECTION_FORWARD) {
+    *address = flow->forward_address;
+    *port = flow->forward_port;
+  } else if (forward_is_a) {
+    *address = flow->flow_key.address_b;
+    *port = flow->flow_key.port_b;
+  } else {
+    *address = flow->flow_key.address_a;
+    *port = flow->flow_key.port_a;
   }
-  *src_ip = flow->node->tuple.src_ip;
-  *src_port = flow->node->tuple.src_port;
-  *dst_ip = flow->node->tuple.dst_ip;
-  *dst_port = flow->node->tuple.dst_port;
-  *protocol = flow->node->tuple.protocol;
   return KTAG_SUCCESS;
 }
 
 KTAG_API uint32_t ktag_flow_view_get_packet_count(const ktag_flow_view *flow,
                                                   ktag_direction direction) {
-  const auto *data = get_direction_data(flow, direction);
-  return data == nullptr ? 0U : data->packets_cnt;
+  const auto *summary = get_direction_summary(flow, direction);
+  return summary == nullptr ? 0U : summary->packet_count;
 }
 
 KTAG_API uint64_t ktag_flow_view_get_total_bytes(const ktag_flow_view *flow,
                                                  ktag_direction direction) {
-  const auto *data = get_direction_data(flow, direction);
-  return data == nullptr ? 0U : data->total_size;
+  const auto *summary = get_direction_summary(flow, direction);
+  return summary == nullptr ? 0U : summary->total_bytes;
 }
 
 KTAG_API const char *ktag_flow_view_get_domain(const ktag_flow_view *flow,
                                                ktag_direction direction) {
-  if (flow == nullptr || flow->node == nullptr) {
-    return nullptr;
-  }
-  const bool forward_is_tuple_source =
-      flow->has_flow_key ? flow->forward_is_node_source
-                         : flow->node->flow_src_ip == flow->node->tuple.src_ip;
-  if (direction == KTAG_DIRECTION_FORWARD) {
-    return forward_is_tuple_source ? flow->node->src_ip_domain_name.c_str()
-                                   : flow->node->dst_ip_domain_name.c_str();
-  }
-  if (direction == KTAG_DIRECTION_REVERSE) {
-    return forward_is_tuple_source ? flow->node->dst_ip_domain_name.c_str()
-                                   : flow->node->src_ip_domain_name.c_str();
-  }
-  return nullptr;
+  const auto *summary = get_direction_summary(flow, direction);
+  return summary == nullptr ? nullptr : summary->domain.c_str();
 }
 
 KTAG_API const uint8_t *

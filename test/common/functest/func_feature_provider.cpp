@@ -186,11 +186,10 @@ TEST(KTAGFeatureProvider, RunsCustomCallbacksByFeatureIdAndSchemaOrder)
     ktag_feature_registry_destroy(registry);
     EXPECT_EQ(1U, counts.provider_create);
 
-    flow_hash_node node{};
-    node.raw_data.packets_cnt = 3;
     ktag_feature_flow_runtime runtime{};
     ASSERT_EQ(KTAG_SUCCESS,
-              ktag_feature_flow_runtime_create_internal(pipeline, &node, 77, &runtime));
+              ktag_feature_flow_runtime_create_internal(pipeline, 77, &runtime));
+    runtime.flow.directions[0U].packet_count = 3U;
     const uint8_t packet[] = {0x11U, 0x22U, 0x33U};
     const ktag_timestamp timestamp{7, 8};
     ASSERT_EQ(KTAG_SUCCESS, ktag_feature_flow_runtime_on_packet_internal(
@@ -238,10 +237,9 @@ TEST(KTAGFeatureProvider, FillZeroPolicyClearsPartialCallbackOutput)
     ktag_feature_pipeline *pipeline = ktag_feature_pipeline_create_internal(schema, registry);
     ASSERT_NE(nullptr, pipeline);
 
-    flow_hash_node node{};
     ktag_feature_flow_runtime runtime{};
     ASSERT_EQ(KTAG_SUCCESS,
-              ktag_feature_flow_runtime_create_internal(pipeline, &node, 1, &runtime));
+              ktag_feature_flow_runtime_create_internal(pipeline, 1, &runtime));
     float output = -1.0F;
     EXPECT_EQ(KTAG_SUCCESS,
               ktag_feature_flow_runtime_finish_internal(&runtime, &output, 1));

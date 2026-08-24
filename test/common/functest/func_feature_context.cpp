@@ -28,7 +28,6 @@ struct callback_counts {
     std::atomic<uint32_t> forward_domain_present{0U};
     std::atomic<uint32_t> reverse_domain_present{0U};
     std::atomic<uint32_t> flow_key_ipv6{0U};
-    std::atomic<uint32_t> legacy_tuple_not_supported{0U};
     std::atomic<uint32_t> packet_view_errors{0U};
     std::atomic<uint32_t> packet_direction_mask{0U};
     std::atomic<uint32_t> packet_network_version{0U};
@@ -332,22 +331,25 @@ ktag_status flow_create(
     if (ktag_flow_view_get_flow_key(flow, &key) != KTAG_SUCCESS) {
         counts->packet_view_errors.fetch_add(
             1U, std::memory_order_relaxed);
-    } else if (key.address_a.version == 6U) {
-        counts->flow_key_ipv6.fetch_add(
-            1U, std::memory_order_relaxed);
-        uint32_t src_ip = 0U;
-        uint32_t dst_ip = 0U;
-        uint16_t src_port = 0U;
-        uint16_t dst_port = 0U;
-        uint8_t protocol = 0U;
-        if (ktag_flow_view_get_legacy_tuple(
-                flow,
-                &src_ip,
-                &src_port,
-                &dst_ip,
-                &dst_port,
-                &protocol) == KTAG_ERROR_NOT_SUPPORTED) {
-            counts->legacy_tuple_not_supported.fetch_add(
+    } else {
+        ktag_ip_address forward_address{};
+        ktag_ip_address reverse_address{};
+        uint16_t forward_port = 0U;
+        uint16_t reverse_port = 0U;
+        if (ktag_flow_view_get_endpoint(
+                flow, KTAG_DIRECTION_FORWARD, &forward_address,
+                &forward_port) != KTAG_SUCCESS ||
+            ktag_flow_view_get_endpoint(
+                flow, KTAG_DIRECTION_REVERSE, &reverse_address,
+                &reverse_port) != KTAG_SUCCESS ||
+            forward_address.version != key.address_a.version ||
+            reverse_address.version != key.address_b.version ||
+            forward_port == 0U || reverse_port == 0U) {
+            counts->packet_view_errors.fetch_add(
+                1U, std::memory_order_relaxed);
+        }
+        if (key.address_a.version == 6U) {
+            counts->flow_key_ipv6.fetch_add(
                 1U, std::memory_order_relaxed);
         }
     }
@@ -665,10 +667,6 @@ TEST(KTAGFeatureContext, IPv6UdpUsesFullDirectionAndPacketView)
     EXPECT_FLOAT_EQ(2.0F, record.values[0]);
     EXPECT_EQ(
         1U, counts.flow_key_ipv6.load(std::memory_order_relaxed));
-    EXPECT_EQ(
-        1U,
-        counts.legacy_tuple_not_supported.load(
-            std::memory_order_relaxed));
     EXPECT_EQ(
         0U,
         counts.packet_view_errors.load(std::memory_order_relaxed));

@@ -48,14 +48,15 @@ ktag_feature_pipeline_create_internal(const ktag_feature_schema *schema,
 void ktag_feature_pipeline_destroy_internal(ktag_feature_pipeline *pipeline);
 
 ktag_status ktag_feature_flow_runtime_create_internal(
-    ktag_feature_pipeline *pipeline, const flow_hash_node *node,
-    uint64_t flow_id, ktag_feature_flow_runtime *runtime);
+    ktag_feature_pipeline *pipeline, uint64_t flow_id,
+    ktag_feature_flow_runtime *runtime);
 
 ktag_status ktag_feature_flow_runtime_create_with_key_internal(
-    ktag_feature_pipeline *pipeline, const flow_hash_node *node,
-    uint64_t flow_id, const ktag_flow_key *flow_key,
-    const ktag_ip_address *forward_address, uint16_t forward_port,
-    bool forward_is_node_source, ktag_feature_flow_runtime *runtime);
+    ktag_feature_pipeline *pipeline, uint64_t flow_id,
+    const ktag_flow_key *flow_key, const ktag_ip_address *forward_address,
+    uint16_t forward_port,
+    const ktag_flow_direction_summary *initial_directions,
+    ktag_feature_flow_runtime *runtime);
 
 ktag_status ktag_feature_flow_runtime_on_packet_internal(
     ktag_feature_flow_runtime *runtime, const uint8_t *packet,
