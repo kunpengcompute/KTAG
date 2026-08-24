@@ -58,6 +58,9 @@ option(KTAG_BUILD_EXAMPLES "Build public three-layer integration examples" ON)
 option(KTAG_BUILD_PROXY_FEATURES
        "Build the official proxy protocol Feature Provider plugin"
        ON)
+option(KTAG_ENABLE_DPDK_UB
+       "Enable the optional DPDK UB transport in kdadk_demo"
+       OFF)
 option(KTAG_INSTALL_LEGACY_COMPAT
        "Install the deprecated fixed-vector compatibility libraries and headers"
        ON)

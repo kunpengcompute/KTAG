@@ -1,10 +1,12 @@
 .vscode/
 /docs/*
+!/docs/设计方案.md
 !/docs/zh/
 /docs/zh/*
 !/docs/zh/proxy_protocol_identification_design.md
 !/docs/zh/vpn_proxy_identification_review_design.md
 !/docs/zh/demo_pipeline.md
+!/docs/zh/dpdk_ub_adaptation_design.md
 /build/
 /output/
 /result/

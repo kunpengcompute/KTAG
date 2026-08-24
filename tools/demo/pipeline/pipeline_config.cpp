@@ -3,11 +3,17 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "pipeline_config.h"
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <unordered_set>
+#include <utility>
+
+#include "ub_feature_wire.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -66,6 +72,47 @@ bool read_u64(const YAML::Node &parent, const char *name, uint64_t *value,
   }
 }
 
+bool read_bool(const YAML::Node &parent, const char *name, bool *value,
+               std::string *error) {
+  if (!has_value(parent)) {
+    return true;
+  }
+  const YAML::Node node = parent[name];
+  if (!has_value(node)) {
+    return true;
+  }
+  try {
+    *value = node.as<bool>();
+    return true;
+  } catch (const YAML::Exception &exception) {
+    set_error(error, std::string(name) + ": " + exception.what());
+    return false;
+  }
+}
+
+bool read_string(const YAML::Node &parent, const char *name,
+                 std::string *value, std::string *error) {
+  if (!has_value(parent)) {
+    return true;
+  }
+  const YAML::Node node = parent[name];
+  if (!has_value(node)) {
+    return true;
+  }
+  try {
+    const std::string parsed = node.as<std::string>();
+    if (parsed.empty()) {
+      set_error(error, std::string(name) + " must not be empty");
+      return false;
+    }
+    *value = parsed;
+    return true;
+  } catch (const YAML::Exception &exception) {
+    set_error(error, std::string(name) + ": " + exception.what());
+    return false;
+  }
+}
+
 bool read_string_list(const YAML::Node &node, const char *name,
                       std::vector<std::string> *values, std::string *error) {
   if (!has_value(node)) {
@@ -91,6 +138,257 @@ bool read_string_list(const YAML::Node &node, const char *name,
     set_error(error, std::string(name) + ": " + exception.what());
     return false;
   }
+}
+
+bool read_ordered_string_list(const YAML::Node &node, const char *name,
+                              std::vector<std::string> *values,
+                              std::string *error) {
+  if (!has_value(node)) {
+    return true;
+  }
+  if (!node.IsSequence()) {
+    set_error(error, std::string(name) + " must be an array");
+    return false;
+  }
+  try {
+    for (const auto &item : node) {
+      const std::string value = item.as<std::string>();
+      if (value.empty()) {
+        set_error(error,
+                  std::string(name) + " must contain non-empty strings");
+        return false;
+      }
+      values->push_back(value);
+    }
+    return true;
+  } catch (const YAML::Exception &exception) {
+    set_error(error, std::string(name) + ": " + exception.what());
+    return false;
+  }
+}
+
+bool read_ground_truth_labels(
+    const YAML::Node &node,
+    std::map<std::string, std::vector<uint32_t>> *labels,
+    std::string *error) {
+  if (!has_value(node)) {
+    return true;
+  }
+  if (!node.IsMap()) {
+    set_error(error,
+              "pipeline.distributed.ub_ring.ground_truth_labels must be a "
+              "map");
+    return false;
+  }
+  try {
+    for (const auto &entry : node) {
+      const std::string hostname = entry.first.as<std::string>();
+      if (hostname.empty() || labels->find(hostname) != labels->end() ||
+          !entry.second.IsSequence()) {
+        set_error(error,
+                  "ground_truth_labels requires unique hostnames and label "
+                  "arrays");
+        return false;
+      }
+      std::vector<uint32_t> values;
+      values.reserve(entry.second.size());
+      for (const auto &label : entry.second) {
+        const uint64_t value = label.as<uint64_t>();
+        if (value > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+          set_error(error, "ground truth label exceeds the Demo int range");
+          return false;
+        }
+        values.push_back(static_cast<uint32_t>(value));
+      }
+      labels->emplace(hostname, std::move(values));
+    }
+    return true;
+  } catch (const YAML::Exception &exception) {
+    set_error(error, std::string("ground_truth_labels: ") + exception.what());
+    return false;
+  } catch (...) {
+    set_error(error, "out of memory parsing ground_truth_labels");
+    return false;
+  }
+}
+
+bool hash_config_file(const fs::path &path, uint64_t *hash,
+                      std::string *error) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    set_error(error, "failed to open pipeline config for ruleset hash");
+    return false;
+  }
+  uint64_t value = 14695981039346656037ULL;
+  char buffer[4096];
+  while (input.good()) {
+    input.read(buffer, sizeof(buffer));
+    const std::streamsize count = input.gcount();
+    for (std::streamsize index = 0; index < count; ++index) {
+      value ^= static_cast<uint8_t>(buffer[index]);
+      value *= 1099511628211ULL;
+    }
+  }
+  if (!input.eof()) {
+    set_error(error, "failed to read pipeline config for ruleset hash");
+    return false;
+  }
+  *hash = value;
+  return true;
+}
+
+bool parse_ub_config(const YAML::Node &pipeline,
+                     ktag_demo_ub_config *config, std::string *error) {
+  const YAML::Node distributed = pipeline["distributed"];
+  if (!has_value(distributed)) {
+    return true;
+  }
+  if (!distributed.IsMap()) {
+    set_error(error, "pipeline.distributed must be a map");
+    return false;
+  }
+  const YAML::Node ub = distributed["ub_ring"];
+  if (!has_value(ub)) {
+    return true;
+  }
+  if (!ub.IsMap()) {
+    set_error(error, "pipeline.distributed.ub_ring must be a map");
+    return false;
+  }
+  config->configured = true;
+  if (!read_bool(ub, "enabled", &config->enabled, error) ||
+      !read_string(ub, "region", &config->region, error) ||
+      !read_string(ub, "shm_prefix", &config->shm_prefix, error) ||
+      !read_u64(ub, "provider_shm_size", &config->provider_shm_size, error) ||
+      !read_u32(ub, "queues_per_provider", &config->queues_per_provider,
+                error) ||
+      !read_u32(ub, "queue_depth", &config->queue_depth, error) ||
+      !read_u32(ub, "data_element_size", &config->data_element_size, error) ||
+      !read_u32(ub, "credits_per_provider",
+                &config->credits_per_provider, error) ||
+      !read_u32(ub, "poll_us", &config->poll_us, error) ||
+      !read_string_list(ub["provider_nodes"],
+                        "pipeline.distributed.ub_ring.provider_nodes",
+                        &config->provider_nodes, error) ||
+      !read_string_list(ub["user_nodes"],
+                        "pipeline.distributed.ub_ring.user_nodes",
+                        &config->user_nodes, error) ||
+      !read_ordered_string_list(
+          ub["eal_arguments"],
+          "pipeline.distributed.ub_ring.eal_arguments",
+          &config->eal_arguments, error) ||
+      !read_ground_truth_labels(ub["ground_truth_labels"],
+                                &config->ground_truth_labels, error)) {
+    return false;
+  }
+  return true;
+}
+
+bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
+                        std::string *error) {
+  const auto &config = pipeline.ub;
+  if (!config.enabled) {
+    return true;
+  }
+  if (!config.configured) {
+    set_error(error,
+              "distributed role requires pipeline.distributed.ub_ring");
+    return false;
+  }
+  if (config.role == ktag_demo_distributed_role::disabled ||
+      config.node_id.empty()) {
+    set_error(error,
+              "distributed UB requires --distributed-role and --node-id");
+    return false;
+  }
+  if (config.provider_nodes.empty() || config.user_nodes.size() != 1U) {
+    set_error(error,
+              "distributed UB requires Provider nodes and exactly one User");
+    return false;
+  }
+  if (config.provider_nodes.size() + config.user_nodes.size() > 256U) {
+    set_error(error, "distributed UB node count exceeds the DPDK limit");
+    return false;
+  }
+  std::unordered_set<std::string> all_nodes(config.provider_nodes.begin(),
+                                             config.provider_nodes.end());
+  if (!all_nodes.insert(config.user_nodes.front()).second) {
+    set_error(error, "distributed UB Provider/User hostnames must be unique");
+    return false;
+  }
+  const bool is_provider =
+      std::find(config.provider_nodes.begin(), config.provider_nodes.end(),
+                config.node_id) != config.provider_nodes.end();
+  const bool is_user = config.node_id == config.user_nodes.front();
+  if ((config.role == ktag_demo_distributed_role::frontend && !is_provider) ||
+      (config.role == ktag_demo_distributed_role::backend && !is_user)) {
+    set_error(error,
+              "--node-id does not belong to the selected distributed role");
+    return false;
+  }
+  if (config.region.empty() || config.shm_prefix.empty() ||
+      config.provider_shm_size == 0U || config.queues_per_provider == 0U ||
+      config.queues_per_provider > 512U ||
+      config.provider_nodes.size() > 512U / config.queues_per_provider ||
+      config.queue_depth < 2U ||
+      (config.queue_depth & (config.queue_depth - 1U)) != 0U ||
+      config.data_element_size < ktag_demo_ub_feature_frame_size(0U) ||
+      config.credits_per_provider == 0U ||
+      config.credits_per_provider >= config.queue_depth ||
+      config.credits_per_provider > 1023U) {
+    set_error(error,
+              "distributed UB memory, queue, element or credit values are "
+              "invalid");
+    return false;
+  }
+  if (config.provider_shm_size >
+      static_cast<uint64_t>(std::numeric_limits<std::size_t>::max())) {
+    set_error(error, "distributed UB Provider shm size exceeds size_t");
+    return false;
+  }
+  if (pipeline.backpressure != ktag_demo_backpressure_policy::block) {
+    set_error(error,
+              "distributed UB requires pipeline.backpressure.policy: block");
+    return false;
+  }
+  if (!config.ground_truth_labels.empty()) {
+    if (config.ground_truth_labels.size() != config.provider_nodes.size()) {
+      set_error(error,
+                "ground_truth_labels must describe every Provider or be "
+                "omitted");
+      return false;
+    }
+    for (const auto &entry : config.ground_truth_labels) {
+      if (std::find(config.provider_nodes.begin(),
+                    config.provider_nodes.end(), entry.first) ==
+          config.provider_nodes.end()) {
+        set_error(error,
+                  "ground_truth_labels contains a non-Provider hostname");
+        return false;
+      }
+    }
+  }
+  if (config.role == ktag_demo_distributed_role::frontend &&
+      pipeline.mode != ktag_demo_pipeline_mode::feature_parallel) {
+    set_error(error,
+              "the first distributed Frontend implementation requires "
+              "feature_parallel mode");
+    return false;
+  }
+  if (config.queues_per_provider != 1U) {
+    set_error(error,
+              "the first distributed implementation requires exactly one "
+              "UB queue per Provider");
+    return false;
+  }
+  if (config.role == ktag_demo_distributed_role::backend &&
+      pipeline.inference_threads != 1U) {
+    set_error(error,
+              "the first distributed Backend implementation requires one "
+              "Inference worker");
+    return false;
+  }
+  return true;
 }
 
 bool resolve_path(const fs::path &config_directory,
@@ -258,6 +556,9 @@ bool parse_enabled_config(const YAML::Node &pipeline,
   if (!parse_mode(pipeline["mode"], &config->mode, error)) {
     return false;
   }
+  if (!parse_ub_config(pipeline, &config->ub, error)) {
+    return false;
+  }
   const YAML::Node model_package_path = pipeline["model_package_path"];
   if (!feature_only && has_value(model_package_path)) {
     if (!resolve_path(config_directory, model_package_path.as<std::string>(),
@@ -310,6 +611,8 @@ bool parse_enabled_config(const YAML::Node &pipeline,
       (!read_u32(inference, "threads", &config->inference_threads, error) ||
        !read_u32(inference, "batch_size", &config->inference_batch_size,
                  error) ||
+       !read_u32(inference, "batch_timeout_us",
+                 &config->inference_batch_timeout_us, error) ||
        !read_u32(inference, "queue_capacity", &config->feature_queue_capacity,
                  error) ||
        !read_u32(inference, "intra_op_threads",
@@ -366,7 +669,9 @@ bool parse_enabled_config(const YAML::Node &pipeline,
   if (config->schema_name.empty() || config->schema_version == 0U ||
       config->packet_pool_size == 0U || config->packet_queue_capacity == 0U ||
       config->feature_queue_capacity == 0U ||
-      config->inference_batch_size == 0U || config->feature_threads == 0U ||
+      config->inference_batch_size == 0U ||
+      config->inference_batch_timeout_us == 0U ||
+      config->feature_threads == 0U ||
       config->inference_threads == 0U) {
     set_error(
         error,
@@ -385,7 +690,16 @@ bool apply_overrides_and_normalize(
     const ktag_demo_pipeline_config_overrides *overrides,
     ktag_demo_pipeline_config *config, std::string *error) {
   if (overrides != nullptr) {
-    config->feature_only = overrides->feature_only;
+    if (overrides->distributed_role_set) {
+      config->ub.enabled = true;
+      config->ub.role = overrides->distributed_role;
+      config->ub.node_id = overrides->node_id;
+    }
+    config->feature_only =
+        overrides->feature_only ||
+        (overrides->distributed_role_set &&
+         overrides->distributed_role ==
+             ktag_demo_distributed_role::frontend);
     if (overrides->mode_set) {
       config->mode = overrides->mode;
     }
@@ -426,16 +740,16 @@ bool apply_overrides_and_normalize(
     } else {
       config->inference_threads = config->feature_threads;
     }
-    return true;
+  } else {
+    if (config->mode == ktag_demo_pipeline_mode::single_thread ||
+        config->mode == ktag_demo_pipeline_mode::staged) {
+      config->feature_threads = 1U;
+      config->inference_threads = 1U;
+    } else if (config->mode == ktag_demo_pipeline_mode::feature_parallel) {
+      config->inference_threads = 1U;
+    }
   }
-  if (config->mode == ktag_demo_pipeline_mode::single_thread ||
-      config->mode == ktag_demo_pipeline_mode::staged) {
-    config->feature_threads = 1U;
-    config->inference_threads = 1U;
-  } else if (config->mode == ktag_demo_pipeline_mode::feature_parallel) {
-    config->inference_threads = 1U;
-  }
-  return true;
+  return validate_ub_config(*config, error);
 }
 
 } // namespace
@@ -485,7 +799,15 @@ ktag_demo_pipeline_config_result ktag_demo_load_pipeline_config_with_overrides(
 
     *config = {};
     config->enabled = true;
-    const bool feature_only = overrides != nullptr && overrides->feature_only;
+    if (!hash_config_file(absolute_config, &config->ub.ruleset_hash, error)) {
+      return ktag_demo_pipeline_config_result::error;
+    }
+    const bool feature_only =
+        overrides != nullptr &&
+        (overrides->feature_only ||
+         (overrides->distributed_role_set &&
+          overrides->distributed_role ==
+              ktag_demo_distributed_role::frontend));
     if (!parse_enabled_config(pipeline, absolute_config.parent_path(),
                               feature_only, config, error)) {
       return ktag_demo_pipeline_config_result::error;
@@ -560,6 +882,34 @@ const char *ktag_demo_backpressure_name(ktag_demo_backpressure_policy policy) {
     return "drop_oldest";
   case ktag_demo_backpressure_policy::fail:
     return "fail";
+  }
+  return "unknown";
+}
+
+bool ktag_demo_distributed_role_from_name(const char *name,
+                                          ktag_demo_distributed_role *role) {
+  if (name == nullptr || role == nullptr) {
+    return false;
+  }
+  if (std::strcmp(name, "frontend") == 0) {
+    *role = ktag_demo_distributed_role::frontend;
+  } else if (std::strcmp(name, "backend") == 0) {
+    *role = ktag_demo_distributed_role::backend;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+const char *
+ktag_demo_distributed_role_name(ktag_demo_distributed_role role) {
+  switch (role) {
+  case ktag_demo_distributed_role::disabled:
+    return "disabled";
+  case ktag_demo_distributed_role::frontend:
+    return "frontend";
+  case ktag_demo_distributed_role::backend:
+    return "backend";
   }
   return "unknown";
 }

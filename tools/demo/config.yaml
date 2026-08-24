@@ -122,12 +122,37 @@ pipeline:
   inference:
     threads: 1
     batch_size: 256
+    batch_timeout_us: 1000
     queue_capacity: 4096
     intra_op_threads: 1
     inter_op_threads: 1
 
   backpressure:
     policy: block
+
+  # UB 分布式模式默认关闭。四个节点使用同一份 YAML，启动时用
+  # --distributed-role frontend|backend --node-id <hostname> 选择本机角色。
+  distributed:
+    ub_ring:
+      enabled: false
+      provider_nodes: [fe-01, fe-02, fe-03]
+      user_nodes: [be-01]
+      region: ktag_ub_region
+      shm_prefix: ktag_feature
+      provider_shm_size: 268435456
+      queues_per_provider: 1
+      queue_depth: 1024
+      data_element_size: 4096
+      credits_per_provider: 256
+      poll_us: 50
+      # 可选：3:1 PCAP 验收时，为每个 Frontend 的 -p 参数给出全局类别标签。
+      # 一旦配置，必须覆盖全部 provider_nodes，且各数组长度等于该节点的 -p 数量。
+      # ground_truth_labels:
+      #   fe-01: [0, 3]
+      #   fe-02: [1, 4]
+      #   fe-03: [2]
+      # 第一项是 EAL 的 argv[0]；现场根据 CPU 绑核和部署环境调整。
+      eal_arguments: [kdadk_demo, --no-huge, -l, "0"]
 
   plugins: []
   schema:
