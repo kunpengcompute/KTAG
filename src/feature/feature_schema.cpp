@@ -4,7 +4,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "feature_schema_internal.h"
 
 #include <algorithm>
-#include <array>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -51,37 +50,6 @@ void hash_string(uint64_t &hash, const std::string &value)
     }
 }
 
-const std::string &hash_provider_contract_id(
-    const ktag_feature_descriptor_storage &descriptor)
-{
-    static const std::string legacy_traffic_contract =
-        "builtin.legacy.traffic_statistics";
-    static constexpr std::array<std::string_view, 8U> split_traffic_slots{{
-        "builtin.legacy.send.counters",
-        "builtin.legacy.send.header",
-        "builtin.legacy.send.payload",
-        "builtin.legacy.send.interval",
-        "builtin.legacy.receive.counters",
-        "builtin.legacy.receive.header",
-        "builtin.legacy.receive.payload",
-        "builtin.legacy.receive.interval",
-    }};
-
-    /*
-     * Provider IDs are runtime ownership identities. These eight built-in
-     * Providers are a zero-algorithm-change decomposition of the historical
-     * traffic-statistics family, so their stable model-contract identity stays
-     * unchanged. A replacement Provider uses another ID/version and therefore
-     * still produces a different Schema Hash.
-    */
-    for (const std::string_view slot : split_traffic_slots) {
-        if (std::string_view(descriptor.provider_id) == slot) {
-            return legacy_traffic_contract;
-        }
-    }
-    return descriptor.provider_id;
-}
-
 uint64_t calculate_schema_hash(const ktag_feature_schema &schema)
 {
     uint64_t hash = FNV1A_OFFSET_BASIS;
@@ -93,7 +61,7 @@ uint64_t calculate_schema_hash(const ktag_feature_schema &schema)
         const auto &descriptor = schema.descriptors[index];
         hash_u32(hash, index);
         hash_string(hash, descriptor.feature_id);
-        hash_string(hash, hash_provider_contract_id(descriptor));
+        hash_string(hash, descriptor.contract_provider_id);
         hash_u32(hash, descriptor.provider_version);
         hash_u32(hash, static_cast<uint32_t>(descriptor.value_type));
         hash_u32(hash, descriptor.dimension);
@@ -109,7 +77,55 @@ auto find_descriptor(ktag_feature_schema *schema, const char *feature_id)
                         });
 }
 
+ktag_status add_descriptor(
+    ktag_feature_schema *schema,
+    const ktag_feature_descriptor *descriptor,
+    const char *contract_provider_id)
+{
+    if (schema == nullptr || !ktag_feature_descriptor_is_valid(descriptor) ||
+        !valid_string(contract_provider_id, KTAG_PROVIDER_ID_MAX_LENGTH)) {
+        return KTAG_ERROR_INVALID_ARGUMENT;
+    }
+    if (schema->frozen) {
+        return KTAG_ERROR_INVALID_STATE;
+    }
+    if (find_descriptor(schema, descriptor->feature_id) !=
+        schema->descriptors.end()) {
+        return KTAG_ERROR_ALREADY_EXISTS;
+    }
+    if (schema->value_count >
+        std::numeric_limits<uint32_t>::max() - descriptor->dimension) {
+        return KTAG_ERROR_CAPACITY;
+    }
+
+    try {
+        ktag_feature_descriptor_storage storage;
+        storage.feature_id = descriptor->feature_id;
+        storage.display_name = descriptor->display_name;
+        storage.provider_id = descriptor->provider_id;
+        storage.contract_provider_id = contract_provider_id;
+        storage.provider_version = descriptor->provider_version;
+        storage.value_type = descriptor->value_type;
+        storage.dimension = descriptor->dimension;
+        schema->descriptors.push_back(std::move(storage));
+        schema->value_count += descriptor->dimension;
+        return KTAG_SUCCESS;
+    } catch (const std::bad_alloc &) {
+        return KTAG_ERROR_OUT_OF_MEMORY;
+    } catch (...) {
+        return KTAG_ERROR_INTERNAL;
+    }
+}
+
 } // namespace
+
+ktag_status ktag_feature_schema_add_contract(
+    ktag_feature_schema *schema,
+    const ktag_feature_descriptor *descriptor,
+    const char *contract_provider_id)
+{
+    return add_descriptor(schema, descriptor, contract_provider_id);
+}
 
 bool ktag_feature_descriptor_is_valid(const ktag_feature_descriptor *descriptor)
 {
@@ -171,35 +187,10 @@ KTAG_API ktag_status ktag_feature_schema_add(
     ktag_feature_schema *schema,
     const ktag_feature_descriptor *descriptor)
 {
-    if (schema == nullptr || !ktag_feature_descriptor_is_valid(descriptor)) {
+    if (descriptor == nullptr) {
         return KTAG_ERROR_INVALID_ARGUMENT;
     }
-    if (schema->frozen) {
-        return KTAG_ERROR_INVALID_STATE;
-    }
-    if (find_descriptor(schema, descriptor->feature_id) != schema->descriptors.end()) {
-        return KTAG_ERROR_ALREADY_EXISTS;
-    }
-    if (schema->value_count > std::numeric_limits<uint32_t>::max() - descriptor->dimension) {
-        return KTAG_ERROR_CAPACITY;
-    }
-
-    try {
-        ktag_feature_descriptor_storage storage;
-        storage.feature_id = descriptor->feature_id;
-        storage.display_name = descriptor->display_name;
-        storage.provider_id = descriptor->provider_id;
-        storage.provider_version = descriptor->provider_version;
-        storage.value_type = descriptor->value_type;
-        storage.dimension = descriptor->dimension;
-        schema->descriptors.push_back(std::move(storage));
-        schema->value_count += descriptor->dimension;
-        return KTAG_SUCCESS;
-    } catch (const std::bad_alloc &) {
-        return KTAG_ERROR_OUT_OF_MEMORY;
-    } catch (...) {
-        return KTAG_ERROR_INTERNAL;
-    }
+    return add_descriptor(schema, descriptor, descriptor->provider_id);
 }
 
 KTAG_API ktag_status ktag_feature_schema_remove(

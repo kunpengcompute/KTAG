@@ -2692,12 +2692,11 @@ int ktag_demo_run_pipeline_internal(
     } else if (config.feature_only) {
       std::sort(feature_records.begin(), feature_records.end(),
                 ktag_demo_schema_feature_record_less);
-      success = output_format == ktag_demo_pipeline_output_format::csv &&
-                ktag_demo_write_schema_feature_csv(output_file, schema.get(),
-                                                   feature_records, &error);
-      if (output_format != ktag_demo_pipeline_output_format::csv) {
-        error = "Schema feature extraction currently requires CSV output";
-      }
+      success = output_format == ktag_demo_pipeline_output_format::csv
+                    ? ktag_demo_write_schema_feature_csv(
+                          output_file, schema.get(), feature_records, &error)
+                    : ktag_demo_write_schema_feature_json(
+                          output_file, schema.get(), feature_records, &error);
     } else {
       std::sort(predictions.begin(), predictions.end(), prediction_less);
       success = distributed_backend
@@ -2744,7 +2743,10 @@ int ktag_demo_run_pipeline_internal(
           "UB 发送特征记录数: %llu\n",
           static_cast<unsigned long long>(run_statistics.emitted_flows));
     } else if (config.feature_only) {
-      std::printf("Schema CSV记录数: %llu\n",
+      std::printf("Schema %s记录数: %llu\n",
+                  output_format == ktag_demo_pipeline_output_format::csv
+                      ? "CSV"
+                      : "JSON",
                   static_cast<unsigned long long>(feature_records.size()));
     } else {
       const uint64_t kept = run_statistics.predictions;
@@ -2827,9 +2829,15 @@ int ktag_demo_run_pipeline_internal(
       }
     }
     if (!distributed_frontend && output_file != nullptr) {
-      std::printf("%s已保存到: %s\n",
-                  config.feature_only ? "Schema 特征 CSV" : "推理结果",
-                  output_file);
+      if (config.feature_only) {
+        std::printf("Schema 特征 %s已保存到: %s\n",
+                    output_format == ktag_demo_pipeline_output_format::csv
+                        ? "CSV"
+                        : "JSON",
+                    output_file);
+      } else {
+        std::printf("推理结果已保存到: %s\n", output_file);
+      }
     }
   }
 

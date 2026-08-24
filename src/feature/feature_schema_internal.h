@@ -16,6 +16,8 @@ struct ktag_feature_descriptor_storage {
     std::string feature_id;
     std::string display_name;
     std::string provider_id;
+    /* Provider identity serialized into the model contract hash. */
+    std::string contract_provider_id;
     uint32_t provider_version = 0;
     ktag_feature_value_type value_type = KTAG_FEATURE_FLOAT32;
     uint32_t dimension = 0;
@@ -33,6 +35,10 @@ struct ktag_feature_schema {
 };
 
 bool ktag_feature_descriptor_is_valid(const ktag_feature_descriptor *descriptor);
+ktag_status ktag_feature_schema_add_contract(
+    ktag_feature_schema *schema,
+    const ktag_feature_descriptor *descriptor,
+    const char *contract_provider_id);
 void ktag_feature_copy_descriptor(
     const ktag_feature_descriptor_storage &source,
     ktag_feature_descriptor *destination);

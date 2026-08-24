@@ -26,7 +26,9 @@ ktag_feature_schema *clone_schema(const ktag_feature_schema *source) {
   for (const auto &item : source->descriptors) {
     ktag_feature_descriptor descriptor{};
     ktag_feature_copy_descriptor(item, &descriptor);
-    if (ktag_feature_schema_add(clone.get(), &descriptor) != KTAG_SUCCESS) {
+    if (ktag_feature_schema_add_contract(
+            clone.get(), &descriptor, item.contract_provider_id.c_str()) !=
+        KTAG_SUCCESS) {
       return nullptr;
     }
   }

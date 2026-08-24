@@ -4,9 +4,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 #include "capture_adapter.h"
 #include "kdadk_file_writer.h"
-#include "kdadk_inference.h"
-#include "kdadk_type.h"
-#include "online_inference.h"
 #include "pipeline/pipeline_config.h"
 #include "pipeline/pipeline_runner.h"
 
@@ -49,10 +46,9 @@ typedef struct {
   char *output_file;
   file_format
       output_format; // 输出文件格式: FILE_FORMAT_CSV 或 FILE_FORMAT_JSON
-  int mode;          // 0:单flow, 1:批处理, 2:文件模式
   int operation;     // 0:训练, 1:验证, 2:特征提取, 3:在线推理
   int with_rawbow;   // 是否输出rawbow (0:不输出, 1:输出)
-  char *pipeline_mode;        // legacy 或四种新 pipeline mode
+  char *pipeline_mode;        // Pipeline mode
   uint32_t feature_threads;   // 0 表示使用 YAML
   uint32_t inference_threads; // 0 表示使用 YAML
   char *distributed_role;     // frontend 或 backend
@@ -61,8 +57,9 @@ typedef struct {
   char *dpdk_eal_args; // --dpdk-eal-args: EAL 参数(空格分隔字符串)
 } CommandLineArgs;
 
-int feature_extraction_mode(const char *pcap_file, const char *output_file,
-                            int with_rawbow) {
+int legacy_feature_extraction_mode(const char *pcap_file,
+                                   const char *output_file,
+                                   int with_rawbow) {
   printf("========== 特征提取模式 ==========\n");
   printf("输入文件: %s\n", pcap_file);
   printf("输出文件: %s\n", output_file);
@@ -393,6 +390,44 @@ std::string get_executable_dir() {
   return ".";
 }
 
+std::string get_traffic_plugin_path() {
+  const std::string executable_dir = get_executable_dir();
+  const std::string candidates[] = {
+      executable_dir + "/plugins/libktag_traffic_features.so",
+      executable_dir + "/../lib/KTAG/plugins/libktag_traffic_features.so",
+      executable_dir + "/../lib64/KTAG/plugins/libktag_traffic_features.so",
+  };
+  for (const auto &candidate : candidates) {
+    if (access(candidate.c_str(), R_OK) == 0) {
+      return candidate;
+    }
+  }
+  return candidates[0U];
+}
+
+int schema_feature_extraction_mode(const char *pcap_file,
+                                   const char *output_file,
+                                   file_format output_format) {
+  ktag_demo_pipeline_config config;
+  config.enabled = true;
+  config.feature_only = true;
+  config.mode = ktag_demo_pipeline_mode::single_thread;
+  config.feature_threads = 1U;
+  config.inference_threads = 1U;
+  config.lifecycle_mode =
+      ktag_demo_feature_lifecycle_mode::legacy_compat;
+  config.plugin_paths = {get_traffic_plugin_path()};
+
+  const char *pcap_files[] = {pcap_file};
+  const auto pipeline_output_format =
+      output_format == FILE_FORMAT_JSON
+          ? ktag_demo_pipeline_output_format::json
+          : ktag_demo_pipeline_output_format::csv;
+  return ktag_demo_run_pipeline(
+      config, "builtin:traffic", pcap_files, 1, nullptr, output_file,
+      pipeline_output_format);
+}
+
 std::string get_script_path(const char *script_name) {
   if (script_name == nullptr) { // 额外的安全检查
     return "";
@@ -447,10 +482,8 @@ void print_usage(const char *prog_name) {
   printf("  -r <config.yaml>        在线推理模式 (需要配合 -c 或 -j 使用)\n");
   printf("  -p <file.pcap>          输入PCAP文件 (可多个)\n");
   printf("  -i <interface>          网口实时抓包\n");
-  printf("  -m <mode>               推理模式: 0=单flow, 1=批处理, 2=文件 "
-         "(默认: 1)\n");
   printf("  --pipeline-mode <mode>  "
-         "legacy/single_thread/staged/feature_parallel/full_parallel\n");
+         "single_thread/staged/feature_parallel/full_parallel\n");
   printf("  -n, --feature-threads N Feature Worker 数量（仅新 pipeline）\n");
   printf("  --inference-threads N   Inference Worker 数量（仅新 pipeline）\n");
   printf("  --distributed-role R    UB 节点角色: frontend/backend\n");
@@ -483,7 +516,7 @@ void print_usage(const char *prog_name) {
   printf("  %s -f input.pcap -j output.json -w\n", prog_name);
   printf("\n");
   printf("  # 在线推理 - 多个PCAP文件，输出CSV\n");
-  printf("  %s -r config.yaml -p file1.pcap -p file2.pcap -m 1 -c result.csv\n",
+  printf("  %s -r config.yaml -p file1.pcap -p file2.pcap -c result.csv\n",
          prog_name);
   printf("  %s -r config.yaml -p file1.pcap --pipeline-mode feature_parallel "
          "-n 4 -c result.csv\n",
@@ -546,7 +579,6 @@ static int parse_positive_u32(const char *text, const char *option_name,
 
 int parse_args(int argc, char *argv[], CommandLineArgs *args) {
   memset(args, 0, sizeof(CommandLineArgs));
-  args->mode = 1; // 默认批处理模式
   args->operation = -1;
   args->with_rawbow = 0; // 默认不输出raw payload
   int opt;
@@ -574,7 +606,7 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       {"dpdk-eal-args", required_argument, nullptr,
        KTAG_DEMO_OPT_DPDK_EAL_ARGS},
       {nullptr, 0, nullptr, 0}};
-  while ((opt = getopt_long(argc, argv, "t:e:f:r:p:i:m:c:j:n:wlh", long_options,
+  while ((opt = getopt_long(argc, argv, "t:e:f:r:p:i:c:j:n:wlh", long_options,
                             nullptr)) != -1) {
     switch (opt) {
     case 't':
@@ -599,25 +631,12 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
     case 'i':
       args->interface = optarg;
       break;
-    case 'm': {
-      char *endptr;
-      errno = 0;
-      long val = strtol(optarg, &endptr, 10);
-      if (endptr == optarg || *endptr != '\0' || errno == ERANGE || val < 0 ||
-          val > 2) {
-        fprintf(stderr, "错误: 无效的推理模式 \"%s\"\n", optarg);
-        return -1;
-      }
-      args->mode = (int)val;
-      break;
-    }
     case KTAG_DEMO_OPT_PIPELINE_MODE: {
       ktag_demo_pipeline_mode parsed_mode;
-      if (strcmp(optarg, "legacy") != 0 &&
-          !ktag_demo_pipeline_mode_from_name(optarg, &parsed_mode)) {
+      if (!ktag_demo_pipeline_mode_from_name(optarg, &parsed_mode)) {
         fprintf(stderr,
                 "错误: 无效的 pipeline mode \"%s\"；"
-                "可选 legacy、single_thread、staged、"
+                "可选 single_thread、staged、"
                 "feature_parallel、full_parallel\n",
                 optarg);
         return -1;
@@ -802,22 +821,12 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
                         "单独生成 CSV\n");
         return -1;
       }
-      if (args->output_format != FILE_FORMAT_CSV) {
-        fprintf(stderr,
-                "错误: -f --config 的 Schema 特征输出必须使用 -c CSV\n");
-        return -1;
-      }
       if (args->with_rawbow) {
         fprintf(stderr, "错误: -w 只适用于未指定 --config 的旧固定向量路径\n");
         return -1;
       }
       if (args->inference_threads != 0U) {
         fprintf(stderr, "错误: Schema 特征提取不创建 Inference Worker\n");
-        return -1;
-      }
-      if (args->pipeline_mode != nullptr &&
-          strcmp(args->pipeline_mode, "legacy") == 0) {
-        fprintf(stderr, "错误: -f --config 需要选择现代 Pipeline Mode\n");
         return -1;
       }
     }
@@ -944,10 +953,20 @@ int main(int argc, char *argv[]) {
       ret = ktag_demo_run_pipeline(
           pipeline_config, args.feature_config_file,
           (const char **)args.pcap_files, args.num_pcap_files, nullptr,
-          args.output_file, ktag_demo_pipeline_output_format::csv);
+          args.output_file,
+          args.output_format == FILE_FORMAT_JSON
+              ? ktag_demo_pipeline_output_format::json
+              : ktag_demo_pipeline_output_format::csv);
     } else if (args.num_pcap_files > 0) {
-      ret = feature_extraction_mode(args.pcap_files[0], args.output_file,
-                                    args.with_rawbow);
+      if (args.with_rawbow) {
+        fprintf(stderr,
+                "警告: RawBOW 明文诊断尚未迁移，当前显式使用旧兼容路径\n");
+        ret = legacy_feature_extraction_mode(
+            args.pcap_files[0], args.output_file, args.with_rawbow);
+      } else {
+        ret = schema_feature_extraction_mode(
+            args.pcap_files[0], args.output_file, args.output_format);
+      }
     }
     break;
 
@@ -1026,10 +1045,9 @@ int main(int argc, char *argv[]) {
             pipeline_config, args.config_file, (const char **)args.pcap_files,
             args.num_pcap_files, args.interface, args.output_file, format);
       } else {
-        ret = online_inference_mode(
-            args.config_file, (const char **)args.pcap_files,
-            args.num_pcap_files, args.interface, args.mode, args.output_file,
-            args.output_format);
+        fprintf(stderr,
+                "错误: 配置文件未启用现代 Pipeline\n");
+        ret = -1;
       }
     }
     break;

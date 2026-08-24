@@ -1,6 +1,6 @@
 if(NOT TARGET ktag_capture OR NOT TARGET ktag_feature OR
    NOT TARGET KDADK_feature_extract OR
-   NOT TARGET ktag_inference OR NOT TARGET KDADK_inference)
+   NOT TARGET ktag_inference)
     message(FATAL_ERROR "kdadk_demo must be built as part of the KTAG source tree")
 endif()
 
@@ -23,7 +23,6 @@ add_executable(
     kdadk_demo
     main.cpp
     kdadk_file_writer.cpp
-    online_inference.cpp
     utils.cpp
     pipeline/pipeline_config.cpp
     pipeline/pipeline_runner.cpp
@@ -48,7 +47,6 @@ target_link_libraries(kdadk_demo PRIVATE
     ktag_feature
     KDADK_feature_extract
     ktag_inference
-    KDADK_inference
     ${YAML_CPP_LIB}
     Threads::Threads
     ${CMAKE_DL_LIBS}
@@ -161,8 +159,6 @@ set_target_properties(kdadk_demo PROPERTIES
 install(TARGETS ktag_example_feature_plugin
         LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}/plugins")
 if(KTAG_INSTALL_LEGACY_COMPAT)
-    # The demo intentionally retains --pipeline-mode legacy, so installing it
-    # also requires the compatibility libraries.
     install(TARGETS kdadk_demo
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/"

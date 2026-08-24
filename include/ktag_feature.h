@@ -209,6 +209,8 @@ typedef struct {
   ktag_feature_callbacks callbacks;
   ktag_feature_callback_error_policy callback_error_policy;
   void *user_data;
+  /* Optional model-contract identity; NULL uses provider_id. */
+  const char *contract_provider_id;
 } ktag_feature_provider_registration;
 
 /*

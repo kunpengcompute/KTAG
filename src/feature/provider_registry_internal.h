@@ -11,6 +11,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 struct ktag_feature_provider_storage {
     std::string provider_id;
+    std::string contract_provider_id;
     uint32_t provider_version = 0;
     std::vector<ktag_feature_descriptor_storage> features;
     ktag_feature_callbacks callbacks{};

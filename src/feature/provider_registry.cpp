@@ -4,11 +4,15 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "provider_registry_internal.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <new>
 #include <utility>
 
 namespace {
+
+constexpr size_t PROVIDER_REGISTRATION_BASE_SIZE =
+    offsetof(ktag_feature_provider_registration, contract_provider_id);
 
 bool valid_identifier(const char *value, uint32_t maximum_length)
 {
@@ -31,6 +35,16 @@ bool callbacks_are_valid(const ktag_feature_callbacks &callbacks)
            (callbacks.flow_create != nullptr || callbacks.flow_destroy == nullptr);
 }
 
+const char *registration_contract_provider_id(
+    const ktag_feature_provider_registration &registration)
+{
+    if (registration.struct_size < sizeof(registration) ||
+        registration.contract_provider_id == nullptr) {
+        return registration.provider_id;
+    }
+    return registration.contract_provider_id;
+}
+
 auto find_provider(ktag_feature_registry *registry, const char *provider_id)
 {
     return std::find_if(registry->providers.begin(), registry->providers.end(),
@@ -49,9 +63,12 @@ auto find_provider(const ktag_feature_registry *registry, const char *provider_i
 
 bool registration_is_valid(const ktag_feature_provider_registration *registration)
 {
-    if (registration == nullptr || registration->struct_size < sizeof(*registration) ||
+    if (registration == nullptr ||
+        registration->struct_size < PROVIDER_REGISTRATION_BASE_SIZE ||
         registration->api_version != KTAG_API_VERSION ||
         !valid_identifier(registration->provider_id, KTAG_PROVIDER_ID_MAX_LENGTH) ||
+        !valid_identifier(registration_contract_provider_id(*registration),
+                          KTAG_PROVIDER_ID_MAX_LENGTH) ||
         registration->provider_version == 0 || registration->features == nullptr ||
         registration->feature_count == 0 || !callbacks_are_valid(registration->callbacks) ||
         (registration->callback_error_policy != KTAG_FEATURE_CALLBACK_ERROR_FAIL_FLOW &&
@@ -80,6 +97,8 @@ ktag_feature_provider_storage copy_registration(
 {
     ktag_feature_provider_storage provider;
     provider.provider_id = registration.provider_id;
+    provider.contract_provider_id =
+        registration_contract_provider_id(registration);
     provider.provider_version = registration.provider_version;
     provider.callbacks = registration.callbacks;
     provider.callback_error_policy = registration.callback_error_policy;
@@ -91,6 +110,7 @@ ktag_feature_provider_storage copy_registration(
         feature.feature_id = source.feature_id;
         feature.display_name = source.display_name;
         feature.provider_id = source.provider_id;
+        feature.contract_provider_id = provider.contract_provider_id;
         feature.provider_version = source.provider_version;
         feature.value_type = source.value_type;
         feature.dimension = source.dimension;
@@ -224,7 +244,8 @@ KTAG_API ktag_status ktag_feature_schema_add_registered(
     }
     ktag_feature_descriptor descriptor{};
     ktag_feature_copy_descriptor(*feature, &descriptor);
-    return ktag_feature_schema_add(schema, &descriptor);
+    return ktag_feature_schema_add_contract(
+        schema, &descriptor, feature->contract_provider_id.c_str());
 }
 
 } // extern "C"

@@ -84,6 +84,45 @@ void write_csv_string(std::ostream &output, const std::string &value) {
   output << '"';
 }
 
+void write_json_string(std::ostream &output, const std::string &value) {
+  output << '"';
+  for (const unsigned char character : value) {
+    switch (character) {
+    case '"':
+      output << "\\\"";
+      break;
+    case '\\':
+      output << "\\\\";
+      break;
+    case '\b':
+      output << "\\b";
+      break;
+    case '\f':
+      output << "\\f";
+      break;
+    case '\n':
+      output << "\\n";
+      break;
+    case '\r':
+      output << "\\r";
+      break;
+    case '\t':
+      output << "\\t";
+      break;
+    default:
+      if (character < 0x20U) {
+        output << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+               << static_cast<uint32_t>(character) << std::dec
+               << std::setfill(' ');
+      } else {
+        output << character;
+      }
+      break;
+    }
+  }
+  output << '"';
+}
+
 bool write_header(std::ostream &output, const ktag_feature_schema *schema,
                   std::string *error) {
   output << "meta.flow_id,meta.ip_version,meta.src_ip,meta.dst_ip,"
@@ -157,6 +196,65 @@ bool write_record(std::ostream &output, uint32_t expected_value_count,
   return static_cast<bool>(output);
 }
 
+bool write_json_record(std::ostream &output, uint32_t expected_value_count,
+                       const ktag_demo_schema_feature_record &record,
+                       std::string *error) {
+  if (record.values.size() != expected_value_count) {
+    set_error(error, "Feature Record value count does not match the Schema");
+    return false;
+  }
+  const auto &details = record.details;
+  const auto &metadata = details.metadata;
+  const uint8_t ip_version = details.source_address.version;
+  if ((ip_version != 4U && ip_version != 6U) ||
+      details.destination_address.version != ip_version) {
+    set_error(error, "Feature Record contains an invalid IP address");
+    return false;
+  }
+  const std::string source = address_text(details.source_address);
+  const std::string destination = address_text(details.destination_address);
+  const std::string flow_key =
+      ktag_demo_schema_flow_key_text(metadata.flow_key);
+  if (source.empty() || destination.empty() || flow_key.empty()) {
+    set_error(error, "failed to format Feature Record metadata");
+    return false;
+  }
+
+  output << "  {\n    \"flow_id\": " << metadata.flow_id
+         << ",\n    \"ip_version\": " << static_cast<uint32_t>(ip_version)
+         << ",\n    \"src_ip\": ";
+  write_json_string(output, source);
+  output << ",\n    \"dst_ip\": ";
+  write_json_string(output, destination);
+  output << ",\n    \"src_port\": " << details.source_port
+         << ",\n    \"dst_port\": " << details.destination_port
+         << ",\n    \"protocol\": "
+         << static_cast<uint32_t>(metadata.flow_key.protocol)
+         << ",\n    \"flow_key\": ";
+  write_json_string(output, flow_key);
+  output << ",\n    \"ipv6_extension_packet_count\": "
+         << details.ipv6_extension_packet_count
+         << ",\n    \"ip_fragment_first_packet_count\": "
+         << details.ip_fragment_first_packet_count
+         << ",\n    \"first_packet_sequence\": "
+         << metadata.first_packet_sequence
+         << ",\n    \"last_packet_sequence\": "
+         << metadata.last_packet_sequence << ",\n    \"features\": [";
+  for (size_t index = 0U; index < record.values.size(); ++index) {
+    const float value = record.values[index];
+    if (!std::isfinite(value)) {
+      set_error(error, "Feature Record contains a non-finite value");
+      return false;
+    }
+    if (index != 0U) {
+      output << ',';
+    }
+    output << value;
+  }
+  output << "]\n  }";
+  return static_cast<bool>(output);
+}
+
 } // namespace
 
 bool ktag_demo_schema_feature_record_less(
@@ -227,6 +325,41 @@ bool ktag_demo_write_schema_feature_csv(
   }
   if (!output) {
     set_error(error, "failed while writing Schema CSV");
+    return false;
+  }
+  return true;
+}
+
+bool ktag_demo_write_schema_feature_json(
+    const char *path, const ktag_feature_schema *schema,
+    const std::vector<ktag_demo_schema_feature_record> &records,
+    std::string *error) {
+  if (error != nullptr) {
+    error->clear();
+  }
+  if (path == nullptr || path[0] == '\0' || schema == nullptr ||
+      ktag_feature_schema_is_frozen(schema) == 0U) {
+    set_error(error, "a frozen Feature Schema and output path are required");
+    return false;
+  }
+  std::ofstream output(path);
+  if (!output) {
+    set_error(error, std::string("failed to open Schema JSON: ") + path);
+    return false;
+  }
+  output << std::setprecision(9) << "[\n";
+  const uint32_t value_count = ktag_feature_schema_get_value_count(schema);
+  for (size_t index = 0U; index < records.size(); ++index) {
+    if (index != 0U) {
+      output << ",\n";
+    }
+    if (!write_json_record(output, value_count, records[index], error)) {
+      return false;
+    }
+  }
+  output << "\n]\n";
+  if (!output) {
+    set_error(error, "failed while writing Schema JSON");
     return false;
   }
   return true;

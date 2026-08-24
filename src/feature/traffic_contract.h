@@ -21,6 +21,7 @@ struct feature_definition {
 
 struct provider_catalog {
   const char *provider_id;
+  const char *contract_provider_id;
   uint32_t provider_version;
   const feature_definition *features;
   size_t feature_count;
@@ -62,6 +63,9 @@ inline constexpr char KTAG_RECEIVE_INTERVAL_PROVIDER_ID[] =
 inline constexpr uint32_t KTAG_RECEIVE_INTERVAL_PROVIDER_VERSION = 1U;
 inline constexpr char KTAG_RAWBOW_PROVIDER_ID[] = "builtin.legacy.rawbow";
 inline constexpr uint32_t KTAG_RAWBOW_PROVIDER_VERSION = 1U;
+/* The split statistics slots retain the frozen model-contract identity. */
+inline constexpr char KTAG_TRAFFIC_STATISTICS_CONTRACT_ID[] =
+    "builtin.legacy.traffic_statistics";
 
 inline constexpr std::array<feature_definition, 1U> KTAG_METADATA_FEATURES{{
     {"legacy.flow_id", "flow_id", 1U},
@@ -185,8 +189,11 @@ template <size_t FeatureCount>
 constexpr provider_catalog make_catalog(
     const char *provider_id,
     uint32_t provider_version,
-    const std::array<feature_definition, FeatureCount> &features) {
-  return {provider_id, provider_version, features.data(), features.size()};
+    const std::array<feature_definition, FeatureCount> &features,
+    const char *contract_provider_id = nullptr) {
+  return {provider_id,
+          contract_provider_id == nullptr ? provider_id : contract_provider_id,
+          provider_version, features.data(), features.size()};
 }
 
 inline constexpr provider_catalog KTAG_METADATA_CATALOG =
@@ -198,32 +205,36 @@ inline constexpr provider_catalog KTAG_TUPLE_CATALOG =
 inline constexpr provider_catalog KTAG_SEND_COUNTERS_CATALOG =
     make_catalog(KTAG_SEND_COUNTERS_PROVIDER_ID,
                  KTAG_SEND_COUNTERS_PROVIDER_VERSION,
-                 KTAG_SEND_COUNTERS_FEATURES);
+                 KTAG_SEND_COUNTERS_FEATURES,
+                 KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
 inline constexpr provider_catalog KTAG_SEND_HEADER_CATALOG =
     make_catalog(KTAG_SEND_HEADER_PROVIDER_ID,
                  KTAG_SEND_HEADER_PROVIDER_VERSION,
-                 KTAG_SEND_HEADER_FEATURES);
+                 KTAG_SEND_HEADER_FEATURES,
+                 KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
 inline constexpr provider_catalog KTAG_SEND_PAYLOAD_CATALOG =
     make_catalog(KTAG_SEND_PAYLOAD_PROVIDER_ID,
                  KTAG_SEND_PAYLOAD_PROVIDER_VERSION,
-                 KTAG_SEND_PAYLOAD_FEATURES);
+                 KTAG_SEND_PAYLOAD_FEATURES,
+                 KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
 inline constexpr provider_catalog KTAG_SEND_INTERVAL_CATALOG =
     make_catalog(KTAG_SEND_INTERVAL_PROVIDER_ID,
                  KTAG_SEND_INTERVAL_PROVIDER_VERSION,
-                 KTAG_SEND_INTERVAL_FEATURES);
+                 KTAG_SEND_INTERVAL_FEATURES,
+                 KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
 inline constexpr provider_catalog KTAG_RECEIVE_COUNTERS_CATALOG = make_catalog(
     KTAG_RECEIVE_COUNTERS_PROVIDER_ID,
     KTAG_RECEIVE_COUNTERS_PROVIDER_VERSION,
-    KTAG_RECEIVE_COUNTERS_FEATURES);
+    KTAG_RECEIVE_COUNTERS_FEATURES, KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
 inline constexpr provider_catalog KTAG_RECEIVE_HEADER_CATALOG = make_catalog(
     KTAG_RECEIVE_HEADER_PROVIDER_ID, KTAG_RECEIVE_HEADER_PROVIDER_VERSION,
-    KTAG_RECEIVE_HEADER_FEATURES);
+    KTAG_RECEIVE_HEADER_FEATURES, KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
 inline constexpr provider_catalog KTAG_RECEIVE_PAYLOAD_CATALOG = make_catalog(
     KTAG_RECEIVE_PAYLOAD_PROVIDER_ID, KTAG_RECEIVE_PAYLOAD_PROVIDER_VERSION,
-    KTAG_RECEIVE_PAYLOAD_FEATURES);
+    KTAG_RECEIVE_PAYLOAD_FEATURES, KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
 inline constexpr provider_catalog KTAG_RECEIVE_INTERVAL_CATALOG = make_catalog(
     KTAG_RECEIVE_INTERVAL_PROVIDER_ID, KTAG_RECEIVE_INTERVAL_PROVIDER_VERSION,
-    KTAG_RECEIVE_INTERVAL_FEATURES);
+    KTAG_RECEIVE_INTERVAL_FEATURES, KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
 inline constexpr provider_catalog KTAG_RAWBOW_CATALOG =
     make_catalog(KTAG_RAWBOW_PROVIDER_ID, KTAG_RAWBOW_PROVIDER_VERSION,
                  KTAG_RAWBOW_FEATURES);

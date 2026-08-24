@@ -27,4 +27,9 @@ bool ktag_demo_write_schema_feature_csv(
     const std::vector<ktag_demo_schema_feature_record> &records,
     std::string *error);
 
+bool ktag_demo_write_schema_feature_json(
+    const char *path, const ktag_feature_schema *schema,
+    const std::vector<ktag_demo_schema_feature_record> &records,
+    std::string *error);
+
 #endif /* KTAG_DEMO_SCHEMA_FEATURE_WRITER_H */

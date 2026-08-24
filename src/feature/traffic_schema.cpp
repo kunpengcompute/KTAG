@@ -3,6 +3,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "ktag_feature.h"
 
+#include "feature_schema_internal.h"
 #include "feature/traffic_contract.h"
 
 namespace {
@@ -21,7 +22,9 @@ bool add_catalog(
     descriptor.provider_version = catalog.provider_version;
     descriptor.value_type = KTAG_FEATURE_FLOAT32;
     descriptor.dimension = feature.dimension;
-    if (ktag_feature_schema_add(schema, &descriptor) != KTAG_SUCCESS) {
+    if (ktag_feature_schema_add_contract(
+            schema, &descriptor, catalog.contract_provider_id) !=
+        KTAG_SUCCESS) {
       return false;
     }
   }

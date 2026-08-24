@@ -43,6 +43,7 @@ ktag_status register_provider(
     registration.callbacks = callbacks;
     registration.callback_error_policy = error_policy;
     registration.user_data = user_data;
+    registration.contract_provider_id = catalog.contract_provider_id;
     return ktag_feature_registry_register(
         registry, &registration, KTAG_FEATURE_REGISTER_DEFAULT);
   } catch (const std::bad_alloc &) {
