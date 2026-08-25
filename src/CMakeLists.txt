@@ -182,20 +182,21 @@ set_target_properties(ktag_feature PROPERTIES
     INSTALL_RPATH "$ORIGIN"
 )
 
-# Deprecated fixed-vector Feature compatibility layer. Old flow/decode sources
-# remain isolated here; only the bounded DNS parser is shared with the modern
-# Feature host.
-set(KTAG_LEGACY_FEATURE_ADAPTER_SOURCES
+# Established fixed-vector public API. Its extraction entry points execute the
+# same Traffic Providers as the Schema API. The old low-level symbols remain
+# in this target temporarily so their independent removal can be reviewed and
+# tested without changing the demo-facing API at the same time.
+set(KTAG_FIXED_VECTOR_FEATURE_SOURCES
     ${PROJECT_SOURCE_DIR}/src/capture/dns_parser.cpp
     ${PROJECT_SOURCE_DIR}/src/decode.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
     ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/legacy/process_feature.cpp
-    ${PROJECT_SOURCE_DIR}/src/legacy/kdadk_feature_extract.cpp
+    ${PROJECT_SOURCE_DIR}/src/kdadk_feature_extract.cpp
 )
 add_library(KDADK_feature_extract SHARED
-    ${KTAG_LEGACY_FEATURE_ADAPTER_SOURCES}
+    ${KTAG_FIXED_VECTOR_FEATURE_SOURCES}
 )
 
 target_compile_definitions(KDADK_feature_extract PRIVATE KDADK_BUILDING_DLL)
@@ -214,8 +215,8 @@ target_include_directories(KDADK_feature_extract
 )
 set_target_properties(KDADK_feature_extract PROPERTIES
     EXPORT_NAME feature_compat
-    BUILD_RPATH "$ORIGIN"
-    INSTALL_RPATH "$ORIGIN"
+    BUILD_RPATH "$ORIGIN;$ORIGIN/plugins"
+    INSTALL_RPATH "$ORIGIN;$ORIGIN/plugins"
 )
 
 # ============= Schema-aware inference layer =============

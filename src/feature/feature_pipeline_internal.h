@@ -5,6 +5,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #define KTAG_FEATURE_PIPELINE_INTERNAL_H
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "feature_view_internal.h"
@@ -16,6 +17,7 @@ struct ktag_feature_output {
   float *values = nullptr;
   uint32_t value_capacity = 0;
   std::vector<uint8_t> *written = nullptr;
+  std::unordered_map<std::string, std::string> *annotations = nullptr;
 };
 
 struct ktag_feature_pipeline_provider {
@@ -30,6 +32,7 @@ struct ktag_feature_pipeline {
   std::vector<ktag_feature_pipeline_provider> providers;
   std::vector<uint8_t> written_scratch;
   bool requires_flow_state_storage = false;
+  bool collect_annotations = false;
 };
 
 struct ktag_feature_flow_runtime {
@@ -38,6 +41,7 @@ struct ktag_feature_flow_runtime {
   std::vector<void *> flow_states;
   std::vector<uint8_t> flow_state_created;
   std::vector<uint8_t> provider_failed;
+  std::unordered_map<std::string, std::string> annotations;
   bool active = false;
 };
 

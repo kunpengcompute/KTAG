@@ -2692,11 +2692,12 @@ int ktag_demo_run_pipeline_internal(
     } else if (config.feature_only) {
       std::sort(feature_records.begin(), feature_records.end(),
                 ktag_demo_schema_feature_record_less);
-      success = output_format == ktag_demo_pipeline_output_format::csv
-                    ? ktag_demo_write_schema_feature_csv(
-                          output_file, schema.get(), feature_records, &error)
-                    : ktag_demo_write_schema_feature_json(
-                          output_file, schema.get(), feature_records, &error);
+      success = output_format == ktag_demo_pipeline_output_format::csv &&
+                ktag_demo_write_schema_feature_csv(output_file, schema.get(),
+                                                   feature_records, &error);
+      if (output_format != ktag_demo_pipeline_output_format::csv) {
+        error = "Schema feature extraction currently requires CSV output";
+      }
     } else {
       std::sort(predictions.begin(), predictions.end(), prediction_less);
       success = distributed_backend

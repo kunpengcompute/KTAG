@@ -146,9 +146,13 @@ bool valid_feature_config(const ktag_feature_config *config) {
       ktag_feature_schema_get_value_count(config->schema) == 0U) {
     return false;
   }
-  if (config->struct_size >= sizeof(*config) &&
+  if (config->struct_size >= offsetof(ktag_feature_config, collect_annotations) &&
       config->lifecycle_mode != KTAG_FEATURE_LIFECYCLE_MODERN &&
       config->lifecycle_mode != KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT) {
+    return false;
+  }
+  if (config->struct_size >= sizeof(*config) &&
+      config->collect_annotations > 1U) {
     return false;
   }
   return true;
@@ -406,7 +410,8 @@ ktag_status finish_flow(ktag_feature_context *context,
         flow->ip_fragment_first_packet_count;
     status = ktag_feature_batch_append_with_details_internal(
         output, &details, context->output_values.data(),
-        static_cast<uint32_t>(context->output_values.size()));
+        static_cast<uint32_t>(context->output_values.size()),
+        &flow->runtime.annotations);
     if (status == KTAG_SUCCESS) {
       ++context->stats.emitted_flows;
       if (legacy_identity) {
@@ -781,7 +786,12 @@ ktag_feature_create(const ktag_feature_config *config) {
       return nullptr;
     }
 
-    context->lifecycle_mode = config->struct_size >= sizeof(*config)
+    context->pipeline->collect_annotations =
+        config->struct_size >= sizeof(*config) &&
+        config->collect_annotations != 0U;
+
+    context->lifecycle_mode =
+        config->struct_size >= offsetof(ktag_feature_config, collect_annotations)
                                   ? config->lifecycle_mode
                                   : KTAG_FEATURE_LIFECYCLE_MODERN;
     context->flow_capacity =

@@ -510,7 +510,7 @@ bool validate_frozen_schema_selection(const ktag_demo_pipeline_config &config,
   if (!config.feature_order.empty()) {
     set_error(error,
               config.schema_name +
-                  " must use remove_features/add_features so its Traffic "
+                  " must use remove_features/add_features so its Built-in "
                   "and Proxy ordering remains auditable");
     return false;
   }

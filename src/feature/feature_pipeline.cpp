@@ -257,6 +257,7 @@ ktag_status ktag_feature_flow_runtime_create_with_key_internal(
     runtime->flow_states.clear();
     runtime->flow_state_created.clear();
     runtime->provider_failed.clear();
+    runtime->annotations.clear();
     runtime->active = true;
     if (!pipeline->requires_flow_state_storage) {
       return KTAG_SUCCESS;
@@ -373,6 +374,9 @@ ktag_feature_flow_runtime_finish_internal(ktag_feature_flow_runtime *runtime,
     writer.values = output;
     writer.value_capacity = output_capacity;
     writer.written = &written;
+    writer.annotations = runtime->pipeline->collect_annotations
+                             ? &runtime->annotations
+                             : nullptr;
 
     ktag_status result = KTAG_SUCCESS;
     for (size_t index = 0; index < runtime->pipeline->providers.size();
@@ -383,12 +387,22 @@ ktag_feature_flow_runtime_finish_internal(ktag_feature_flow_runtime *runtime,
         fill_provider_zero(provider, &writer);
         continue;
       }
+      std::unique_ptr<std::unordered_map<std::string, std::string>>
+          annotations_before;
+      if (writer.annotations != nullptr) {
+        annotations_before = std::make_unique<
+            std::unordered_map<std::string, std::string>>(
+            *writer.annotations);
+      }
       const ktag_status callback_status =
           provider.registration.callbacks.flow_finish(
               provider.provider_state, flow_state_at(runtime, index),
               &runtime->flow, &writer);
       if (callback_status != KTAG_SUCCESS ||
           !provider_outputs_complete(provider, writer)) {
+        if (writer.annotations != nullptr) {
+          *writer.annotations = std::move(*annotations_before);
+        }
         if (should_fill_zero(provider)) {
           fill_provider_zero(provider, &writer);
           continue;
@@ -418,6 +432,7 @@ void ktag_feature_flow_runtime_destroy_internal(
     ktag_feature_flow_runtime *runtime) {
   destroy_flow_states(runtime);
   if (runtime != nullptr) {
+    runtime->annotations.clear();
     runtime->pipeline = nullptr;
     runtime->flow = {};
   }
@@ -457,6 +472,36 @@ KTAG_API ktag_status ktag_feature_output_set(ktag_feature_output *output,
             output->values + descriptor.value_offset);
   (*output->written)[descriptor_index] = 1U;
   return KTAG_SUCCESS;
+}
+
+KTAG_API uint32_t
+ktag_feature_output_annotations_enabled(const ktag_feature_output *output) {
+  return output != nullptr && output->annotations != nullptr ? 1U : 0U;
+}
+
+KTAG_API ktag_status ktag_feature_output_set_annotation(
+    ktag_feature_output *output, const char *key, const char *value) {
+  if (output == nullptr || output->current_provider_id == nullptr ||
+      key == nullptr || value == nullptr) {
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
+  if (output->annotations == nullptr) {
+    return KTAG_ERROR_NOT_SUPPORTED;
+  }
+  const size_t key_length = std::strlen(key);
+  const size_t value_length = std::strlen(value);
+  if (key_length == 0U || key_length > KTAG_FEATURE_ANNOTATION_KEY_MAX_LENGTH ||
+      value_length > KTAG_FEATURE_ANNOTATION_VALUE_MAX_LENGTH) {
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
+  try {
+    const auto inserted = output->annotations->emplace(key, value);
+    return inserted.second ? KTAG_SUCCESS : KTAG_ERROR_INVALID_STATE;
+  } catch (const std::bad_alloc &) {
+    return KTAG_ERROR_OUT_OF_MEMORY;
+  } catch (...) {
+    return KTAG_ERROR_INTERNAL;
+  }
 }
 
 } // extern "C"

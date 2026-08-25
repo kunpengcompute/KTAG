@@ -27,6 +27,15 @@ target_link_libraries(ktag_traffic_features PRIVATE
     ktag_feature
 )
 
+# The established fixed-vector API now executes these Providers directly.
+# Keeping the dependency here avoids teaching the public demo about Provider
+# registration or changing its existing extraction flow.
+if(TARGET KDADK_feature_extract)
+    target_link_libraries(KDADK_feature_extract PRIVATE
+        ktag_traffic_features
+    )
+endif()
+
 set_target_properties(ktag_traffic_features PROPERTIES
     EXPORT_NAME traffic_features
     CXX_STANDARD 17

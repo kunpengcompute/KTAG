@@ -12,6 +12,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <unordered_set>
 
 #include "feature/traffic_contract.h"
+#include "ktag_traffic_features.h"
 #include "traffic_provider_common.h"
 
 namespace ktag_traffic_features {
@@ -168,6 +169,17 @@ void update_crc(char value, uint16_t *crc) {
   }
 }
 
+std::string rawbow_text(const rawbow_flow_state &state) {
+  std::string text;
+  for (uint32_t index = 0U; index < state.count; ++index) {
+    if (!text.empty()) {
+      text.push_back('_');
+    }
+    text.append(state.tokens[index]);
+  }
+  return text;
+}
+
 ktag_status flow_create(void *, const ktag_flow_view *, void **flow_state) {
   if (flow_state == nullptr) {
     return KTAG_ERROR_INVALID_ARGUMENT;
@@ -210,8 +222,16 @@ ktag_status flow_finish(void *, void *flow_state, const ktag_flow_view *flow,
     histogram[crc % histogram.size()] +=
         KEYWORDS.count(state->tokens[index]) != 0U ? KEYWORD_WEIGHT : 1.0F;
   }
-  return set_optional(output, KTAG_RAWBOW_FEATURES[0U], histogram.data(),
-                      static_cast<uint32_t>(histogram.size()));
+  const ktag_status feature_status =
+      set_optional(output, KTAG_RAWBOW_FEATURES[0U], histogram.data(),
+                   static_cast<uint32_t>(histogram.size()));
+  if (feature_status != KTAG_SUCCESS ||
+      ktag_feature_output_annotations_enabled(output) == 0U) {
+    return feature_status;
+  }
+  const std::string text = rawbow_text(*state);
+  return ktag_feature_output_set_annotation(
+      output, KTAG_TRAFFIC_RAWBOW_ANNOTATION, text.c_str());
 }
 
 void flow_destroy(void *, void *flow_state) {

@@ -1492,39 +1492,6 @@ TEST(KTAGDemoSchemaFeaturePipeline, FlushesSameApplicationCsvInAllModes)
     std::remove(pcap_path.c_str());
 }
 
-TEST(KTAGDemoSchemaFeaturePipeline, WritesApplicationJson)
-{
-    ktag_demo_pipeline_config config;
-    config.enabled = true;
-    config.feature_only = true;
-    config.mode = ktag_demo_pipeline_mode::single_thread;
-    config.feature_threads = 1U;
-    config.inference_threads = 1U;
-    config.lifecycle_mode = ktag_demo_feature_lifecycle_mode::modern;
-    config.plugin_paths = {TRAFFIC_PLUGIN};
-
-    const std::string pcap_path = write_test_pcap();
-    const char *pcap_files[] = {pcap_path.c_str()};
-    const std::string output_path =
-        "/tmp/ktag_schema_pipeline_" + std::to_string(getpid()) + ".json";
-    ASSERT_EQ(
-        0,
-        ktag_demo_run_pipeline(
-            config, "functest", pcap_files, 1, nullptr,
-            output_path.c_str(), ktag_demo_pipeline_output_format::json));
-
-    const std::string json = read_text_file(output_path);
-    ASSERT_FALSE(json.empty());
-    EXPECT_EQ('[', json.front());
-    EXPECT_NE(std::string::npos, json.find("\"ip_version\": 4"));
-    EXPECT_NE(std::string::npos, json.find("\"src_ip\": \"10.0.0.1\""));
-    EXPECT_NE(std::string::npos, json.find("\"features\": ["));
-    EXPECT_EQ(']', json[json.find_last_not_of("\r\n")]);
-
-    std::remove(output_path.c_str());
-    std::remove(pcap_path.c_str());
-}
-
 TEST(KTAGDemoSchemaFeaturePipeline, FlushesTruncatedPcapInAllModes)
 {
     struct mode_case {

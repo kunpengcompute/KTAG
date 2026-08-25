@@ -24,6 +24,8 @@ extern "C" {
 #define KTAG_FEATURE_DEFAULT_TCP_IDLE_TIMEOUT_US 300000000ULL
 #define KTAG_FEATURE_DEFAULT_UDP_IDLE_TIMEOUT_US 30000000ULL
 #define KTAG_FEATURE_DEFAULT_UDP_PACKET_LIMIT 100U
+#define KTAG_FEATURE_ANNOTATION_KEY_MAX_LENGTH 255U
+#define KTAG_FEATURE_ANNOTATION_VALUE_MAX_LENGTH 4095U
 
 /* Number of values written by the legacy CSV/model contract. */
 #define KTAG_LEGACY_V1_VALUE_COUNT 354U
@@ -238,6 +240,8 @@ typedef struct {
   uint32_t udp_packet_limit;
   uint32_t domain_authority_lookup_on_miss;
   ktag_feature_lifecycle_mode lifecycle_mode;
+  /* Auxiliary Provider text for diagnostics; never enters model input. */
+  uint32_t collect_annotations;
 } ktag_feature_config;
 
 typedef struct {
@@ -424,6 +428,13 @@ KTAG_API ktag_status ktag_feature_output_set(ktag_feature_output *output,
                                              const float *values,
                                              uint32_t value_count);
 
+/* Optional diagnostic text is collected only when Feature Config enables it. */
+KTAG_API uint32_t
+ktag_feature_output_annotations_enabled(const ktag_feature_output *output);
+
+KTAG_API ktag_status ktag_feature_output_set_annotation(
+    ktag_feature_output *output, const char *key, const char *value);
+
 /* Read-only flow view accessors. Returned strings are borrowed. */
 KTAG_API uint64_t ktag_flow_view_get_flow_id(const ktag_flow_view *flow);
 
@@ -494,6 +505,11 @@ ktag_feature_batch_get_record(const ktag_feature_batch *batch, uint32_t index,
 KTAG_API ktag_status ktag_feature_batch_get_record_details(
     const ktag_feature_batch *batch, uint32_t index,
     ktag_feature_record_details *details);
+
+/* Returned text is borrowed until the batch is mutated or destroyed. */
+KTAG_API ktag_status ktag_feature_batch_get_annotation(
+    const ktag_feature_batch *batch, uint32_t index, const char *key,
+    const char **value);
 
 #ifdef __cplusplus
 }

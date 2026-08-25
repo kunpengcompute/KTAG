@@ -1188,7 +1188,7 @@ TEST(KTAGFeatureContext, CapacityUdpAndTcpExpireFlushAndThreadOwnership)
  * of the 354 Legacy V1 values. Representative-value tests cannot replace this
  * differential check.
  */
-TEST(KTAGFeatureContext, LegacySchemaMatchesCompatibilityExtractor)
+TEST(KTAGFeatureContext, FixedVectorApiMatchesSlottedTrafficSchema)
 {
     ktag_feature_registry *registry = ktag_feature_registry_create();
     ktag_feature_schema *schema = ktag_feature_schema_create_legacy_v1();
@@ -1198,7 +1198,8 @@ TEST(KTAGFeatureContext, LegacySchemaMatchesCompatibilityExtractor)
         KTAG_SUCCESS,
         ktag_traffic_features_register(registry));
     ktag_feature_context *context = make_context(
-        schema, registry, 8U, 100U, 1000U, 1000U);
+        schema, registry, 8U, 100U, 1000U, 1000U, nullptr,
+        KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT);
     ktag_feature_batch *batch = ktag_feature_batch_create(schema, 1U);
     feature_extractor *legacy = extractor_init(DLT_EN10MB);
     ASSERT_NE(nullptr, context);

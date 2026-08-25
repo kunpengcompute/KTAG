@@ -6,12 +6,15 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 #include <memory>
 #include <new>
+#include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 struct ktag_feature_record_storage {
   ktag_feature_record_details details{};
   std::vector<float> values;
+  std::unique_ptr<std::unordered_map<std::string, std::string>> annotations;
 };
 
 struct ktag_feature_batch {
@@ -133,11 +136,32 @@ KTAG_API ktag_status ktag_feature_batch_get_record_details(
   return KTAG_SUCCESS;
 }
 
+KTAG_API ktag_status ktag_feature_batch_get_annotation(
+    const ktag_feature_batch *batch, uint32_t index, const char *key,
+    const char **value) {
+  if (batch == nullptr || key == nullptr || value == nullptr ||
+      index >= batch->records.size()) {
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
+  *value = nullptr;
+  const auto &annotations = batch->records[index].annotations;
+  if (!annotations) {
+    return KTAG_ERROR_NOT_FOUND;
+  }
+  const auto position = annotations->find(key);
+  if (position == annotations->cend()) {
+    return KTAG_ERROR_NOT_FOUND;
+  }
+  *value = position->second.c_str();
+  return KTAG_SUCCESS;
+}
+
 } // extern "C"
 
 ktag_status ktag_feature_batch_append_with_details_internal(
     ktag_feature_batch *batch, const ktag_feature_record_details *details,
-    const float *values, uint32_t value_count) {
+    const float *values, uint32_t value_count,
+    const std::unordered_map<std::string, std::string> *annotations) {
   if (batch == nullptr || details == nullptr || values == nullptr ||
       details->struct_size < sizeof(ktag_feature_record_details) ||
       details->api_version != KTAG_API_VERSION ||
@@ -152,6 +176,10 @@ ktag_status ktag_feature_batch_append_with_details_internal(
     ktag_feature_record_storage record;
     record.details = *details;
     record.values.assign(values, values + value_count);
+    if (annotations != nullptr && !annotations->empty()) {
+      record.annotations = std::make_unique<
+          std::unordered_map<std::string, std::string>>(*annotations);
+    }
     batch->records.push_back(std::move(record));
     return KTAG_SUCCESS;
   } catch (const std::bad_alloc &) {

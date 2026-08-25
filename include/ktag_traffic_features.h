@@ -22,6 +22,8 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 extern "C" {
 #endif
 
+#define KTAG_TRAFFIC_RAWBOW_ANNOTATION "traffic.rawbow.text"
+
 /* Direct registration for statically linked hosts and functional tests.
  * Dynamic hosts should load the plugin through ktag_feature_plugin_query. */
 KTAG_TRAFFIC_FEATURES_API ktag_status ktag_traffic_features_register(
