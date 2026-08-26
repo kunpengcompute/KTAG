@@ -10,7 +10,9 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <stdlib.h>
 #include <string.h>
 #include <netinet/in.h>
-#include "process_feature.h"
+#include "domain_name_hash.h"
+#include "feature_extract.h"
+#include "flow_hash.h"
 #include "kdadk_export.h"
 #include "ktag_feature.h"
 

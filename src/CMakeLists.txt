@@ -183,17 +183,14 @@ set_target_properties(ktag_feature PROPERTIES
 )
 
 # Established fixed-vector public API. Its extraction entry points execute the
-# same Traffic Providers as the Schema API. The old low-level symbols remain
-# in this target temporarily so their independent removal can be reviewed and
-# tested without changing the demo-facing API at the same time.
+# same Traffic Providers as the Schema API. Keep the old low-level algorithms
+# available until their behavior has been compared independently.
 set(KTAG_FIXED_VECTOR_FEATURE_SOURCES
-    ${PROJECT_SOURCE_DIR}/src/capture/dns_parser.cpp
+    ${PROJECT_SOURCE_DIR}/src/kdadk_feature_extract.cpp
     ${PROJECT_SOURCE_DIR}/src/decode.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
     ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
-    ${PROJECT_SOURCE_DIR}/src/legacy/process_feature.cpp
-    ${PROJECT_SOURCE_DIR}/src/kdadk_feature_extract.cpp
 )
 add_library(KDADK_feature_extract SHARED
     ${KTAG_FIXED_VECTOR_FEATURE_SOURCES}

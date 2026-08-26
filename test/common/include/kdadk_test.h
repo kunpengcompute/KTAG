@@ -13,7 +13,6 @@
 #include <vector>
 #include <dlfcn.h>
 #include <gtest/gtest.h>
-#include "process_feature.h"
 #include <math.h>
 #include <filesystem>
 #include "domain_name_hash.h"
@@ -96,6 +95,15 @@ const int FLOW_IS_FINISHED = 1;
 const int FORCE_CLOSE = 1;
 const int NORMAL_CLOSE = 0;
 const int PARAMETERS_NUM = 2;
+
+typedef struct {
+    flow_hash *hash_table;
+    domain_name_hash *domain_name_table;
+    std::string feature_csv_file;
+    int link_type;
+    std::vector<std::vector<float>> *data;
+    std::vector<std::string> *rawbow;
+} pcap_handler_parameters;
 
 typedef struct {
     const u_char *packet;
