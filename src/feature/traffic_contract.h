@@ -239,8 +239,14 @@ inline constexpr provider_catalog KTAG_RAWBOW_CATALOG =
     make_catalog(KTAG_RAWBOW_PROVIDER_ID, KTAG_RAWBOW_PROVIDER_VERSION,
                  KTAG_RAWBOW_FEATURES);
 
+/*
+ * The application Schema catalog contains only the established 354-value
+ * contract.  It is deliberately separate from the set of Providers exported
+ * by the Traffic Feature plugin: new Providers may be registered for custom
+ * Schemas without changing or removing any value in this baseline Schema.
+ */
 inline constexpr std::array<const provider_catalog *, 11U>
-    KTAG_TRAFFIC_PROVIDER_CATALOG{{
+    KTAG_APPLICATION_SCHEMA_CATALOG{{
         &KTAG_METADATA_CATALOG,
         &KTAG_TUPLE_CATALOG,
         &KTAG_SEND_COUNTERS_CATALOG,

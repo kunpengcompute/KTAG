@@ -43,7 +43,7 @@ KTAG_API ktag_feature_schema *ktag_feature_schema_create_legacy_v1(void) {
   }
 
   for (const auto *catalog :
-       ktag_traffic_features::KTAG_TRAFFIC_PROVIDER_CATALOG) {
+       ktag_traffic_features::KTAG_APPLICATION_SCHEMA_CATALOG) {
     if (catalog == nullptr || !add_catalog(schema, *catalog)) {
       ktag_feature_schema_destroy(schema);
       return nullptr;

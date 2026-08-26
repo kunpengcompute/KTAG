@@ -16,39 +16,53 @@ namespace {
 using register_provider_fn =
     ktag_status (*)(ktag_feature_registry *registry);
 
+struct provider_entry {
+  const char *provider_id;
+  register_provider_fn register_provider;
+};
+
 ktag_status register_traffic_providers(void *,
                                        ktag_feature_registry *registry) {
   if (registry == nullptr) {
     return KTAG_ERROR_INVALID_ARGUMENT;
   }
 
-  const std::array<register_provider_fn, 11U> register_provider{{
-      ktag_traffic_features::register_metadata_provider,
-      ktag_traffic_features::register_tuple_provider,
-      ktag_traffic_features::register_send_counters_provider,
-      ktag_traffic_features::register_send_header_provider,
-      ktag_traffic_features::register_send_payload_provider,
-      ktag_traffic_features::register_send_interval_provider,
-      ktag_traffic_features::register_receive_counters_provider,
-      ktag_traffic_features::register_receive_header_provider,
-      ktag_traffic_features::register_receive_payload_provider,
-      ktag_traffic_features::register_receive_interval_provider,
-      ktag_traffic_features::register_rawbow_provider,
+  const std::array<provider_entry, 11U> providers{{
+      {ktag_traffic_features::KTAG_METADATA_PROVIDER_ID,
+       ktag_traffic_features::register_metadata_provider},
+      {ktag_traffic_features::KTAG_TUPLE_PROVIDER_ID,
+       ktag_traffic_features::register_tuple_provider},
+      {ktag_traffic_features::KTAG_SEND_COUNTERS_PROVIDER_ID,
+       ktag_traffic_features::register_send_counters_provider},
+      {ktag_traffic_features::KTAG_SEND_HEADER_PROVIDER_ID,
+       ktag_traffic_features::register_send_header_provider},
+      {ktag_traffic_features::KTAG_SEND_PAYLOAD_PROVIDER_ID,
+       ktag_traffic_features::register_send_payload_provider},
+      {ktag_traffic_features::KTAG_SEND_INTERVAL_PROVIDER_ID,
+       ktag_traffic_features::register_send_interval_provider},
+      {ktag_traffic_features::KTAG_RECEIVE_COUNTERS_PROVIDER_ID,
+       ktag_traffic_features::register_receive_counters_provider},
+      {ktag_traffic_features::KTAG_RECEIVE_HEADER_PROVIDER_ID,
+       ktag_traffic_features::register_receive_header_provider},
+      {ktag_traffic_features::KTAG_RECEIVE_PAYLOAD_PROVIDER_ID,
+       ktag_traffic_features::register_receive_payload_provider},
+      {ktag_traffic_features::KTAG_RECEIVE_INTERVAL_PROVIDER_ID,
+       ktag_traffic_features::register_receive_interval_provider},
+      {ktag_traffic_features::KTAG_RAWBOW_PROVIDER_ID,
+       ktag_traffic_features::register_rawbow_provider},
   }};
 
   size_t registered_count = 0U;
-  for (; registered_count < register_provider.size(); ++registered_count) {
-    const ktag_status status = register_provider[registered_count](registry);
+  for (; registered_count < providers.size(); ++registered_count) {
+    const ktag_status status =
+        providers[registered_count].register_provider(registry);
     if (status == KTAG_SUCCESS) {
       continue;
     }
     while (registered_count > 0U) {
       --registered_count;
       (void)ktag_feature_registry_unregister(
-          registry,
-          ktag_traffic_features::
-              KTAG_TRAFFIC_PROVIDER_CATALOG[registered_count]
-                  ->provider_id);
+          registry, providers[registered_count].provider_id);
     }
     return status;
   }
