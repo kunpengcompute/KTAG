@@ -25,20 +25,19 @@ struct feature_runtime {
     ktag_feature_statistics statistics_baseline{};
 };
 
-feature_runtime *runtime_of(feature_extractor *extractor)
-{
-    return extractor == nullptr ? nullptr :
-        static_cast<feature_runtime *>(extractor->legacy_feature_pipeline);
+feature_runtime *runtime_of(feature_extractor *extractor) {
+    return extractor == nullptr ? nullptr
+                                : static_cast<feature_runtime *>(
+                                      extractor->legacy_feature_pipeline);
 }
 
-const feature_runtime *runtime_of(const feature_extractor *extractor)
-{
-    return extractor == nullptr ? nullptr :
-        static_cast<const feature_runtime *>(extractor->legacy_feature_pipeline);
+const feature_runtime *runtime_of(const feature_extractor *extractor) {
+    return extractor == nullptr ? nullptr
+                                : static_cast<const feature_runtime *>(
+                                      extractor->legacy_feature_pipeline);
 }
 
-void destroy_runtime(feature_runtime *runtime)
-{
+void destroy_runtime(feature_runtime *runtime) {
     if (runtime == nullptr) {
         return;
     }
@@ -47,8 +46,7 @@ void destroy_runtime(feature_runtime *runtime)
     delete runtime;
 }
 
-feature_runtime *create_runtime(ktag_domain_store *domain_store)
-{
+feature_runtime *create_runtime(ktag_domain_store *domain_store) {
     ktag_feature_registry *registry = ktag_feature_registry_create();
     ktag_feature_schema *schema = ktag_feature_schema_create_legacy_v1();
     if (registry == nullptr || schema == nullptr ||
@@ -89,18 +87,16 @@ feature_runtime *create_runtime(ktag_domain_store *domain_store)
     return runtime;
 }
 
-bool valid_extractor(const feature_extractor *extractor)
-{
+bool valid_extractor(const feature_extractor *extractor) {
     const feature_runtime *runtime = runtime_of(extractor);
     return extractor != nullptr && extractor->initialized != 0 &&
-        runtime != nullptr && runtime->context != nullptr &&
-        runtime->batch != nullptr;
+           runtime != nullptr && runtime->context != nullptr &&
+           runtime->batch != nullptr;
 }
 
 int copy_record(const ktag_feature_batch *batch, uint32_t index,
                 feature_vector *features, rawbow *rawbows,
-                bool extract_rawbow)
-{
+                bool extract_rawbow) {
     if (batch == nullptr || features == nullptr) {
         return EXTRACTOR_ERROR;
     }
@@ -133,27 +129,24 @@ int copy_record(const ktag_feature_batch *batch, uint32_t index,
         return EXTRACTOR_ERROR;
     }
 
-    const size_t length = std::min(
-        std::strlen(text), static_cast<size_t>(RAWBOW_MAX_LEN - 1U));
+    const size_t length =
+        std::min(std::strlen(text), static_cast<size_t>(RAWBOW_MAX_LEN - 1U));
     std::memcpy(rawbows->rawbow, text, length);
     rawbows->rawbow[length] = '\0';
     rawbows->len = static_cast<uint32_t>(length);
     return EXTRACTOR_SUCCESS;
 }
 
-uint64_t counter_delta(uint64_t value, uint64_t baseline)
-{
+uint64_t counter_delta(uint64_t value, uint64_t baseline) {
     return value >= baseline ? value - baseline : 0U;
 }
 
-uint32_t narrow_counter(uint64_t value)
-{
-    return static_cast<uint32_t>(std::min<uint64_t>(
-        value, std::numeric_limits<uint32_t>::max()));
+uint32_t narrow_counter(uint64_t value) {
+    return static_cast<uint32_t>(
+        std::min<uint64_t>(value, std::numeric_limits<uint32_t>::max()));
 }
 
-int refresh_public_statistics(feature_extractor *extractor)
-{
+int refresh_public_statistics(feature_extractor *extractor) {
     feature_runtime *runtime = runtime_of(extractor);
     if (runtime == nullptr) {
         return EXTRACTOR_ERROR;
@@ -180,8 +173,7 @@ int refresh_public_statistics(feature_extractor *extractor)
 }
 
 feature_extractor *extractor_init_internal(int link_type,
-                                           ktag_domain_store *domain_store)
-{
+                                           ktag_domain_store *domain_store) {
     if (link_type != DLT_EN10MB && link_type != DLT_LINUX_SLL) {
         std::fprintf(stderr, "Error: Unsupported link type %d\n", link_type);
         return nullptr;
@@ -208,10 +200,9 @@ feature_extractor *extractor_init_internal(int link_type,
 
 int process_packet_internal(feature_extractor *extractor,
                             const unsigned char *packet, uint32_t packet_len,
-                            const timeval *timestamp,
-                            feature_vector *features, rawbow *rawbows,
-                            int *has_feature, bool extract_rawbow)
-{
+                            const timeval *timestamp, feature_vector *features,
+                            rawbow *rawbows, int *has_feature,
+                            bool extract_rawbow) {
     if (!valid_extractor(extractor) || packet == nullptr || packet_len == 0U ||
         timestamp == nullptr || timestamp->tv_sec < 0 ||
         timestamp->tv_usec < 0 || timestamp->tv_usec > 999999 ||
@@ -253,27 +244,23 @@ int process_packet_internal(feature_extractor *extractor,
     if (count == 0U) {
         return EXTRACTOR_SUCCESS;
     }
-    if (count != 1U ||
-        copy_record(runtime->batch, 0U, features, rawbows, extract_rawbow) !=
-            EXTRACTOR_SUCCESS) {
+    if (count != 1U || copy_record(runtime->batch, 0U, features, rawbows,
+                                   extract_rawbow) != EXTRACTOR_SUCCESS) {
         return EXTRACTOR_ERROR;
     }
 
-    extractor->next_flow_id =
-        static_cast<uint64_t>(features->features[0]) + 1U;
+    extractor->next_flow_id = static_cast<uint64_t>(features->features[0]) + 1U;
     *has_feature = 1;
     return EXTRACTOR_SUCCESS;
 }
 
 int finalize_internal(feature_extractor *extractor,
                       feature_vector_list *features, rawbow_list *rawbows,
-                      bool extract_rawbow)
-{
+                      bool extract_rawbow) {
     if (!valid_extractor(extractor) || features == nullptr ||
         features->vectors == nullptr || features->capacity == 0U ||
-        (extract_rawbow &&
-         (rawbows == nullptr || rawbows->rawbows == nullptr ||
-          rawbows->capacity == 0U))) {
+        (extract_rawbow && (rawbows == nullptr || rawbows->rawbows == nullptr ||
+                            rawbows->capacity == 0U))) {
         return EXTRACTOR_ERROR;
     }
 
@@ -307,8 +294,9 @@ int finalize_internal(feature_extractor *extractor,
     }
 
     if (copied != 0U) {
-        extractor->next_flow_id = static_cast<uint64_t>(
-            features->vectors[copied - 1U].features[0]) + 1U;
+        extractor->next_flow_id =
+            static_cast<uint64_t>(features->vectors[copied - 1U].features[0]) +
+            1U;
     }
     if (available > capacity) {
         std::fprintf(stderr,
@@ -324,52 +312,49 @@ int finalize_internal(feature_extractor *extractor,
 
 extern "C" {
 
-KDADK_API feature_extractor *extractor_init(int link_type)
-{
+KDADK_API feature_extractor *extractor_init(int link_type) {
     return extractor_init_internal(link_type, nullptr);
 }
 
-KDADK_API feature_extractor *extractor_init_with_domain_store(
-    int link_type, ktag_domain_store *domain_store)
-{
-    return domain_store == nullptr ? nullptr :
-        extractor_init_internal(link_type, domain_store);
+KDADK_API feature_extractor *
+extractor_init_with_domain_store(int link_type,
+                                 ktag_domain_store *domain_store) {
+    return domain_store == nullptr
+               ? nullptr
+               : extractor_init_internal(link_type, domain_store);
 }
 
 KDADK_API int process_packet(feature_extractor *extractor,
-                             const unsigned char *packet,
-                             uint32_t packet_len, const timeval *timestamp,
-                             feature_vector *features, int *has_feature)
-{
+                             const unsigned char *packet, uint32_t packet_len,
+                             const timeval *timestamp, feature_vector *features,
+                             int *has_feature) {
     return process_packet_internal(extractor, packet, packet_len, timestamp,
                                    features, nullptr, has_feature, false);
 }
 
-KDADK_API int process_packet_with_rawbow(
-    feature_extractor *extractor, const unsigned char *packet,
-    uint32_t packet_len, const timeval *timestamp, feature_vector *features,
-    rawbow *rawbows, int *has_feature)
-{
+KDADK_API int process_packet_with_rawbow(feature_extractor *extractor,
+                                         const unsigned char *packet,
+                                         uint32_t packet_len,
+                                         const timeval *timestamp,
+                                         feature_vector *features,
+                                         rawbow *rawbows, int *has_feature) {
     return process_packet_internal(extractor, packet, packet_len, timestamp,
                                    features, rawbows, has_feature, true);
 }
 
 KDADK_API int extractor_finalize(feature_extractor *extractor,
-                                 feature_vector_list *features)
-{
+                                 feature_vector_list *features) {
     return finalize_internal(extractor, features, nullptr, false);
 }
 
 KDADK_API int extractor_finalize_with_rawbow(feature_extractor *extractor,
                                              feature_vector_list *features,
-                                             rawbow_list *rawbows)
-{
+                                             rawbow_list *rawbows) {
     return finalize_internal(extractor, features, rawbows, true);
 }
 
 KDADK_API int extractor_get_statistics(feature_extractor *extractor,
-                                       statistics *stats)
-{
+                                       statistics *stats) {
     if (!valid_extractor(extractor) || stats == nullptr ||
         refresh_public_statistics(extractor) != EXTRACTOR_SUCCESS) {
         return EXTRACTOR_ERROR;
@@ -378,8 +363,7 @@ KDADK_API int extractor_get_statistics(feature_extractor *extractor,
     return EXTRACTOR_SUCCESS;
 }
 
-KDADK_API void extractor_reset_statistics(feature_extractor *extractor)
-{
+KDADK_API void extractor_reset_statistics(feature_extractor *extractor) {
     if (!valid_extractor(extractor)) {
         return;
     }
@@ -394,8 +378,7 @@ KDADK_API void extractor_reset_statistics(feature_extractor *extractor)
     }
 }
 
-KDADK_API void extractor_destroy(feature_extractor *extractor)
-{
+KDADK_API void extractor_destroy(feature_extractor *extractor) {
     if (extractor == nullptr) {
         return;
     }

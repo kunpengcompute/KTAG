@@ -14,17 +14,17 @@ inline constexpr uint32_t KTAG_LEGACY_HISTOGRAM_DIMENSION = 16U;
 inline constexpr uint32_t KTAG_LEGACY_RAWBOW_DIMENSION = 32U;
 
 struct feature_definition {
-  const char *feature_id;
-  const char *display_name;
-  uint32_t dimension;
+    const char *feature_id;
+    const char *display_name;
+    uint32_t dimension;
 };
 
 struct provider_catalog {
-  const char *provider_id;
-  const char *contract_provider_id;
-  uint32_t provider_version;
-  const feature_definition *features;
-  size_t feature_count;
+    const char *provider_id;
+    const char *contract_provider_id;
+    uint32_t provider_version;
+    const feature_definition *features;
+    size_t feature_count;
 };
 
 /*
@@ -32,8 +32,7 @@ struct provider_catalog {
  * complete historical vector. The catalog order is also the frozen Legacy V1
  * CSV order; changing it requires a new schema version.
  */
-inline constexpr char KTAG_METADATA_PROVIDER_ID[] =
-    "builtin.legacy.metadata";
+inline constexpr char KTAG_METADATA_PROVIDER_ID[] = "builtin.legacy.metadata";
 inline constexpr uint32_t KTAG_METADATA_PROVIDER_VERSION = 1U;
 inline constexpr char KTAG_TUPLE_PROVIDER_ID[] = "builtin.legacy.tuple";
 inline constexpr uint32_t KTAG_TUPLE_PROVIDER_VERSION = 1U;
@@ -84,42 +83,40 @@ inline constexpr std::array<feature_definition, 5U> KTAG_TUPLE_FEATURES{{
  * this avoids compiler-dependent aggregate initialization through macros.
  * The entry order below is the historical 354-value vector order.
  */
-inline constexpr std::array<feature_definition, 2U>
-    KTAG_SEND_COUNTERS_FEATURES{{
+inline constexpr std::array<feature_definition, 2U> KTAG_SEND_COUNTERS_FEATURES{
+    {
         {"traffic.send.byte_count", "send_byte_nums", 1U},
         {"traffic.send.packet_count", "send_packet_nums", 1U},
     }};
 
-inline constexpr std::array<feature_definition, 7U>
-    KTAG_SEND_HEADER_FEATURES{{
-        {"traffic.send.header.minimum", "send_hdr_min", 1U},
-        {"traffic.send.header.maximum", "send_hdr_max", 1U},
-        {"traffic.send.header.mean", "send_hdr_mean", 1U},
-        {"traffic.send.header.variance", "send_hdr_var", 1U},
-        {"traffic.send.header.histogram.relative", "send_hdr_hist_rel",
-         KTAG_LEGACY_HISTOGRAM_DIMENSION},
-        {"traffic.send.header.histogram.absolute", "send_hdr_hist_abs",
-         KTAG_LEGACY_HISTOGRAM_DIMENSION},
-        {"traffic.send.header.histogram.normalized", "send_hdr_hist_nor",
-         KTAG_LEGACY_HISTOGRAM_DIMENSION},
-    }};
+inline constexpr std::array<feature_definition, 7U> KTAG_SEND_HEADER_FEATURES{{
+    {"traffic.send.header.minimum", "send_hdr_min", 1U},
+    {"traffic.send.header.maximum", "send_hdr_max", 1U},
+    {"traffic.send.header.mean", "send_hdr_mean", 1U},
+    {"traffic.send.header.variance", "send_hdr_var", 1U},
+    {"traffic.send.header.histogram.relative", "send_hdr_hist_rel",
+     KTAG_LEGACY_HISTOGRAM_DIMENSION},
+    {"traffic.send.header.histogram.absolute", "send_hdr_hist_abs",
+     KTAG_LEGACY_HISTOGRAM_DIMENSION},
+    {"traffic.send.header.histogram.normalized", "send_hdr_hist_nor",
+     KTAG_LEGACY_HISTOGRAM_DIMENSION},
+}};
 
-inline constexpr std::array<feature_definition, 7U>
-    KTAG_SEND_PAYLOAD_FEATURES{{
-        {"traffic.send.payload.minimum", "send_pld_min", 1U},
-        {"traffic.send.payload.maximum", "send_pld_max", 1U},
-        {"traffic.send.payload.mean", "send_pld_mean", 1U},
-        {"traffic.send.payload.variance", "send_pld_var", 1U},
-        {"traffic.send.payload.histogram.relative", "send_pld_hist_rel",
-         KTAG_LEGACY_HISTOGRAM_DIMENSION},
-        {"traffic.send.payload.histogram.absolute", "send_pld_hist_abs",
-         KTAG_LEGACY_HISTOGRAM_DIMENSION},
-        {"traffic.send.payload.histogram.normalized", "send_pld_hist_nor",
-         KTAG_LEGACY_HISTOGRAM_DIMENSION},
-    }};
+inline constexpr std::array<feature_definition, 7U> KTAG_SEND_PAYLOAD_FEATURES{{
+    {"traffic.send.payload.minimum", "send_pld_min", 1U},
+    {"traffic.send.payload.maximum", "send_pld_max", 1U},
+    {"traffic.send.payload.mean", "send_pld_mean", 1U},
+    {"traffic.send.payload.variance", "send_pld_var", 1U},
+    {"traffic.send.payload.histogram.relative", "send_pld_hist_rel",
+     KTAG_LEGACY_HISTOGRAM_DIMENSION},
+    {"traffic.send.payload.histogram.absolute", "send_pld_hist_abs",
+     KTAG_LEGACY_HISTOGRAM_DIMENSION},
+    {"traffic.send.payload.histogram.normalized", "send_pld_hist_nor",
+     KTAG_LEGACY_HISTOGRAM_DIMENSION},
+}};
 
-inline constexpr std::array<feature_definition, 7U>
-    KTAG_SEND_INTERVAL_FEATURES{{
+inline constexpr std::array<feature_definition, 7U> KTAG_SEND_INTERVAL_FEATURES{
+    {
         {"traffic.send.interval.minimum", "send_interval_min", 1U},
         {"traffic.send.interval.maximum", "send_interval_max", 1U},
         {"traffic.send.interval.mean", "send_interval_mean", 1U},
@@ -181,50 +178,39 @@ inline constexpr std::array<feature_definition, 7U>
     }};
 
 inline constexpr std::array<feature_definition, 1U> KTAG_RAWBOW_FEATURES{{
-    {"rawbow.crc_histogram", "raw_bow_crc_hist",
-     KTAG_LEGACY_RAWBOW_DIMENSION},
+    {"rawbow.crc_histogram", "raw_bow_crc_hist", KTAG_LEGACY_RAWBOW_DIMENSION},
 }};
 
 template <size_t FeatureCount>
-constexpr provider_catalog make_catalog(
-    const char *provider_id,
-    uint32_t provider_version,
-    const std::array<feature_definition, FeatureCount> &features,
-    const char *contract_provider_id = nullptr) {
-  return {provider_id,
-          contract_provider_id == nullptr ? provider_id : contract_provider_id,
-          provider_version, features.data(), features.size()};
+constexpr provider_catalog
+make_catalog(const char *provider_id, uint32_t provider_version,
+             const std::array<feature_definition, FeatureCount> &features,
+             const char *contract_provider_id = nullptr) {
+    return {provider_id,
+            contract_provider_id == nullptr ? provider_id
+                                            : contract_provider_id,
+            provider_version, features.data(), features.size()};
 }
 
 inline constexpr provider_catalog KTAG_METADATA_CATALOG =
     make_catalog(KTAG_METADATA_PROVIDER_ID, KTAG_METADATA_PROVIDER_VERSION,
                  KTAG_METADATA_FEATURES);
-inline constexpr provider_catalog KTAG_TUPLE_CATALOG =
-    make_catalog(KTAG_TUPLE_PROVIDER_ID, KTAG_TUPLE_PROVIDER_VERSION,
-                 KTAG_TUPLE_FEATURES);
-inline constexpr provider_catalog KTAG_SEND_COUNTERS_CATALOG =
-    make_catalog(KTAG_SEND_COUNTERS_PROVIDER_ID,
-                 KTAG_SEND_COUNTERS_PROVIDER_VERSION,
-                 KTAG_SEND_COUNTERS_FEATURES,
-                 KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
-inline constexpr provider_catalog KTAG_SEND_HEADER_CATALOG =
-    make_catalog(KTAG_SEND_HEADER_PROVIDER_ID,
-                 KTAG_SEND_HEADER_PROVIDER_VERSION,
-                 KTAG_SEND_HEADER_FEATURES,
-                 KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
-inline constexpr provider_catalog KTAG_SEND_PAYLOAD_CATALOG =
-    make_catalog(KTAG_SEND_PAYLOAD_PROVIDER_ID,
-                 KTAG_SEND_PAYLOAD_PROVIDER_VERSION,
-                 KTAG_SEND_PAYLOAD_FEATURES,
-                 KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
-inline constexpr provider_catalog KTAG_SEND_INTERVAL_CATALOG =
-    make_catalog(KTAG_SEND_INTERVAL_PROVIDER_ID,
-                 KTAG_SEND_INTERVAL_PROVIDER_VERSION,
-                 KTAG_SEND_INTERVAL_FEATURES,
-                 KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
+inline constexpr provider_catalog KTAG_TUPLE_CATALOG = make_catalog(
+    KTAG_TUPLE_PROVIDER_ID, KTAG_TUPLE_PROVIDER_VERSION, KTAG_TUPLE_FEATURES);
+inline constexpr provider_catalog KTAG_SEND_COUNTERS_CATALOG = make_catalog(
+    KTAG_SEND_COUNTERS_PROVIDER_ID, KTAG_SEND_COUNTERS_PROVIDER_VERSION,
+    KTAG_SEND_COUNTERS_FEATURES, KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
+inline constexpr provider_catalog KTAG_SEND_HEADER_CATALOG = make_catalog(
+    KTAG_SEND_HEADER_PROVIDER_ID, KTAG_SEND_HEADER_PROVIDER_VERSION,
+    KTAG_SEND_HEADER_FEATURES, KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
+inline constexpr provider_catalog KTAG_SEND_PAYLOAD_CATALOG = make_catalog(
+    KTAG_SEND_PAYLOAD_PROVIDER_ID, KTAG_SEND_PAYLOAD_PROVIDER_VERSION,
+    KTAG_SEND_PAYLOAD_FEATURES, KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
+inline constexpr provider_catalog KTAG_SEND_INTERVAL_CATALOG = make_catalog(
+    KTAG_SEND_INTERVAL_PROVIDER_ID, KTAG_SEND_INTERVAL_PROVIDER_VERSION,
+    KTAG_SEND_INTERVAL_FEATURES, KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
 inline constexpr provider_catalog KTAG_RECEIVE_COUNTERS_CATALOG = make_catalog(
-    KTAG_RECEIVE_COUNTERS_PROVIDER_ID,
-    KTAG_RECEIVE_COUNTERS_PROVIDER_VERSION,
+    KTAG_RECEIVE_COUNTERS_PROVIDER_ID, KTAG_RECEIVE_COUNTERS_PROVIDER_VERSION,
     KTAG_RECEIVE_COUNTERS_FEATURES, KTAG_TRAFFIC_STATISTICS_CONTRACT_ID);
 inline constexpr provider_catalog KTAG_RECEIVE_HEADER_CATALOG = make_catalog(
     KTAG_RECEIVE_HEADER_PROVIDER_ID, KTAG_RECEIVE_HEADER_PROVIDER_VERSION,
@@ -263,8 +249,8 @@ inline constexpr std::array<const provider_catalog *, 11U>
 inline constexpr uint32_t TRAFFIC_FEATURE_DESCRIPTOR_COUNT =
     1U + 5U + 2U + 7U + 7U + 7U + 2U + 7U + 7U + 7U + 1U;
 inline constexpr uint32_t TRAFFIC_FEATURE_VALUE_COUNT =
-    1U + 5U + 2U + (6U * (4U + 3U * KTAG_LEGACY_HISTOGRAM_DIMENSION)) +
-    2U + KTAG_LEGACY_RAWBOW_DIMENSION;
+    1U + 5U + 2U + (6U * (4U + 3U * KTAG_LEGACY_HISTOGRAM_DIMENSION)) + 2U +
+    KTAG_LEGACY_RAWBOW_DIMENSION;
 
 static_assert(TRAFFIC_FEATURE_DESCRIPTOR_COUNT == 53U,
               "Legacy V1 must expose exactly 53 feature descriptors");

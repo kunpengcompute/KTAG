@@ -34,13 +34,13 @@ struct ktag_feature_schema {
     bool frozen = false;
 };
 
-bool ktag_feature_descriptor_is_valid(const ktag_feature_descriptor *descriptor);
-ktag_status ktag_feature_schema_add_contract(
-    ktag_feature_schema *schema,
-    const ktag_feature_descriptor *descriptor,
-    const char *contract_provider_id);
-void ktag_feature_copy_descriptor(
-    const ktag_feature_descriptor_storage &source,
-    ktag_feature_descriptor *destination);
+bool ktag_feature_descriptor_is_valid(
+    const ktag_feature_descriptor *descriptor);
+ktag_status
+ktag_feature_schema_add_contract(ktag_feature_schema *schema,
+                                 const ktag_feature_descriptor *descriptor,
+                                 const char *contract_provider_id);
+void ktag_feature_copy_descriptor(const ktag_feature_descriptor_storage &source,
+                                  ktag_feature_descriptor *destination);
 
 #endif /* KTAG_FEATURE_SCHEMA_INTERNAL_H */

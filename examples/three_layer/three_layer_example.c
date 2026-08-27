@@ -11,45 +11,39 @@
 
 #include "ktag_capture.h"
 #include "ktag_feature.h"
-#include "ktag_traffic_features.h"
 #include "ktag_inference.h"
+#include "ktag_traffic_features.h"
 
-static int print_predictions(
-    ktag_inference_context *inference,
-    const ktag_feature_batch *features,
-    ktag_prediction_batch *predictions,
-    uint64_t *prediction_count)
-{
+static int print_predictions(ktag_inference_context *inference,
+                             const ktag_feature_batch *features,
+                             ktag_prediction_batch *predictions,
+                             uint64_t *prediction_count) {
     uint32_t index;
-    ktag_status status = ktag_inference_predict(
-        inference, features, predictions);
+    ktag_status status =
+        ktag_inference_predict(inference, features, predictions);
     if (status != KTAG_SUCCESS) {
         fprintf(stderr, "Inference failed: %s\n",
                 ktag_inference_get_last_error());
         return 0;
     }
 
-    for (index = 0U;
-         index < ktag_prediction_batch_get_count(predictions);
+    for (index = 0U; index < ktag_prediction_batch_get_count(predictions);
          ++index) {
         ktag_prediction_record record = {0};
-        status = ktag_prediction_batch_get_record(
-            predictions, index, &record);
+        status = ktag_prediction_batch_get_record(predictions, index, &record);
         if (status != KTAG_SUCCESS) {
             fprintf(stderr, "Could not read prediction %u\n", index);
             return 0;
         }
         printf("flow=%" PRIu64 " label=%" PRId64 " confidence=%.6f\n",
-               record.metadata.flow_id,
-               record.label,
+               record.metadata.flow_id, record.label,
                (double)record.confidence);
         ++(*prediction_count);
     }
     return 1;
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     int result = EXIT_FAILURE;
     uint64_t packet_count = 0U;
     uint64_t prediction_count = 0U;
@@ -71,8 +65,7 @@ int main(int argc, char **argv)
     schema = ktag_feature_schema_create_legacy_v1();
     registry = ktag_feature_registry_create();
     if (schema == NULL || registry == NULL ||
-        ktag_traffic_features_register(registry) !=
-            KTAG_SUCCESS) {
+        ktag_traffic_features_register(registry) != KTAG_SUCCESS) {
         fprintf(stderr, "Could not create the Legacy V1 feature contract\n");
         goto cleanup;
     }
@@ -166,8 +159,8 @@ int main(int argc, char **argv)
             goto cleanup;
         }
         if (ktag_feature_batch_get_count(features) != 0U &&
-            !print_predictions(
-                inference, features, predictions, &prediction_count)) {
+            !print_predictions(inference, features, predictions,
+                               &prediction_count)) {
             goto cleanup;
         }
     }
@@ -176,8 +169,7 @@ int main(int argc, char **argv)
         ktag_feature_statistics statistics = {0};
         statistics.struct_size = sizeof(statistics);
         statistics.api_version = KTAG_API_VERSION;
-        if (ktag_feature_get_statistics(feature, &statistics) !=
-                KTAG_SUCCESS ||
+        if (ktag_feature_get_statistics(feature, &statistics) != KTAG_SUCCESS ||
             ktag_feature_batch_reserve(features, statistics.active_flows) !=
                 KTAG_SUCCESS ||
             ktag_prediction_batch_reserve(
@@ -188,8 +180,8 @@ int main(int argc, char **argv)
     }
 
     if (ktag_feature_flush(feature, features) != KTAG_SUCCESS ||
-        !print_predictions(
-            inference, features, predictions, &prediction_count)) {
+        !print_predictions(inference, features, predictions,
+                           &prediction_count)) {
         fprintf(stderr, "Could not flush remaining flows\n");
         goto cleanup;
     }

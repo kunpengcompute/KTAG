@@ -24,13 +24,13 @@ struct ktag_feature_registry {
     std::vector<ktag_feature_provider_storage> providers;
 };
 
-const ktag_feature_provider_storage *ktag_feature_registry_find_provider_internal(
-    const ktag_feature_registry *registry,
-    const std::string &provider_id);
+const ktag_feature_provider_storage *
+ktag_feature_registry_find_provider_internal(
+    const ktag_feature_registry *registry, const std::string &provider_id);
 
-const ktag_feature_descriptor_storage *ktag_feature_registry_find_feature_internal(
-    const ktag_feature_registry *registry,
-    const std::string &feature_id,
+const ktag_feature_descriptor_storage *
+ktag_feature_registry_find_feature_internal(
+    const ktag_feature_registry *registry, const std::string &feature_id,
     const ktag_feature_provider_storage **provider);
 
 #endif /* KTAG_PROVIDER_REGISTRY_INTERNAL_H */

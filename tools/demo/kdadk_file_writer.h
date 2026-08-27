@@ -4,9 +4,9 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #ifndef KDADK_FILE_WRITER_H
 #define KDADK_FILE_WRITER_H
 
-#include <stdint.h>
 #include "kdadk_feature_extract.h"
 #include "kdadk_inference.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,8 +17,8 @@ typedef enum { FILE_FORMAT_CSV = 0, FILE_FORMAT_JSON = 1 } file_format;
 
 /* 写入模式 */
 typedef enum {
-    WRITE_MODE_FEATURES_ONLY = 0,   /* 只写特征 */
-    WRITE_MODE_WITH_PREDICTIONS = 1, /* 写特征+预测结果 */
+    WRITE_MODE_FEATURES_ONLY = 0,       /* 只写特征 */
+    WRITE_MODE_WITH_PREDICTIONS = 1,    /* 写特征+预测结果 */
     WRITE_MODE_FEATURES_WITH_RAWBOW = 2 /* 写特征+rawbow */
 } write_mode;
 
@@ -52,7 +52,8 @@ file_writer *writer_create(const file_writer_config *config);
  * @param features 特征向量列表
  * @return WRITER_SUCCESS表示成功，WRITER_ERROR表示失败
  */
-int writer_write_features(file_writer *writer, const feature_vector_list *features);
+int writer_write_features(file_writer *writer,
+                          const feature_vector_list *features);
 
 /**
  * @brief 写入特征向量和预测结果
@@ -62,8 +63,10 @@ int writer_write_features(file_writer *writer, const feature_vector_list *featur
  * @param count 数量
  * @return WRITER_SUCCESS表示成功，WRITER_ERROR表示失败
  */
-int writer_write_features_with_predictions(file_writer *writer, const feature_vector_list *features,
-                                           const int *predictions, uint32_t count);
+int writer_write_features_with_predictions(file_writer *writer,
+                                           const feature_vector_list *features,
+                                           const int *predictions,
+                                           uint32_t count);
 
 /**
  * @brief 写入特征向量和rawbow
@@ -72,7 +75,8 @@ int writer_write_features_with_predictions(file_writer *writer, const feature_ve
  * @param rawbows rawbow列表
  * @return WRITER_SUCCESS表示成功，WRITER_ERROR表示失败
  */
-int writer_write_features_with_rawbow(file_writer *writer, const feature_vector_list *features,
+int writer_write_features_with_rawbow(file_writer *writer,
+                                      const feature_vector_list *features,
                                       const rawbow_list *rawbows);
 /**
  * @brief 刷新缓冲区
