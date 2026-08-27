@@ -145,7 +145,8 @@ message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 # ============= 生成特征提取动态链接库 =============
 add_library(ktag_feature SHARED
     ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
-    ${PROJECT_SOURCE_DIR}/src/capture/dns_parser.cpp
+    ${PROJECT_SOURCE_DIR}/src/decode.cpp
+    ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_schema.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_batch.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/traffic_schema.cpp
@@ -187,10 +188,8 @@ set_target_properties(ktag_feature PROPERTIES
 # available until their behavior has been compared independently.
 set(KTAG_FIXED_VECTOR_FEATURE_SOURCES
     ${PROJECT_SOURCE_DIR}/src/kdadk_feature_extract.cpp
-    ${PROJECT_SOURCE_DIR}/src/decode.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
     ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
-    ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
 )
 add_library(KDADK_feature_extract SHARED
     ${KTAG_FIXED_VECTOR_FEATURE_SOURCES}
