@@ -27,13 +27,11 @@ target_link_libraries(ktag_traffic_features PRIVATE
     ktag_feature
 )
 
-# The established fixed-vector API now executes these Providers directly.
-# Keeping the dependency here avoids teaching the public demo about Provider
-# registration or changing its existing extraction flow.
+# The compatibility library discovers this plugin at runtime through the
+# public Plugin ABI. Keep a build-order dependency without creating a link-time
+# dependency or a DT_NEEDED entry.
 if(TARGET KDADK_feature_extract)
-    target_link_libraries(KDADK_feature_extract PRIVATE
-        ktag_traffic_features
-    )
+    add_dependencies(KDADK_feature_extract ktag_traffic_features)
 endif()
 
 set_target_properties(ktag_traffic_features PROPERTIES

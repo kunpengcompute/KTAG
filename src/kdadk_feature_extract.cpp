@@ -3,7 +3,10 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 #include "kdadk_feature_extract.h"
 #include "kdadk_export.h"
+#include "ktag_feature_plugin.h"
 #include "ktag_traffic_features.h"
+
+#include <dlfcn.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -11,6 +14,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <cstring>
 #include <limits>
 #include <new>
+#include <string>
 
 static_assert(
     KTAG_LEGACY_V1_VALUE_COUNT == FEATURES_NUM - 1,
@@ -18,9 +22,43 @@ static_assert(
 
 namespace {
 
+thread_local std::string extractor_last_error;
+const int legacy_plugin_path_anchor = 0;
+
+void set_last_error(const std::string &message) {
+    extractor_last_error = message;
+}
+
+bool default_plugin_path(std::string *path) {
+    const char *environment = std::getenv(KTAG_LEGACY_FEATURE_PLUGIN_ENV);
+    if (environment != nullptr && environment[0] != '\0') {
+        *path = environment;
+        return true;
+    }
+
+    Dl_info library_info{};
+    if (dladdr(&legacy_plugin_path_anchor, &library_info) == 0 ||
+        library_info.dli_fname == nullptr) {
+        set_last_error("cannot locate libKDADK_feature_extract to resolve "
+                       "the default Feature Plugin path");
+        return false;
+    }
+    const std::string library_path(library_info.dli_fname);
+    const size_t separator = library_path.find_last_of('/');
+    if (separator == std::string::npos) {
+        set_last_error("libKDADK_feature_extract has no absolute directory; "
+                       "set " KTAG_LEGACY_FEATURE_PLUGIN_ENV);
+        return false;
+    }
+    *path = library_path.substr(0U, separator + 1U) +
+            "plugins/libktag_traffic_features.so";
+    return true;
+}
+
 struct feature_runtime {
     ktag_feature_context *context = nullptr;
     ktag_feature_batch *batch = nullptr;
+    ktag_loaded_feature_plugin *plugin = nullptr;
     uint64_t next_packet_sequence = 1U;
     ktag_feature_statistics statistics_baseline{};
 };
@@ -43,14 +81,36 @@ void destroy_runtime(feature_runtime *runtime) {
     }
     ktag_feature_batch_destroy(runtime->batch);
     ktag_feature_destroy(runtime->context);
+    ktag_feature_plugin_unload(runtime->plugin);
     delete runtime;
 }
 
-feature_runtime *create_runtime(ktag_domain_store *domain_store) {
+feature_runtime *create_runtime(ktag_domain_store *domain_store,
+                                const char *plugin_path) {
     ktag_feature_registry *registry = ktag_feature_registry_create();
     ktag_feature_schema *schema = ktag_feature_schema_create_legacy_v1();
-    if (registry == nullptr || schema == nullptr ||
-        ktag_traffic_features_register(registry) != KTAG_SUCCESS) {
+    if (registry == nullptr || schema == nullptr) {
+        set_last_error(
+            "failed to create the legacy Feature Registry or Schema");
+        ktag_feature_schema_destroy(schema);
+        ktag_feature_registry_destroy(registry);
+        return nullptr;
+    }
+
+    std::string resolved_path;
+    if (plugin_path != nullptr && plugin_path[0] != '\0') {
+        resolved_path = plugin_path;
+    } else if (!default_plugin_path(&resolved_path)) {
+        ktag_feature_schema_destroy(schema);
+        ktag_feature_registry_destroy(registry);
+        return nullptr;
+    }
+    ktag_loaded_feature_plugin *plugin =
+        ktag_feature_plugin_load(resolved_path.c_str(), registry);
+    if (plugin == nullptr) {
+        set_last_error(
+            std::string("failed to initialize legacy Feature Plugin: ") +
+            ktag_feature_plugin_get_last_error());
         ktag_feature_schema_destroy(schema);
         ktag_feature_registry_destroy(registry);
         return nullptr;
@@ -58,10 +118,13 @@ feature_runtime *create_runtime(ktag_domain_store *domain_store) {
 
     feature_runtime *runtime = new (std::nothrow) feature_runtime();
     if (runtime == nullptr) {
+        set_last_error("out of memory creating the legacy Feature runtime");
         ktag_feature_schema_destroy(schema);
         ktag_feature_registry_destroy(registry);
+        ktag_feature_plugin_unload(plugin);
         return nullptr;
     }
+    runtime->plugin = plugin;
 
     runtime->batch = ktag_feature_batch_create(schema, 1U);
     ktag_feature_config config{};
@@ -78,6 +141,8 @@ feature_runtime *create_runtime(ktag_domain_store *domain_store) {
     ktag_feature_registry_destroy(registry);
 
     if (runtime->batch == nullptr || runtime->context == nullptr) {
+        set_last_error("the dynamically loaded Providers do not satisfy the "
+                       "legacy Feature contract");
         destroy_runtime(runtime);
         return nullptr;
     }
@@ -173,8 +238,11 @@ int refresh_public_statistics(feature_extractor *extractor) {
 }
 
 feature_extractor *extractor_init_internal(int link_type,
-                                           ktag_domain_store *domain_store) {
+                                           ktag_domain_store *domain_store,
+                                           const char *plugin_path) {
+    set_last_error(std::string());
     if (link_type != DLT_EN10MB && link_type != DLT_LINUX_SLL) {
+        set_last_error("unsupported link type");
         std::fprintf(stderr, "Error: Unsupported link type %d\n", link_type);
         return nullptr;
     }
@@ -182,10 +250,11 @@ feature_extractor *extractor_init_internal(int link_type,
     feature_extractor *extractor = static_cast<feature_extractor *>(
         std::calloc(1U, sizeof(feature_extractor)));
     if (extractor == nullptr) {
+        set_last_error("out of memory creating the legacy Feature Extractor");
         return nullptr;
     }
 
-    feature_runtime *runtime = create_runtime(domain_store);
+    feature_runtime *runtime = create_runtime(domain_store, plugin_path);
     if (runtime == nullptr) {
         std::free(extractor);
         return nullptr;
@@ -313,15 +382,33 @@ int finalize_internal(feature_extractor *extractor,
 extern "C" {
 
 KDADK_API feature_extractor *extractor_init(int link_type) {
-    return extractor_init_internal(link_type, nullptr);
+    return extractor_init_internal(link_type, nullptr, nullptr);
+}
+
+KDADK_API feature_extractor *
+extractor_init_with_config(const kdadk_feature_extractor_config *config) {
+    if (config == nullptr || config->struct_size < sizeof(*config) ||
+        config->api_version != KTAG_API_VERSION) {
+        set_last_error("invalid legacy Feature Extractor configuration");
+        return nullptr;
+    }
+    return extractor_init_internal(config->link_type,
+                                   config->shared_domain_store,
+                                   config->feature_plugin_path);
 }
 
 KDADK_API feature_extractor *
 extractor_init_with_domain_store(int link_type,
                                  ktag_domain_store *domain_store) {
-    return domain_store == nullptr
-               ? nullptr
-               : extractor_init_internal(link_type, domain_store);
+    if (domain_store == nullptr) {
+        set_last_error("a shared Domain Store is required");
+        return nullptr;
+    }
+    return extractor_init_internal(link_type, domain_store, nullptr);
+}
+
+KDADK_API const char *extractor_get_last_error(void) {
+    return extractor_last_error.c_str();
 }
 
 KDADK_API int process_packet(feature_extractor *extractor,

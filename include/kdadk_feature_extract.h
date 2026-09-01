@@ -30,6 +30,7 @@ extern "C" {
  * authorizes removal. New integrations must use ktag_feature.h.
  */
 #define KTAG_LEGACY_FEATURE_COMPAT_AVAILABLE 1
+#define KTAG_LEGACY_FEATURE_PLUGIN_ENV "KTAG_LEGACY_FEATURE_PLUGIN"
 
 #define FEATURES_NUM FEATURE_MAX_SIZE + 1 /* 354 + 1 (flow_id在第0列) */
 
@@ -74,6 +75,15 @@ typedef struct {
     void *legacy_feature_pipeline;
 } feature_extractor;
 
+typedef struct {
+    uint32_t struct_size;
+    uint32_t api_version;
+    int link_type;
+    ktag_domain_store *shared_domain_store;
+    /* NULL selects KTAG_LEGACY_FEATURE_PLUGIN_ENV or the installed default. */
+    const char *feature_plugin_path;
+} kdadk_feature_extractor_config;
+
 #define EXTRACTOR_SUCCESS 0
 #define EXTRACTOR_ERROR -1
 
@@ -85,10 +95,22 @@ typedef struct {
 KDADK_API KDADK_DEPRECATED("Use ktag_feature_create")
     feature_extractor *extractor_init(int link_type);
 
+/* Additive compatibility constructor for an explicitly selected Provider
+ * plugin. The plugin is loaded through ktag_feature_plugin_query and remains
+ * loaded until extractor_destroy(). */
+KDADK_API
+KDADK_DEPRECATED("Use ktag_feature_plugin_load and ktag_feature_create")
+feature_extractor *
+extractor_init_with_config(const kdadk_feature_extractor_config *config);
+
 /* Compatibility constructor for multiple extractors sharing one DomainStore. */
 KDADK_API KDADK_DEPRECATED("Use ktag_feature_create with shared_domain_store")
     feature_extractor *extractor_init_with_domain_store(
         int link_type, ktag_domain_store *domain_store);
+
+/* Thread-local detail for the most recent compatibility initialization error.
+ */
+KDADK_API const char *extractor_get_last_error(void);
 
 /**
  * @brief 销毁特征提取器

@@ -61,6 +61,9 @@ option(KTAG_BUILD_FEATURE_PLUGINS
 option(KTAG_BUILD_PROXY_FEATURES
        "Build the official proxy protocol Feature Provider plugin"
        ON)
+option(KTAG_BUILD_LEGACY_COMPAT
+       "Build the deprecated fixed-vector compatibility libraries"
+       ON)
 option(KTAG_ENABLE_DPDK_UB
        "Enable the optional DPDK UB transport in kdadk_demo"
        OFF)
@@ -69,6 +72,22 @@ option(KTAG_ENABLE_DPDK
 option(KTAG_INSTALL_LEGACY_COMPAT
        "Install the deprecated fixed-vector compatibility libraries and headers"
        ON)
+
+if(KTAG_INSTALL_LEGACY_COMPAT AND NOT KTAG_BUILD_LEGACY_COMPAT)
+    message(FATAL_ERROR
+        "KTAG_INSTALL_LEGACY_COMPAT requires KTAG_BUILD_LEGACY_COMPAT")
+endif()
+if(KTAG_BUILD_LEGACY_COMPAT AND NOT KTAG_BUILD_FEATURE_PLUGINS)
+    message(FATAL_ERROR
+        "KTAG_BUILD_LEGACY_COMPAT requires KTAG_BUILD_FEATURE_PLUGINS because "
+        "the default compatibility constructor dynamically loads the official "
+        "Traffic Feature Plugin")
+endif()
+if(KTAG_BUILD_TOOLS AND NOT KTAG_BUILD_LEGACY_COMPAT)
+    message(FATAL_ERROR
+        "KTAG_BUILD_TOOLS currently requires KTAG_BUILD_LEGACY_COMPAT because "
+        "kdadk_demo retains the legacy command paths")
+endif()
 
 # Keep the historical KDADK_APPID installation prefix layout while exposing
 # modern CMake imported targets to customers.
