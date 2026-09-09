@@ -2,6 +2,8 @@
 
 ## 最新消息
 
+\[2026-09-15\]: 增加 Capture、Feature、Inference 三层公共 API、IPv4/IPv6 双栈 Schema Pipeline 和代理 Feature Plugin。
+
 \[2026-06-30\]: KDADK-APPID更名为KTAG。
 
 \[2026-03-30\]: 发布KDADK-APPID 1.0.0。更新了特征提取及特征推理接口头文件及软件包。
@@ -15,24 +17,36 @@ KTAG是鲲鹏数据分析开发套件的网络流分类库，包含流汇聚、�
 
 当前仓库还提供 IPv4/IPv6 双栈 Schema 特征提取和独立的应用/代理分类配置。代理
 分类使用可选的 `libktag_proxy_features.so` 插件和 619 维 `ktag_proxy_v1` Schema。
-仓库中的代理配置目前是两个 VMess 承载类别的可运行示例，不代表已经随仓库交付
-普通流量及全部目标代理类别的正式模型。完整范围、命令和限制参见
-《[应用分类与代理分类使用指南](docs/zh/demo_pipeline.md)》。
+仓库中的代理配置是两个 VMess 承载类别的可运行示例。完整范围、命令和限制参见
+《[用户指南](docs/zh/user_guide.md)》。
 
 ## 2. 项目结构
 项目目录结构如下：
 ```
-|—— cmake                                                     # 项目工程编译目录
+|—— cmake                                                     # 工程编译配置
 |—— docs                                                      # 文档资料
 │   └── zh                                                    # 中文文档目录
 │       ├── release_notes.md                                  # 版本说明书
 │       ├── installation_guide.md                             # 安装指南
+│       ├── quick_start.md                                    # 快速上手指南
 │       ├── user_guide.md                                     # 用户指南
-│       ├── api_reference.md                                  # API参考
-│       ├── demo_pipeline.md                                  # 应用/代理分类使用指南
+│       └── api_reference.md                                  # API参考
+|—— examples                                                  # 公共 API 示例
 |—— include                                                   # 头文件目录
+|—— plugins                                                   # 代理特征插件源码
 |—— src                                                       # 源码目录
+│   ├── capture                                               # 报文读取与流标识
+│   ├── feature                                               # 组流与特征计算
+│   ├── inference                                             # 模型加载与批量推理
+│   └── legacy                                                # 旧固定向量接口兼容层
 |—— test                                                      # 测试框架
+|—— tools                                                     # 工具集
+│   ├── demo                                                  # 训练/评估/推理命令行工具
+│   ├── data                                                  # 数据过滤与预检工具
+│   ├── capture                                               # 流量抓包脚本
+│   ├── labeling                                              # 流量打标签工具
+│   ├── model_package                                         # 模型包打包工具
+│   └── validation                                            # 一致性验收脚本
 |—— README.md                                                 # 说明文档
 |—— kdadk_appidver.h                                          # 项目版本信息头文件
 |—— build.sh                                                  # 项目编译脚本
@@ -65,10 +79,9 @@ KTAG当前适配的处理器和操作系统为鲲鹏920系列处理器，openEul
 | 文档 | 介绍|
 | -- | -- |
 | [编译指南](docs/zh/installation_guide.md#编译指南) | 提供了项目编译方法。 |
-| [用户指南](docs/zh/user_guide.md#用户指南) | 提供了测试框架说明及用法。 |
-| [API参考](docs/zh/api_reference.md#api参考) | 提供了特征提取和特征推理的接口说明。 |
-| [应用分类与代理分类使用指南](docs/zh/demo_pipeline.md) | 说明配置、特征提取、训练、评估、推理、双栈范围和当前限制。 |
-| [应用代理与加密代理流量分类功能设计](docs/zh/proxy_protocol_identification_design.md) | 说明应用与代理双栈分类、代理 Feature Plugin、轻量级 QUIC 与完整实施步骤。 |
+| [快速上手](docs/zh/quick_start.md) | 按步骤指导完成推理、网口实时分类、特征生成、训练和评估。 |
+| [用户指南](docs/zh/user_guide.md#用户指南) | 提供配置文件、Schema 契约、训练评估、推理模式、支持边界和常见问题的完整使用说明。 |
+| [API参考](docs/zh/api_reference.md) | 提供 Capture、Feature、Inference 三层接口、插件 ABI 和旧接口兼容说明。 |
 | [版本说明书](docs/zh/release_notes.md#版本说明书) | 提供了版本更新说明。 |
 
 ## 6. 贡献声明

@@ -20,63 +20,6 @@ training_data_paths:
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-03.csv,
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-04.csv,
     ]
-  # 以下为候选数据组路径示意，不代表当前模型的 label，也不能直接接在当前两组后面
-  # 当作正式 13 类顺序；正式顺序应在数据齐备后一次性确定。
-  # # 候选: shadowsocks/udp/aead2022
-  # - [
-  #     /path/to/proxy_csv/shadowsocks_udp_aead2022/train_ipv4.csv,
-  #     /path/to/proxy_csv/shadowsocks_udp_aead2022/train_ipv6.csv,
-  #   ]
-  # # 候选: shadowsocksr/tcp/auth_aes128_md5/tls1.2_ticket_auth
-  # - [
-  #     /path/to/proxy_csv/ssr_auth_aes128_md5_tls12_ticket_auth/train_ipv4.csv,
-  #     /path/to/proxy_csv/ssr_auth_aes128_md5_tls12_ticket_auth/train_ipv6.csv,
-  #   ]
-  # # 候选: shadowsocksr/tcp/auth_aes128_sha1/tls1.2_ticket_auth
-  # - [
-  #     /path/to/proxy_csv/ssr_auth_aes128_sha1_tls12_ticket_auth/train_ipv4.csv,
-  #     /path/to/proxy_csv/ssr_auth_aes128_sha1_tls12_ticket_auth/train_ipv6.csv,
-  #   ]
-  # # 候选: vmess/websocket/tls
-  # - [
-  #     /path/to/proxy_csv/vmess_websocket_tls/train_ipv4.csv,
-  #     /path/to/proxy_csv/vmess_websocket_tls/train_ipv6.csv,
-  #   ]
-  # # 候选: vmess/http2/tls
-  # - [
-  #     /path/to/proxy_csv/vmess_http2_tls/train_ipv4.csv,
-  #     /path/to/proxy_csv/vmess_http2_tls/train_ipv6.csv,
-  #   ]
-  # # 候选: vless/raw/reality
-  # - [
-  #     /path/to/proxy_csv/vless_raw_reality/train_ipv4.csv,
-  #     /path/to/proxy_csv/vless_raw_reality/train_ipv6.csv,
-  #   ]
-  # # 候选: vless/grpc/tls
-  # - [
-  #     /path/to/proxy_csv/vless_grpc_tls/train_ipv4.csv,
-  #     /path/to/proxy_csv/vless_grpc_tls/train_ipv6.csv,
-  #   ]
-  # # 候选: trojan/raw/tls
-  # - [
-  #     /path/to/proxy_csv/trojan_raw_tls/train_ipv4.csv,
-  #     /path/to/proxy_csv/trojan_raw_tls/train_ipv6.csv,
-  #   ]
-  # # 候选: trojan/websocket/tls
-  # - [
-  #     /path/to/proxy_csv/trojan_websocket_tls/train_ipv4.csv,
-  #     /path/to/proxy_csv/trojan_websocket_tls/train_ipv6.csv,
-  #   ]
-  # # 候选: hysteria2/quic/tls
-  # - [
-  #     /path/to/proxy_csv/hysteria2_quic_tls/train_ipv4.csv,
-  #     /path/to/proxy_csv/hysteria2_quic_tls/train_ipv6.csv,
-  #   ]
-  # # 候选: hysteria2/quic_salamander/tls
-  # - [
-  #     /path/to/proxy_csv/hysteria2_quic_salamander_tls/train_ipv4.csv,
-  #     /path/to/proxy_csv/hysteria2_quic_salamander_tls/train_ipv6.csv,
-  #   ]
 
 evaluation_data_paths:
   # 与 training_data_paths 保持相同外层组顺序。评估文件不能复用训练 CSV；服务器
@@ -87,50 +30,6 @@ evaluation_data_paths:
   - [
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-05.csv,
     ]
-  # - [
-  #     /path/to/proxy_csv/shadowsocks_udp_aead2022/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/shadowsocks_udp_aead2022/evaluation_ipv6.csv,
-  #   ]
-  # - [
-  #     /path/to/proxy_csv/ssr_auth_aes128_md5_tls12_ticket_auth/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/ssr_auth_aes128_md5_tls12_ticket_auth/evaluation_ipv6.csv,
-  #   ]
-  # - [
-  #     /path/to/proxy_csv/ssr_auth_aes128_sha1_tls12_ticket_auth/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/ssr_auth_aes128_sha1_tls12_ticket_auth/evaluation_ipv6.csv,
-  #   ]
-  # - [
-  #     /path/to/proxy_csv/vmess_websocket_tls/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/vmess_websocket_tls/evaluation_ipv6.csv,
-  #   ]
-  # - [
-  #     /path/to/proxy_csv/vmess_http2_tls/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/vmess_http2_tls/evaluation_ipv6.csv,
-  #   ]
-  # - [
-  #     /path/to/proxy_csv/vless_raw_reality/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/vless_raw_reality/evaluation_ipv6.csv,
-  #   ]
-  # - [
-  #     /path/to/proxy_csv/vless_grpc_tls/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/vless_grpc_tls/evaluation_ipv6.csv,
-  #   ]
-  # - [
-  #     /path/to/proxy_csv/trojan_raw_tls/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/trojan_raw_tls/evaluation_ipv6.csv,
-  #   ]
-  # - [
-  #     /path/to/proxy_csv/trojan_websocket_tls/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/trojan_websocket_tls/evaluation_ipv6.csv,
-  #   ]
-  # - [
-  #     /path/to/proxy_csv/hysteria2_quic_tls/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/hysteria2_quic_tls/evaluation_ipv6.csv,
-  #   ]
-  # - [
-  #     /path/to/proxy_csv/hysteria2_quic_salamander_tls/evaluation_ipv4.csv,
-  #     /path/to/proxy_csv/hysteria2_quic_salamander_tls/evaluation_ipv6.csv,
-  #   ]
 
 # 以下是训练中间产物；正式在线加载目录由 pipeline.model_package_path 指定。
 model_path_pkl: ../../result/proxy_two_class_v1_model/model.pkl
