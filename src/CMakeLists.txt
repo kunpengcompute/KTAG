@@ -32,6 +32,72 @@ set_target_properties(ktag_capture PROPERTIES
     INSTALL_RPATH "$ORIGIN"
 )
 
+# ============= Optional DPDK live capture backend =============
+if(KTAG_ENABLE_DPDK)
+    find_package(PkgConfig REQUIRED)
+    # 24.11 is the version this backend targets, and the same one the DPDK/UB
+    # distributed transport requires; a process can only link one libdpdk.
+    # Checked without REQUIRED so a too-old but installed libdpdk reports its
+    # actual version instead of pkg-config's generic "not found".
+    pkg_check_modules(DPDK libdpdk>=24.11)
+    if(NOT DPDK_FOUND)
+        execute_process(
+            COMMAND ${PKG_CONFIG_EXECUTABLE} --modversion libdpdk
+            OUTPUT_VARIABLE KTAG_DPDK_DETECTED_VERSION
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        if(NOT KTAG_DPDK_DETECTED_VERSION)
+            set(KTAG_DPDK_DETECTED_VERSION "none")
+        endif()
+        message(FATAL_ERROR
+            "ktag_capture_dpdk requires DPDK 24.11 or later, but pkg-config "
+            "reports libdpdk ${KTAG_DPDK_DETECTED_VERSION}.\n"
+            "Point PKG_CONFIG_PATH at a 24.11+ installation "
+            "(the DPDK/UB transport needs the same version), or configure "
+            "with -DKTAG_ENABLE_DPDK=OFF.")
+    endif()
+
+    add_library(ktag_capture_dpdk SHARED
+        ${PROJECT_SOURCE_DIR}/src/capture_dpdk/dpdk_capture.cpp
+    )
+    add_library(KTAG::capture_dpdk ALIAS ktag_capture_dpdk)
+
+    target_compile_definitions(ktag_capture_dpdk PRIVATE KTAG_BUILDING_DLL)
+
+    target_link_libraries(ktag_capture_dpdk PRIVATE
+        ktag_capture
+        Threads::Threads
+    )
+
+    target_include_directories(ktag_capture_dpdk
+        PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
+        PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/capture_dpdk
+        ${DPDK_INCLUDE_DIRS}
+    )
+
+    # DPDK requires -include rte_config.h and an arch-specific -march; these
+    # are applied only to this target's translation units so the rest of the
+    # project keeps its portable compiler flags.
+    target_compile_options(ktag_capture_dpdk PRIVATE ${DPDK_CFLAGS_OTHER})
+    target_link_directories(ktag_capture_dpdk PRIVATE ${DPDK_LIBRARY_DIRS})
+    target_link_libraries(ktag_capture_dpdk PRIVATE ${DPDK_LIBRARIES})
+
+    set_target_properties(ktag_capture_dpdk PROPERTIES
+        EXPORT_NAME capture_dpdk
+        BUILD_RPATH "$ORIGIN;${DPDK_LIBRARY_DIRS}"
+        INSTALL_RPATH "$ORIGIN;${DPDK_LIBRARY_DIRS}"
+    )
+
+    install(TARGETS ktag_capture_dpdk
+            EXPORT KTAGTargets
+            LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
+            ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
+            RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
+endif()
+
 # ============= ONNX Runtime 配置 =============
 set(ONNXRUNTIME_ROOT "$ENV{ONNXRUNTIME_HOME}" CACHE PATH "Root directory of ONNX Runtime installation")
 if(NOT ONNXRUNTIME_ROOT)

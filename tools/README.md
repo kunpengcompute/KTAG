@@ -169,3 +169,65 @@ ONNX、Scaler、Schema manifest，以及 `output_dir/feature_importance.csv`。�
 
 完整操作顺序、标签语义、模型包结构、IPv6/QUIC 范围和已知限制参见
 《[用户指南](../docs/zh/user_guide.md)》。
+## DPDK 在线收包（可选）
+
+在线推理的网口实时抓包默认走 libpcap。若需利用 DPDK 轮询（poll-mode）驱动与
+零拷贝 mbuf 达到更高 PPS，可用可选的 `ktag_capture_dpdk` 后端。该功能不改变
+`ktag_capture`（libpcap）核心，通过 demo 的捕获后端抽象切换。
+
+### 前置条件
+
+- 已安装 **DPDK 24.11 或更高版本**（可用 `pkg-config --modversion libdpdk` 确认；低于 24.11 时 CMake 配置阶段即报错，源码中另有编译期版本检查）。
+- 网卡已绑定 DPDK 支持的驱动（如 vfio-pci），可用 `dpdk-devbind.py --status` 查看。
+- 已配置大页（hugepages）。
+- 以 `-DKTAG_ENABLE_DPDK=ON` 编译，可用一键脚本：
+
+```bash
+sh build.sh dpdk
+```
+
+或手动配置：
+
+```bash
+cmake -S . -B build -DKTAG_BUILD_TOOLS=ON -DKTAG_ENABLE_DPDK=ON
+cmake --build build --target kdadk_demo ktag_capture_dpdk
+```
+
+默认 `sh build.sh` 不带 DPDK（`KTAG_ENABLE_DPDK=OFF`）。
+
+### 使用
+
+在 pipeline 配置中设置 `pipeline.capture.backend: dpdk` 并填写 `capture.dpdk.*`
+选项（见 `tools/demo/proxy_config.yaml` 的 `pipeline.capture` 段），然后：
+
+```bash
+# SP600/HiSilicon 网卡按 PCI 地址收包
+output/kdadk_demo -r config.yaml -i 0000:03:00.0 --dpdk -j result.json
+
+# 或通过命令行指定 EAL 参数
+output/kdadk_demo -r config.yaml -i 0000:03:00.0 --dpdk \
+  --dpdk-eal-args "-a 0000:03:00.0 --log-level=lib.eal:7" -j result.json
+```
+
+说明：
+
+- `--dpdk` 只能与新的 pipeline 模式（`--pipeline-mode` 非 legacy）配合使用；
+  `-i` 参数此时解释为 PCI 地址或 DPDK vdev 名。
+- EAL 参数只生效于进程内第一次成功初始化（`rte_eal_init` 一次性）；CLI
+  `--dpdk-eal-args` 优先于 YAML 中的 `capture.dpdk.eal_args`。
+- 单线程模式（BORROWED）零拷贝指向 mbuf；并行模式（OWNED）复用
+  `ktag_packet_make_owned` 拷入引用计数 buffer。
+
+离线验证（无需真实流量，用 DPDK net_pcap vdev 把 pcap 文件模拟成网卡）：
+
+```yaml
+pipeline:
+  capture:
+    backend: dpdk
+    dpdk:
+      device_name: "net_pcap0"
+      eal_args: "--vdev=net_pcap0,rx_pcap=/path/to/test.pcap --no-pci"
+      rx_idle_eof_us: 500000   # 文件读完后 N 微秒空闲触发结束
+```
+
+此时 `-i net_pcap0 --dpdk` 即可回放 pcap 文件走完整 DPDK 收包路径。

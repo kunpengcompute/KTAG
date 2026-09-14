@@ -76,6 +76,9 @@ SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_config.cp
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_runner.cpp
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/schema_feature_writer.cpp
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/ub_feature_wire.cpp
+# pipeline_runner.cpp drives capture through the demo_capture_source factory,
+# so the factory has to be linked in even when the DPDK backend is disabled.
+SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/demo_capture_source.cpp
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/plugin/feature_plugin_loader.cpp
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/utils.cpp
 
@@ -84,6 +87,22 @@ SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/utils.cpp
 # run it explicitly with `internal=y` against a visibility-disabled test build.
 ifneq ($(internal),y)
 SOURCES_MUD := $(filter-out $(TEST_modules_DIR)/common/functest/func_feature_provider.cpp,$(SOURCES_MUD))
+endif
+
+# DPDK poll-mode capture backend. libktag_capture_dpdk only exists in a
+# KTAG_ENABLE_DPDK=ON build, so these cases are opt-in: run `make dpdk=y`.
+# Without the switch the file is dropped from the build, the same way the
+# internal-symbol test above is.
+ifeq ($(dpdk), y)
+DPDK_PC_CFLAGS := $(shell pkg-config --cflags libdpdk)
+DPDK_PC_LIBS := $(shell pkg-config --libs libdpdk)
+CPPFLAGS += $(DPDK_PC_CFLAGS) -DKTAG_DEMO_HAVE_DPDK=1
+LD_LIBRARIES += -lktag_capture_dpdk $(DPDK_PC_LIBS)
+SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/demo_capture_dpdk_source.cpp
+else
+# Matched on the suffix: wildcard() yields "../..//common/functest//<file>",
+# so a literal prefix pattern never matches.
+SOURCES_MUD := $(filter-out %/func_capture_dpdk.cpp,$(SOURCES_MUD))
 endif
 
 SOURCES = $(shell echo $(SOURCES_MUD) | \
@@ -126,6 +145,8 @@ clean :
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_runner.o
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/schema_feature_writer.o
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/ub_feature_wire.o
+	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/demo_capture_source.o
+	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/demo_capture_dpdk_source.o
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/plugin/feature_plugin_loader.o
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/utils.o
 

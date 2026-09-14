@@ -1,0 +1,101 @@
+/*
+Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+*/
+#ifdef KTAG_DEMO_HAVE_DPDK
+
+#include "demo_capture_source.h"
+
+#include <memory>
+#include <new>
+#include <string>
+
+#include "ktag_capture_dpdk.h"
+
+namespace {
+
+class dpdk_capture_source : public demo_capture_source {
+public:
+  explicit dpdk_capture_source(void *context) : capture_(context) {}
+
+  ~dpdk_capture_source() override {
+    if (capture_ != nullptr) {
+      ktag_dpdk_capture_close(capture_);
+      capture_ = nullptr;
+    }
+  }
+
+  ktag_status next(ktag_packet *packet) override {
+    return ktag_dpdk_capture_next(capture_, packet);
+  }
+
+  void interrupt() override {
+    if (capture_ != nullptr) {
+      ktag_dpdk_capture_interrupt(capture_);
+    }
+  }
+
+  uint32_t link_type() const override {
+    return ktag_dpdk_capture_get_link_type(capture_);
+  }
+
+  const char *last_error() const override {
+    return ktag_dpdk_capture_get_last_error();
+  }
+
+private:
+  void *capture_ = nullptr;
+};
+
+ktag_dpdk_capture_config
+make_dpdk_capture_config(const ktag_demo_pipeline_config &config,
+                         const char *source, bool owned) {
+  ktag_dpdk_capture_config capture_config{};
+  capture_config.struct_size = sizeof(capture_config);
+  capture_config.api_version = KTAG_API_VERSION;
+  capture_config.device_name = source;
+  capture_config.rx_queue_count = config.dpdk_rx_queue_count;
+  capture_config.rx_queue_depth = config.dpdk_rx_queue_depth;
+  capture_config.mbuf_pool_size = config.dpdk_mbuf_pool_size;
+  capture_config.burst_size = config.dpdk_burst_size;
+  capture_config.rx_idle_eof_us = config.dpdk_rx_idle_eof_us;
+  capture_config.poll_interval_us = config.dpdk_poll_interval_us;
+  capture_config.packet_mode =
+      owned ? KTAG_DPDK_PACKET_OWNED : KTAG_DPDK_PACKET_BORROWED;
+  return capture_config;
+}
+
+} // namespace
+
+std::unique_ptr<demo_capture_source>
+create_dpdk_demo_capture_source(const ktag_demo_pipeline_config &config,
+                                const char *source, bool owned,
+                                std::string *error) {
+  if (error != nullptr) {
+    error->clear();
+  }
+  /* EAL init is idempotent; the first successful call wins. */
+  const ktag_status init_status =
+      ktag_dpdk_eal_init(config.dpdk_eal_args.c_str());
+  if (init_status != KTAG_SUCCESS) {
+    if (error != nullptr) {
+      *error = std::string("DPDK EAL init failed: ") +
+               ktag_dpdk_capture_get_last_error();
+    }
+    return nullptr;
+  }
+
+  const ktag_dpdk_capture_config capture_config =
+      make_dpdk_capture_config(config, source, owned);
+  void *capture = ktag_dpdk_capture_open(&capture_config);
+  if (capture == nullptr) {
+    if (error != nullptr) {
+      *error = std::string("DPDK capture open failed: ") +
+               ktag_dpdk_capture_get_last_error();
+    }
+    return nullptr;
+  }
+  return std::unique_ptr<demo_capture_source>(new (std::nothrow)
+                                                  dpdk_capture_source(capture));
+}
+
+#endif /* KTAG_DEMO_HAVE_DPDK */

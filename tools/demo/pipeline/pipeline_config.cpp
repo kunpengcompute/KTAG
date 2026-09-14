@@ -90,8 +90,8 @@ bool read_bool(const YAML::Node &parent, const char *name, bool *value,
   }
 }
 
-bool read_string(const YAML::Node &parent, const char *name,
-                 std::string *value, std::string *error) {
+bool read_string(const YAML::Node &parent, const char *name, std::string *value,
+                 std::string *error) {
   if (!has_value(parent)) {
     return true;
   }
@@ -154,8 +154,7 @@ bool read_ordered_string_list(const YAML::Node &node, const char *name,
     for (const auto &item : node) {
       const std::string value = item.as<std::string>();
       if (value.empty()) {
-        set_error(error,
-                  std::string(name) + " must contain non-empty strings");
+        set_error(error, std::string(name) + " must contain non-empty strings");
         return false;
       }
       values->push_back(value);
@@ -169,8 +168,7 @@ bool read_ordered_string_list(const YAML::Node &node, const char *name,
 
 bool read_ground_truth_labels(
     const YAML::Node &node,
-    std::map<std::string, std::vector<uint32_t>> *labels,
-    std::string *error) {
+    std::map<std::string, std::vector<uint32_t>> *labels, std::string *error) {
   if (!has_value(node)) {
     return true;
   }
@@ -237,8 +235,8 @@ bool hash_config_file(const fs::path &path, uint64_t *hash,
   return true;
 }
 
-bool parse_ub_config(const YAML::Node &pipeline,
-                     ktag_demo_ub_config *config, std::string *error) {
+bool parse_ub_config(const YAML::Node &pipeline, ktag_demo_ub_config *config,
+                     std::string *error) {
   const YAML::Node distributed = pipeline["distributed"];
   if (!has_value(distributed)) {
     return true;
@@ -264,8 +262,8 @@ bool parse_ub_config(const YAML::Node &pipeline,
                 error) ||
       !read_u32(ub, "queue_depth", &config->queue_depth, error) ||
       !read_u32(ub, "data_element_size", &config->data_element_size, error) ||
-      !read_u32(ub, "credits_per_provider",
-                &config->credits_per_provider, error) ||
+      !read_u32(ub, "credits_per_provider", &config->credits_per_provider,
+                error) ||
       !read_u32(ub, "poll_us", &config->poll_us, error) ||
       !read_string_list(ub["provider_nodes"],
                         "pipeline.distributed.ub_ring.provider_nodes",
@@ -273,10 +271,9 @@ bool parse_ub_config(const YAML::Node &pipeline,
       !read_string_list(ub["user_nodes"],
                         "pipeline.distributed.ub_ring.user_nodes",
                         &config->user_nodes, error) ||
-      !read_ordered_string_list(
-          ub["eal_arguments"],
-          "pipeline.distributed.ub_ring.eal_arguments",
-          &config->eal_arguments, error) ||
+      !read_ordered_string_list(ub["eal_arguments"],
+                                "pipeline.distributed.ub_ring.eal_arguments",
+                                &config->eal_arguments, error) ||
       !read_ground_truth_labels(ub["ground_truth_labels"],
                                 &config->ground_truth_labels, error)) {
     return false;
@@ -291,8 +288,7 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
     return true;
   }
   if (!config.configured) {
-    set_error(error,
-              "distributed role requires pipeline.distributed.ub_ring");
+    set_error(error, "distributed role requires pipeline.distributed.ub_ring");
     return false;
   }
   if (config.role == ktag_demo_distributed_role::disabled ||
@@ -311,7 +307,7 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
     return false;
   }
   std::unordered_set<std::string> all_nodes(config.provider_nodes.begin(),
-                                             config.provider_nodes.end());
+                                            config.provider_nodes.end());
   if (!all_nodes.insert(config.user_nodes.front()).second) {
     set_error(error, "distributed UB Provider/User hostnames must be unique");
     return false;
@@ -353,15 +349,13 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
   }
   if (!config.ground_truth_labels.empty()) {
     if (config.ground_truth_labels.size() != config.provider_nodes.size()) {
-      set_error(error,
-                "ground_truth_labels must describe every Provider or be "
-                "omitted");
+      set_error(error, "ground_truth_labels must describe every Provider or be "
+                       "omitted");
       return false;
     }
     for (const auto &entry : config.ground_truth_labels) {
-      if (std::find(config.provider_nodes.begin(),
-                    config.provider_nodes.end(), entry.first) ==
-          config.provider_nodes.end()) {
+      if (std::find(config.provider_nodes.begin(), config.provider_nodes.end(),
+                    entry.first) == config.provider_nodes.end()) {
         set_error(error,
                   "ground_truth_labels contains a non-Provider hostname");
         return false;
@@ -370,9 +364,8 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
   }
   if (config.role == ktag_demo_distributed_role::frontend &&
       pipeline.mode != ktag_demo_pipeline_mode::feature_parallel) {
-    set_error(error,
-              "the first distributed Frontend implementation requires "
-              "feature_parallel mode");
+    set_error(error, "the first distributed Frontend implementation requires "
+                     "feature_parallel mode");
     return false;
   }
   if (config.queues_per_provider != 1U) {
@@ -622,6 +615,51 @@ bool parse_enabled_config(const YAML::Node &pipeline,
     return false;
   }
 
+  /* Capture backend selection and optional DPDK settings. */
+  const YAML::Node backend_node =
+      has_value(capture) ? capture["backend"] : YAML::Node();
+  if (has_value(backend_node)) {
+    std::string backend_value;
+    try {
+      backend_value = backend_node.as<std::string>();
+    } catch (const YAML::Exception &exception) {
+      set_error(error, exception.what());
+      return false;
+    }
+    if (!ktag_demo_capture_backend_from_name(backend_value.c_str(),
+                                             &config->capture_backend)) {
+      set_error(error, "pipeline.capture.backend must be pcap or dpdk");
+      return false;
+    }
+  }
+  const YAML::Node dpdk = has_value(capture) ? capture["dpdk"] : YAML::Node();
+  if (has_value(dpdk) && !dpdk.IsMap()) {
+    set_error(error, "pipeline.capture.dpdk must be a map");
+    return false;
+  }
+  try {
+    if (has_value(dpdk)) {
+      if (has_value(dpdk["device_name"])) {
+        config->dpdk_device_name = dpdk["device_name"].as<std::string>();
+      }
+      if (has_value(dpdk["eal_args"])) {
+        config->dpdk_eal_args = dpdk["eal_args"].as<std::string>();
+      }
+    }
+  } catch (const YAML::Exception &exception) {
+    set_error(error, exception.what());
+    return false;
+  }
+  if (!read_u32(dpdk, "rx_queue_count", &config->dpdk_rx_queue_count, error) ||
+      !read_u32(dpdk, "rx_queue_depth", &config->dpdk_rx_queue_depth, error) ||
+      !read_u32(dpdk, "mbuf_pool_size", &config->dpdk_mbuf_pool_size, error) ||
+      !read_u32(dpdk, "burst_size", &config->dpdk_burst_size, error) ||
+      !read_u64(dpdk, "rx_idle_eof_us", &config->dpdk_rx_idle_eof_us, error) ||
+      !read_u32(dpdk, "poll_interval_us", &config->dpdk_poll_interval_us,
+                error)) {
+    return false;
+  }
+
   try {
     if (has_value(schema)) {
       const YAML::Node schema_name = schema["name"];
@@ -671,8 +709,7 @@ bool parse_enabled_config(const YAML::Node &pipeline,
       config->feature_queue_capacity == 0U ||
       config->inference_batch_size == 0U ||
       config->inference_batch_timeout_us == 0U ||
-      config->feature_threads == 0U ||
-      config->inference_threads == 0U) {
+      config->feature_threads == 0U || config->inference_threads == 0U) {
     set_error(
         error,
         "pipeline sizes, thread counts and schema version must be positive");
@@ -698,8 +735,7 @@ bool apply_overrides_and_normalize(
     config->feature_only =
         overrides->feature_only ||
         (overrides->distributed_role_set &&
-         overrides->distributed_role ==
-             ktag_demo_distributed_role::frontend);
+         overrides->distributed_role == ktag_demo_distributed_role::frontend);
     if (overrides->mode_set) {
       config->mode = overrides->mode;
     }
@@ -708,6 +744,13 @@ bool apply_overrides_and_normalize(
     }
     if (overrides->inference_threads != 0U) {
       config->inference_threads = overrides->inference_threads;
+    }
+    if (overrides->force_dpdk) {
+      config->capture_backend = ktag_demo_capture_backend::dpdk;
+    }
+    if (overrides->dpdk_eal_args != nullptr &&
+        overrides->dpdk_eal_args[0] != '\0') {
+      config->dpdk_eal_args = overrides->dpdk_eal_args;
     }
 
     if ((config->mode == ktag_demo_pipeline_mode::single_thread ||
@@ -806,8 +849,7 @@ ktag_demo_pipeline_config_result ktag_demo_load_pipeline_config_with_overrides(
         overrides != nullptr &&
         (overrides->feature_only ||
          (overrides->distributed_role_set &&
-          overrides->distributed_role ==
-              ktag_demo_distributed_role::frontend));
+          overrides->distributed_role == ktag_demo_distributed_role::frontend));
     if (!parse_enabled_config(pipeline, absolute_config.parent_path(),
                               feature_only, config, error)) {
       return ktag_demo_pipeline_config_result::error;
@@ -845,6 +887,31 @@ bool ktag_demo_pipeline_mode_from_name(const char *name,
     return false;
   }
   return true;
+}
+
+bool ktag_demo_capture_backend_from_name(const char *name,
+                                         ktag_demo_capture_backend *backend) {
+  if (name == nullptr || backend == nullptr) {
+    return false;
+  }
+  if (std::strcmp(name, "pcap") == 0) {
+    *backend = ktag_demo_capture_backend::pcap;
+  } else if (std::strcmp(name, "dpdk") == 0) {
+    *backend = ktag_demo_capture_backend::dpdk;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+const char *ktag_demo_capture_backend_name(ktag_demo_capture_backend backend) {
+  switch (backend) {
+  case ktag_demo_capture_backend::pcap:
+    return "pcap";
+  case ktag_demo_capture_backend::dpdk:
+    return "dpdk";
+  }
+  return "unknown";
 }
 
 const char *ktag_demo_pipeline_mode_name(ktag_demo_pipeline_mode mode) {
@@ -901,8 +968,7 @@ bool ktag_demo_distributed_role_from_name(const char *name,
   return true;
 }
 
-const char *
-ktag_demo_distributed_role_name(ktag_demo_distributed_role role) {
+const char *ktag_demo_distributed_role_name(ktag_demo_distributed_role role) {
   switch (role) {
   case ktag_demo_distributed_role::disabled:
     return "disabled";

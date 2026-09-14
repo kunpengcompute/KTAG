@@ -2,7 +2,7 @@
 ##############################################################
 ## Copyright: Copyright (c) Huawei Technologies Co., Ltd. 2020-2020. All rights reserved.
 ## @Filename: build.sh
-## @Usage: sh build.sh, sh build.sh -perf, sh build.sh clean, sh build.sh install or sh build.sh uninstall
+## @Usage: sh build.sh, sh build.sh -perf, sh build.sh dpdk, sh build.sh clean, sh build.sh install or sh build.sh uninstall
 ##############################################################
 
 set -e
@@ -87,6 +87,7 @@ function kdadk_appid_uninstall()
 }
 
 PERF_OPTION="-DKTAG_ENABLE_PERF_PROFILING=OFF"
+DPDK_OPTION="-DKTAG_ENABLE_DPDK=OFF"
 
 if [ "$1" == "" ] ;then
     COVERAGE_OPTION=""
@@ -103,6 +104,11 @@ elif [ "$1" == "-coverage" ]; then
 elif [ "$1" == "-perf" ]; then
     COVERAGE_OPTION=""
     PERF_OPTION="-DKTAG_ENABLE_PERF_PROFILING=ON"
+    kdadk_appid_build
+elif [ "$1" == "dpdk" ] || [ "$1" == "-dpdk" ]; then
+    COVERAGE_OPTION=""
+    DPDK_OPTION="-DKTAG_ENABLE_DPDK=ON"
+    echo "==> 启用 DPDK 轮询收包后端 (KTAG_ENABLE_DPDK=ON)"
     kdadk_appid_build
 elif [ "$1" == "clean" ] ;then
     kdadk_appid_clean

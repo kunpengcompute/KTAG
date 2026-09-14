@@ -35,7 +35,8 @@ function kdadk_appid_build()
         -DKTAG_BUILD_TOOLS=ON \
         -DKTAG_ENABLE_DPDK_UB="${KTAG_ENABLE_DPDK_UB:-OFF}" \
         ${PERF_OPTION} \
-        ${COVERAGE_OPTION}
+        ${COVERAGE_OPTION} \
+        ${DPDK_OPTION:-"-DKTAG_ENABLE_DPDK=OFF"}
 
     cmake --build "${OBJ_DIR}" --parallel "${BUILD_JOBS:-16}"
 
@@ -70,6 +71,11 @@ function kdadk_appid_build()
     fi
     if [ ! -x "${OUTPUT_DIR}/ktag_three_layer_example" ]; then
         echo "build failed: three-layer customer example was not generated"
+        exit 1
+    fi
+    if [[ "${DPDK_OPTION:-"-DKTAG_ENABLE_DPDK=OFF"}" == *"=ON"* ]] &&
+       [ ! -f "${OUTPUT_DIR}/libktag_capture_dpdk.so" ]; then
+        echo "build failed: ${OUTPUT_DIR}/libktag_capture_dpdk.so was not generated"
         exit 1
     fi
     if [ ! -f "${OUTPUT_DIR}/plugins/libktag_example_feature_plugin.so" ]; then
