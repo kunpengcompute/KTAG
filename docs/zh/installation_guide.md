@@ -7,7 +7,7 @@
 ```bash
 cd /opt
 git clone https://gitcode.com/boostkit/KTAG.git
-cd KTAG
+cd /opt/KTAG
 ```
 
 ## 依赖准备
@@ -16,9 +16,10 @@ cd KTAG
 
 下载源码包[yaml-cpp](https://github.com/jbeder/yaml-cpp/archive/refs/tags/0.8.0.tar.gz)。
 
-将下载好的源码放在`KTAG/util/`文件夹下，进到`KTAG/util/yaml-cpp`。
+将下载好的源码包放在`/opt/KTAG/util/`目录下，然后执行以下命令：
 
 ```bash
+cd /opt/KTAG/util
 tar -xzf yaml-cpp-0.8.0.tar.gz
 cd yaml-cpp-0.8.0
 mkdir -p build
@@ -52,52 +53,58 @@ make install
 
 下载源码包[onnxruntime](https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-aarch64-1.22.0.tgz)。
 
-将下载好的源码放在`KTAG/util/`文件夹下。
+将下载好的源码包放在`/opt/KTAG/util/`目录下，然后执行以下命令：
 
 ```bash
+cd /opt/KTAG/util
 tar -xzf onnxruntime-linux-aarch64-1.22.0.tgz
 export ONNXRUNTIME_HOME=/opt/KTAG/util/onnxruntime-linux-aarch64-1.22.0
 export LD_LIBRARY_PATH=$ONNXRUNTIME_HOME/lib:$LD_LIBRARY_PATH
 ```
 
+### 3. 配置python环境
+
+在`/opt/KTAG/tools/demo/python/packages.txt`文件中记录了离线训练需要的python环境依赖，可以执行下述命令安装python环境依赖。
+
+```bash
+python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
+```
+
 ## 编译指导
 
-在此目录下`/opt/KTAG/`执行下述命令。
+执行下述命令完成构建。
 
-```
-sh build.sh
-```
-完整构建会同时生成三层公共库、旧接口兼容库、demo 和 Feature Plugin。主要产物
-如下（实际文件还可能包含版本软链接）：
-
-```
-output/libktag_capture.so
-output/libktag_feature.so
-output/libktag_inference.so
-output/libKDADK_feature_extract.so
-output/libKDADK_inference.so
-output/kdadk_demo
-output/plugins/libktag_example_feature_plugin.so
-output/plugins/libktag_proxy_features.so
+```bash
+sh /opt/KTAG/build.sh
 ```
 
-`libKDADK_feature_extract.so` 和 `libKDADK_inference.so` 用于兼容旧固定向量接口；
-新接入推荐使用 Capture、Feature、Inference 三层公共库。代理分类需要构建并加载
-`libktag_proxy_features.so`。
+完整构建会同时生成三层公共库、旧接口兼容库、demo 和 Feature Plugin。主要产物如下：
+
+```
+/opt/KTAG/output/libktag_capture.so
+/opt/KTAG/output/libktag_feature.so
+/opt/KTAG/output/libktag_inference.so
+/opt/KTAG/output/libKDADK_feature_extract.so
+/opt/KTAG/output/libKDADK_inference.so
+/opt/KTAG/output/kdadk_demo
+/opt/KTAG/output/plugins/libktag_example_feature_plugin.so
+/opt/KTAG/output/plugins/libktag_proxy_features.so
+```
+
+`libKDADK_feature_extract.so` 和 `libKDADK_inference.so` 用于兼容旧固定向量接口；新接入推荐使用 Capture、Feature、Inference 三层公共库。代理分类需要构建并加载 `libktag_proxy_features.so`。
 
 相关构建选项：
 
 ```bash
-cmake -S . -B build \
+cmake -S /opt/KTAG -B /opt/KTAG/build \
   -DKTAG_BUILD_TOOLS=ON \
   -DKTAG_BUILD_PROXY_FEATURES=ON \
   -DKTAG_INSTALL_LEGACY_COMPAT=ON
-cmake --build build
+cmake --build /opt/KTAG/build
 ```
 
 - `KTAG_BUILD_TOOLS`：构建 `kdadk_demo` 和示例插件。
 - `KTAG_BUILD_PROXY_FEATURES`：构建正式代理 Feature Plugin，默认开启。
 - `KTAG_INSTALL_LEGACY_COMPAT`：安装旧兼容库、头文件和依赖旧路径的 demo，默认开启。
 
-应用与代理分类的配置和运行命令参见
-《[应用分类与代理分类使用指南](demo_pipeline.md)》。
+应用与代理分类的配置和运行命令参见《[用户指南](user_guide.md)》。
