@@ -21,6 +21,7 @@ struct ktag_demo_ub_transport_config {
   size_t provider_shm_size = 0U;
   uint32_t queues_per_provider = 1U;
   uint32_t queue_depth = 1024U;
+  /* Application-visible payload capacity; UB 24.11 adds its own header. */
   uint32_t data_element_size = 4096U;
   std::vector<std::string> eal_arguments;
 };
@@ -30,6 +31,15 @@ struct ktag_demo_ub_queue_mapping {
   uint32_t tx_queue_id = 0U;
   uint32_t rx_queue_id = 0U;
 };
+
+/*
+ * Convert the application payload capacity from YAML to the element stride
+ * reported by the installed rte_ub_ring implementation.  DPDK/UB 24.11
+ * stores a 128-byte ownership header in front of every app-visible buffer;
+ * older releases reported the payload size directly.  Keeping this helper in
+ * the KTAG adapter lets the YAML contract remain stable across both layouts.
+ */
+uint32_t ktag_demo_ub_runtime_data_element_size(uint32_t payload_size);
 
 /*
  * Thin RAII wrapper over the installed DPDK rte_ub_ring public API. It owns

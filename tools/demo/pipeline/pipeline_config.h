@@ -34,6 +34,7 @@ struct ktag_demo_ub_config {
   uint64_t provider_shm_size = 268435456U;
   uint32_t queues_per_provider = 1U;
   uint32_t queue_depth = 1024U;
+  /* YAML payload capacity; rte_ub_ring may report a larger internal stride. */
   uint32_t data_element_size = 4096U;
   uint32_t credits_per_provider = 256U;
   uint32_t poll_us = 50U;

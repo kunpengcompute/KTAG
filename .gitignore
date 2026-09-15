@@ -1,6 +1,5 @@
 .vscode/
 /docs/*
-!/docs/设计方案.md
 !/docs/zh/
 /docs/zh/*
 !/docs/zh/proxy_protocol_identification_design.md

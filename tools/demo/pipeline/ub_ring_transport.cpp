@@ -129,6 +129,27 @@ bool initialize_eal(const ktag_demo_ub_transport_config &config,
 
 } // namespace
 
+uint32_t ktag_demo_ub_runtime_data_element_size(uint32_t payload_size) {
+#if defined(UB_RING_BUF_HDR_SIZE)
+  /* rte_ub_ring 24.11 aligns (payload + ownership header) to 128 bytes. */
+  constexpr uint64_t kAlignment = 128U;
+  const uint64_t runtime_size =
+      static_cast<uint64_t>(payload_size) + UB_RING_BUF_HDR_SIZE;
+  if (runtime_size > std::numeric_limits<uint32_t>::max()) {
+    return 0U;
+  }
+  const uint64_t aligned_size =
+      (runtime_size + (kAlignment - 1U)) & ~(kAlignment - 1U);
+  if (aligned_size > std::numeric_limits<uint32_t>::max()) {
+    return 0U;
+  }
+  return static_cast<uint32_t>(aligned_size);
+#else
+  /* DPDK/UB 24.1 and earlier had no ownership header. */
+  return payload_size;
+#endif
+}
+
 struct ktag_demo_ub_ring_transport::implementation {
   ~implementation() {
     if (handle != nullptr) {

@@ -135,8 +135,9 @@ pipeline:
   distributed:
     ub_ring:
       enabled: false
-      provider_nodes: [fe-01, fe-02, fe-03]
-      user_nodes: [be-01]
+      # 命名规则：provider hostname 必须字典序小于 user。
+      provider_nodes: [computer01, computer02, computer03]
+      user_nodes: [controller]
       region: ktag_ub_region
       shm_prefix: ktag_feature
       provider_shm_size: 268435456

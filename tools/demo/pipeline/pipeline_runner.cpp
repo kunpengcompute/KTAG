@@ -1557,8 +1557,15 @@ public:
       actual_size =
           transport_->data_element_size(mapping_.provider_node_index);
     }
-    if (actual_size != config.ub.data_element_size) {
-      *error = "Frontend/Backend UB data_element_size does not match";
+    const uint32_t expected_runtime_size =
+        ktag_demo_ub_runtime_data_element_size(config.ub.data_element_size);
+    if (expected_runtime_size == 0U || actual_size != expected_runtime_size) {
+      std::ostringstream message;
+      message << "Frontend/Backend UB runtime element size does not match: "
+              << "payload=" << config.ub.data_element_size
+              << ", expected_runtime=" << expected_runtime_size
+              << ", actual_runtime=" << actual_size;
+      *error = message.str();
       return false;
     }
     if (!take_credit(&ready_buffer_, error)) {
@@ -1836,8 +1843,18 @@ public:
         }
         const uint32_t actual_size = transport_->data_element_size(
             provider.mapping.provider_node_index);
-        if (actual_size != config.ub.data_element_size) {
-          *error = "Provider/Backend UB data_element_size does not match";
+        const uint32_t expected_runtime_size =
+            ktag_demo_ub_runtime_data_element_size(
+                config.ub.data_element_size);
+        if (expected_runtime_size == 0U ||
+            actual_size != expected_runtime_size) {
+          std::ostringstream message;
+          message << "Provider/Backend UB runtime element size does not "
+                     "match: payload="
+                  << config.ub.data_element_size
+                  << ", expected_runtime=" << expected_runtime_size
+                  << ", actual_runtime=" << actual_size;
+          *error = message.str();
           return false;
         }
         providers_.push_back(std::move(provider));
