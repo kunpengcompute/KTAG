@@ -1,12 +1,6 @@
 .vscode/
 /docs/*
 !/docs/zh/
-/docs/zh/*
-!/docs/zh/release_notes.md
-!/docs/zh/installation_guide.md
-!/docs/zh/user_guide.md
-!/docs/zh/api_reference.md
-!/docs/zh/quick_start.md
 /build/
 /output/
 /result/
