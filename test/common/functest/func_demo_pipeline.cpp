@@ -24,6 +24,7 @@
 #include "pipeline_runner.h"
 #include "proxy_feature_catalog.h"
 #include "schema_feature_writer.h"
+#include "ub_feature_wire.h"
 
 namespace {
 
@@ -775,6 +776,231 @@ TEST(KTAGDemoPipelineConfig, FeatureOnlyDoesNotRequireModelOrInference)
     std::remove(path.c_str());
 }
 
+TEST(KTAGDemoPipelineConfig, ParsesSharedTopologyForDistributedFrontend)
+{
+    const std::string path = write_config(
+        "pipeline:\n"
+        "  enabled: false\n"
+        "  mode: feature_parallel\n"
+        "  feature:\n"
+        "    threads: 3\n"
+        "  backpressure:\n"
+        "    policy: block\n"
+        "  distributed:\n"
+        "    ub_ring:\n"
+        "      enabled: false\n"
+        "      provider_nodes: [fe-01, fe-02, fe-03]\n"
+        "      user_nodes: [be-01]\n"
+        "      region: ktag-test-region\n"
+        "      shm_prefix: ktag-test-feature\n"
+        "      provider_shm_size: 134217728\n"
+        "      queues_per_provider: 1\n"
+        "      queue_depth: 1024\n"
+        "      data_element_size: 4096\n"
+        "      credits_per_provider: 256\n"
+        "      poll_us: 50\n"
+        "      ground_truth_labels:\n"
+        "        fe-01: [0, 3]\n"
+        "        fe-02: [1, 4]\n"
+        "        fe-03: [2]\n"
+        "      eal_arguments: [kdadk_demo, --no-huge, -l, \"0\"]\n"
+        "  schema:\n"
+        "    name: ktag_legacy_v1\n"
+        "    version: 1\n");
+    ktag_demo_pipeline_config_overrides overrides;
+    overrides.force_enable = true;
+    overrides.distributed_role_set = true;
+    overrides.distributed_role = ktag_demo_distributed_role::frontend;
+    overrides.node_id = "fe-02";
+    ktag_demo_pipeline_config config;
+    std::string error;
+    ASSERT_EQ(
+        ktag_demo_pipeline_config_result::enabled,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error))
+        << error;
+    EXPECT_TRUE(config.feature_only);
+    EXPECT_TRUE(config.model_package_path.empty());
+    EXPECT_TRUE(config.ub.configured);
+    EXPECT_TRUE(config.ub.enabled);
+    EXPECT_EQ(ktag_demo_distributed_role::frontend, config.ub.role);
+    EXPECT_EQ("fe-02", config.ub.node_id);
+    ASSERT_EQ(3U, config.ub.provider_nodes.size());
+    ASSERT_EQ(1U, config.ub.user_nodes.size());
+    EXPECT_EQ("be-01", config.ub.user_nodes.front());
+    EXPECT_EQ(134217728U, config.ub.provider_shm_size);
+    EXPECT_EQ(256U, config.ub.credits_per_provider);
+    ASSERT_EQ(3U, config.ub.ground_truth_labels.size());
+    EXPECT_EQ((std::vector<uint32_t>{1U, 4U}),
+              config.ub.ground_truth_labels.at("fe-02"));
+    ASSERT_EQ(4U, config.ub.eal_arguments.size());
+    EXPECT_EQ("0", config.ub.eal_arguments.back());
+    EXPECT_NE(0U, config.ub.ruleset_hash);
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, ParsesDistributedBackendWithModel)
+{
+    const std::string path = write_config(
+        "pipeline:\n"
+        "  enabled: false\n"
+        "  mode: feature_parallel\n"
+        "  model_package_path: model_package\n"
+        "  inference:\n"
+        "    threads: 1\n"
+        "    batch_timeout_us: 2500\n"
+        "  backpressure:\n"
+        "    policy: block\n"
+        "  distributed:\n"
+        "    ub_ring:\n"
+        "      provider_nodes: [fe-01, fe-02, fe-03]\n"
+        "      user_nodes: [be-01]\n"
+        "      queue_depth: 1024\n"
+        "      data_element_size: 4096\n"
+        "      credits_per_provider: 256\n");
+    ktag_demo_pipeline_config_overrides overrides;
+    overrides.force_enable = true;
+    overrides.distributed_role_set = true;
+    overrides.distributed_role = ktag_demo_distributed_role::backend;
+    overrides.node_id = "be-01";
+    ktag_demo_pipeline_config config;
+    std::string error;
+    ASSERT_EQ(
+        ktag_demo_pipeline_config_result::enabled,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error))
+        << error;
+    EXPECT_FALSE(config.feature_only);
+    EXPECT_FALSE(config.model_package_path.empty());
+    EXPECT_EQ(ktag_demo_distributed_role::backend, config.ub.role);
+    EXPECT_EQ("be-01", config.ub.node_id);
+    EXPECT_EQ(2500U, config.inference_batch_timeout_us);
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsDistributedRoleOrBackpressureMismatch)
+{
+    const std::string path = write_config(
+        "pipeline:\n"
+        "  enabled: false\n"
+        "  mode: feature_parallel\n"
+        "  feature:\n"
+        "    threads: 3\n"
+        "  backpressure:\n"
+        "    policy: drop_newest\n"
+        "  distributed:\n"
+        "    ub_ring:\n"
+        "      provider_nodes: [fe-01, fe-02, fe-03]\n"
+        "      user_nodes: [be-01]\n"
+        "      queue_depth: 1024\n"
+        "      data_element_size: 4096\n"
+        "      credits_per_provider: 256\n");
+    ktag_demo_pipeline_config_overrides overrides;
+    overrides.force_enable = true;
+    overrides.distributed_role_set = true;
+    overrides.distributed_role = ktag_demo_distributed_role::frontend;
+    overrides.node_id = "be-01";
+    ktag_demo_pipeline_config config;
+    std::string error;
+    EXPECT_EQ(
+        ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error));
+    EXPECT_NE(std::string::npos, error.find("selected distributed role"));
+
+    overrides.node_id = "fe-01";
+    error.clear();
+    EXPECT_EQ(
+        ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error));
+    EXPECT_NE(std::string::npos, error.find("requires pipeline.backpressure"));
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, RestrictsFirstDistributedFrontendTopology)
+{
+    ktag_demo_pipeline_config_overrides overrides;
+    overrides.force_enable = true;
+    overrides.distributed_role_set = true;
+    overrides.distributed_role = ktag_demo_distributed_role::frontend;
+    overrides.node_id = "fe-01";
+    ktag_demo_pipeline_config config;
+    std::string error;
+
+    std::string path = write_config(
+        "pipeline:\n"
+        "  enabled: false\n"
+        "  mode: full_parallel\n"
+        "  backpressure: {policy: block}\n"
+        "  distributed:\n"
+        "    ub_ring:\n"
+        "      provider_nodes: [fe-01]\n"
+        "      user_nodes: [be-01]\n"
+        "      queues_per_provider: 1\n"
+        "      queue_depth: 1024\n"
+        "      data_element_size: 4096\n"
+        "      credits_per_provider: 256\n");
+    EXPECT_EQ(
+        ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error));
+    EXPECT_NE(std::string::npos, error.find("feature_parallel"));
+
+    path = write_config(
+        "pipeline:\n"
+        "  enabled: false\n"
+        "  mode: feature_parallel\n"
+        "  backpressure: {policy: block}\n"
+        "  distributed:\n"
+        "    ub_ring:\n"
+        "      provider_nodes: [fe-01]\n"
+        "      user_nodes: [be-01]\n"
+        "      queues_per_provider: 2\n"
+        "      queue_depth: 1024\n"
+        "      data_element_size: 4096\n"
+        "      credits_per_provider: 256\n");
+    error.clear();
+    EXPECT_EQ(
+        ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error));
+    EXPECT_NE(std::string::npos, error.find("one UB queue"));
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsIncompleteGroundTruthTopology)
+{
+    const std::string path = write_config(
+        "pipeline:\n"
+        "  enabled: false\n"
+        "  mode: feature_parallel\n"
+        "  backpressure: {policy: block}\n"
+        "  distributed:\n"
+        "    ub_ring:\n"
+        "      provider_nodes: [fe-01, fe-02]\n"
+        "      user_nodes: [be-01]\n"
+        "      queues_per_provider: 1\n"
+        "      queue_depth: 1024\n"
+        "      data_element_size: 4096\n"
+        "      credits_per_provider: 256\n"
+        "      ground_truth_labels:\n"
+        "        fe-01: [0]\n");
+    ktag_demo_pipeline_config_overrides overrides;
+    overrides.force_enable = true;
+    overrides.distributed_role_set = true;
+    overrides.distributed_role = ktag_demo_distributed_role::frontend;
+    overrides.node_id = "fe-01";
+    ktag_demo_pipeline_config config;
+    std::string error;
+    EXPECT_EQ(
+        ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config_with_overrides(
+            path.c_str(), &overrides, &config, &error));
+    EXPECT_NE(std::string::npos, error.find("every Provider"));
+    std::remove(path.c_str());
+}
+
 TEST(KTAGDemoPipelineConfig, RejectsMutationOfFrozenOfficialSchemaNames)
 {
     ktag_demo_pipeline_config_overrides overrides;
@@ -1020,9 +1246,123 @@ TEST(KTAGDemoSchemaFeatureWriter, ExpandsSchemaAndQuotesIpv6Metadata)
     ktag_feature_schema_destroy(schema);
 }
 
+TEST(KTAGDemoUbFeatureWire, RoundTripsFeatureRecordAndContract)
+{
+    ktag_demo_schema_feature_record input;
+    input.source_index = 7U;
+    input.details.struct_size = sizeof(input.details);
+    input.details.api_version = KTAG_API_VERSION;
+    auto &metadata = input.details.metadata;
+    metadata.struct_size = sizeof(metadata);
+    metadata.api_version = KTAG_API_VERSION;
+    metadata.flow_id = 0x1122334455667788ULL;
+    metadata.flow_key.struct_size = sizeof(metadata.flow_key);
+    metadata.flow_key.api_version = KTAG_API_VERSION;
+    metadata.flow_key.address_a.version = 6U;
+    metadata.flow_key.address_b.version = 4U;
+    ASSERT_EQ(1, inet_pton(AF_INET6, "2001:db8::10",
+                           metadata.flow_key.address_a.bytes));
+    ASSERT_EQ(1, inet_pton(AF_INET, "192.0.2.20",
+                           metadata.flow_key.address_b.bytes));
+    metadata.flow_key.port_a = 443U;
+    metadata.flow_key.port_b = 51000U;
+    metadata.flow_key.protocol = 6U;
+    metadata.first_packet_sequence = 19U;
+    metadata.last_packet_sequence = 91U;
+    input.details.source_address = metadata.flow_key.address_b;
+    input.details.destination_address = metadata.flow_key.address_a;
+    input.details.source_port = metadata.flow_key.port_b;
+    input.details.destination_port = metadata.flow_key.port_a;
+    input.details.ipv6_extension_packet_count = 3U;
+    input.details.ip_fragment_first_packet_count = 2U;
+    input.values = {1.25F, -2.5F, 0.0F, 99.75F};
+
+    ktag_demo_ub_frame_contract contract;
+    contract.frontend_id_hash = 0xa1U;
+    contract.epoch = 5U;
+    contract.sequence = 17U;
+    contract.schema_hash = 0xdd48882b53bebfa5ULL;
+    contract.ruleset_hash = 0xbbU;
+
+    std::vector<uint8_t> buffer(
+        ktag_demo_ub_feature_frame_size(input.values.size()));
+    size_t encoded_size = 0U;
+    std::string error;
+    ASSERT_TRUE(ktag_demo_ub_encode_feature_frame(
+        buffer.data(), buffer.size(), contract, input, true, &encoded_size,
+        &error)) << error;
+    EXPECT_EQ(buffer.size(), encoded_size);
+
+    ktag_demo_ub_frame_info info;
+    ktag_demo_schema_feature_record output;
+    ASSERT_TRUE(ktag_demo_ub_decode_feature_frame(
+        buffer.data(), buffer.size(), &info, &output, &error)) << error;
+    EXPECT_EQ(ktag_demo_ub_message_type::feature, info.message_type);
+    EXPECT_EQ(KTAG_DEMO_UB_FRAME_FLAG_GROUND_TRUTH_VALID, info.flags);
+    EXPECT_EQ(contract.frontend_id_hash, info.contract.frontend_id_hash);
+    EXPECT_EQ(contract.epoch, info.contract.epoch);
+    EXPECT_EQ(contract.sequence, info.contract.sequence);
+    EXPECT_EQ(contract.schema_hash, info.contract.schema_hash);
+    EXPECT_EQ(contract.ruleset_hash, info.contract.ruleset_hash);
+    EXPECT_EQ(input.source_index, output.source_index);
+    EXPECT_EQ(metadata.flow_id, output.details.metadata.flow_id);
+    EXPECT_EQ(metadata.flow_key.port_a,
+              output.details.metadata.flow_key.port_a);
+    EXPECT_EQ(metadata.flow_key.port_b,
+              output.details.metadata.flow_key.port_b);
+    EXPECT_EQ(metadata.flow_key.protocol,
+              output.details.metadata.flow_key.protocol);
+    EXPECT_EQ(0, std::memcmp(metadata.flow_key.address_a.bytes,
+                             output.details.metadata.flow_key.address_a.bytes,
+                             KTAG_IPV6_ADDRESS_SIZE));
+    EXPECT_EQ(input.details.source_port, output.details.source_port);
+    EXPECT_EQ(input.details.destination_port, output.details.destination_port);
+    EXPECT_EQ(input.details.ipv6_extension_packet_count,
+              output.details.ipv6_extension_packet_count);
+    EXPECT_EQ(input.values, output.values);
+}
+
+TEST(KTAGDemoUbFeatureWire, ValidatesControlAndRejectsCorruption)
+{
+    ktag_demo_ub_frame_contract contract;
+    contract.frontend_id_hash = 3U;
+    contract.epoch = 9U;
+    contract.schema_hash = 11U;
+    contract.ruleset_hash = 13U;
+    std::array<uint8_t, KTAG_DEMO_UB_FRAME_HEADER_SIZE> control{};
+    size_t encoded_size = 0U;
+    std::string error;
+    ASSERT_TRUE(ktag_demo_ub_encode_control_frame(
+        control.data(), control.size(), ktag_demo_ub_message_type::credit,
+        contract, &encoded_size, &error)) << error;
+    ktag_demo_ub_frame_info info;
+    ASSERT_TRUE(ktag_demo_ub_inspect_frame(
+        control.data(), control.size(), &info, &error)) << error;
+    EXPECT_EQ(ktag_demo_ub_message_type::credit, info.message_type);
+    EXPECT_EQ(contract.schema_hash, info.contract.schema_hash);
+
+    ktag_demo_schema_feature_record record{};
+    record.values = {1.0F, 2.0F};
+    std::vector<uint8_t> feature(
+        ktag_demo_ub_feature_frame_size(record.values.size()));
+    ASSERT_TRUE(ktag_demo_ub_encode_feature_frame(
+        feature.data(), feature.size(), contract, record, false,
+        &encoded_size, &error)) << error;
+    ASSERT_TRUE(ktag_demo_ub_inspect_frame(
+        feature.data(), feature.size(), &info, &error)) << error;
+    EXPECT_EQ(0U, info.flags);
+    feature.back() ^= 0x1U;
+    EXPECT_FALSE(ktag_demo_ub_inspect_frame(
+        feature.data(), feature.size(), &info, &error));
+    EXPECT_NE(std::string::npos, error.find("CRC"));
+    EXPECT_FALSE(ktag_demo_ub_encode_feature_frame(
+        feature.data(), KTAG_DEMO_UB_FRAME_HEADER_SIZE, contract, record,
+        false, &encoded_size, &error));
+}
+
 TEST(KTAGDemoPredictionWriter, WritesDualStackMetadataAndConfidenceContract)
 {
-    const std::vector<ktag_demo_pipeline_prediction> predictions{
+    std::vector<ktag_demo_pipeline_prediction> predictions{
         make_prediction(false, 5, 0.0F, 7U),
         make_prediction(
             true,
@@ -1065,6 +1405,7 @@ TEST(KTAGDemoPredictionWriter, WritesDualStackMetadataAndConfidenceContract)
 
     EXPECT_NE(std::string::npos, json.find("\"ip_version\":4"));
     EXPECT_NE(std::string::npos, json.find("\"ip_version\":6"));
+    EXPECT_EQ(std::string::npos, json.find("frontend_id_hash"));
     EXPECT_NE(std::string::npos, json.find("\"label\":5,\"confidence\":0"));
     EXPECT_NE(std::string::npos, json.find("\"label\":9,\"confidence\":-1"));
     EXPECT_EQ(std::string::npos, json.find("unknown"));

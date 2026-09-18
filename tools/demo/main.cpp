@@ -22,10 +22,16 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <string>
 #include <unistd.h>
 
+#ifndef KTAG_ENABLE_DPDK_UB
+#define KTAG_ENABLE_DPDK_UB 0
+#endif
+
 enum {
   KTAG_DEMO_OPT_PIPELINE_MODE = 1000,
   KTAG_DEMO_OPT_INFERENCE_THREADS,
-  KTAG_DEMO_OPT_FEATURE_CONFIG
+  KTAG_DEMO_OPT_FEATURE_CONFIG,
+  KTAG_DEMO_OPT_DISTRIBUTED_ROLE,
+  KTAG_DEMO_OPT_NODE_ID
 };
 
 typedef struct {
@@ -43,6 +49,8 @@ typedef struct {
   char *pipeline_mode;        // legacy 或四种新 pipeline mode
   uint32_t feature_threads;   // 0 表示使用 YAML
   uint32_t inference_threads; // 0 表示使用 YAML
+  char *distributed_role;     // frontend 或 backend
+  char *node_id;              // UB 拓扑中的本机 hostname
 } CommandLineArgs;
 
 int feature_extraction_mode(const char *pcap_file, const char *output_file,
@@ -437,6 +445,8 @@ void print_usage(const char *prog_name) {
          "legacy/single_thread/staged/feature_parallel/full_parallel\n");
   printf("  -n, --feature-threads N Feature Worker 数量（仅新 pipeline）\n");
   printf("  --inference-threads N   Inference Worker 数量（仅新 pipeline）\n");
+  printf("  --distributed-role R    UB 节点角色: frontend/backend\n");
+  printf("  --node-id HOSTNAME      本机在 UB 拓扑中的 hostname\n");
   printf("  -c <output.csv>         输出CSV文件路径 (与 -j 互斥)\n");
   printf("  -j <output.json>        输出JSON文件路径 (与 -c 互斥)\n");
   printf("  -w                      输出是否带有rawbow (仅用于 -f "
@@ -471,6 +481,14 @@ void print_usage(const char *prog_name) {
   printf("\n");
   printf("  # 在线推理 - 网口实时抓包，输出JSON\n");
   printf("  %s -r config.yaml -i eth0 -j result.json\n", prog_name);
+  printf("\n");
+  printf("  # UB 分布式推理（所有节点使用同一份 YAML）\n");
+  printf("  %s -r config.yaml -i eth0 --distributed-role frontend "
+         "--node-id fe-01\n",
+         prog_name);
+  printf("  %s -r config.yaml --distributed-role backend --node-id be-01 "
+         "-c result.csv\n",
+         prog_name);
   printf("\n");
   printf("  # 列出可用网口\n");
   printf("  %s -l\n", prog_name);
@@ -534,6 +552,9 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       {"inference-threads", required_argument, nullptr,
        KTAG_DEMO_OPT_INFERENCE_THREADS},
       {"config", required_argument, nullptr, KTAG_DEMO_OPT_FEATURE_CONFIG},
+      {"distributed-role", required_argument, nullptr,
+       KTAG_DEMO_OPT_DISTRIBUTED_ROLE},
+      {"node-id", required_argument, nullptr, KTAG_DEMO_OPT_NODE_ID},
       {nullptr, 0, nullptr, 0}};
   while ((opt = getopt_long(argc, argv, "t:e:f:r:p:i:m:c:j:n:wlh", long_options,
                             nullptr)) != -1) {
@@ -601,6 +622,23 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
     case KTAG_DEMO_OPT_FEATURE_CONFIG:
       args->feature_config_file = optarg;
       break;
+    case KTAG_DEMO_OPT_DISTRIBUTED_ROLE: {
+      ktag_demo_distributed_role parsed_role;
+      if (!ktag_demo_distributed_role_from_name(optarg, &parsed_role)) {
+        fprintf(stderr,
+                "错误: --distributed-role 只能是 frontend 或 backend\n");
+        return -1;
+      }
+      args->distributed_role = optarg;
+      break;
+    }
+    case KTAG_DEMO_OPT_NODE_ID:
+      if (optarg[0] == '\0') {
+        fprintf(stderr, "错误: --node-id 不能为空\n");
+        return -1;
+      }
+      args->node_id = optarg;
+      break;
     case 'c':
       if (json_specified) {
         fprintf(stderr, "错误: -c 和 -j 选项不能同时使用\n");
@@ -659,7 +697,9 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
 
   const int has_pipeline_cli = args->pipeline_mode != nullptr ||
                                args->feature_threads != 0U ||
-                               args->inference_threads != 0U;
+                               args->inference_threads != 0U ||
+                               args->distributed_role != nullptr ||
+                               args->node_id != nullptr;
   if (args->feature_config_file != nullptr && args->operation != 2) {
     fprintf(stderr, "错误: --config 只能与 Schema 特征提取模式 -f 一起使用\n");
     return -1;
@@ -675,6 +715,35 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       (args->feature_threads != 0U || args->inference_threads != 0U)) {
     fprintf(stderr,
             "错误: legacy 模式不能同时指定 Feature/Inference Worker 数量\n");
+    return -1;
+  }
+  if ((args->distributed_role == nullptr) != (args->node_id == nullptr)) {
+    fprintf(stderr,
+            "错误: --distributed-role 和 --node-id 必须同时指定\n");
+    return -1;
+  }
+  if (args->node_id != nullptr) {
+    constexpr size_t kHostnameBufferSize = 256U;
+    char hostname[kHostnameBufferSize] = {};
+    if (gethostname(hostname, sizeof(hostname) - 1U) != 0 ||
+        strcmp(args->node_id, hostname) != 0) {
+      fprintf(stderr,
+              "错误: --node-id 必须与本机 gethostname() 结果完全一致"
+              "（当前为 %s）\n",
+              hostname[0] == '\0' ? "<unavailable>" : hostname);
+      return -1;
+    }
+  }
+  if (args->distributed_role != nullptr &&
+      args->pipeline_mode != nullptr &&
+      strcmp(args->pipeline_mode, "legacy") == 0) {
+    fprintf(stderr, "错误: UB 分布式模式不支持 legacy pipeline\n");
+    return -1;
+  }
+  if (args->distributed_role != nullptr && !KTAG_ENABLE_DPDK_UB) {
+    fprintf(stderr,
+            "错误: 当前构建未启用 DPDK UB，请使用 "
+            "-DKTAG_ENABLE_DPDK_UB=ON 重新构建\n");
     return -1;
   }
 
@@ -730,8 +799,33 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
 
   // 3. 在线推理模式 (-r) 的验证
   if (args->operation == 3) {
-    // 必须有输入源（PCAP文件或网口）
-    if (args->num_pcap_files == 0 && !args->interface) {
+    const bool distributed_frontend =
+        args->distributed_role != nullptr &&
+        strcmp(args->distributed_role, "frontend") == 0;
+    const bool distributed_backend =
+        args->distributed_role != nullptr &&
+        strcmp(args->distributed_role, "backend") == 0;
+
+    if (distributed_backend &&
+        (args->num_pcap_files != 0 || args->interface != nullptr)) {
+      fprintf(stderr,
+              "错误: 分布式 Backend 的输入来自 UB，不能指定 -p/-i\n");
+      return -1;
+    }
+    if (distributed_backend && args->output_file == nullptr) {
+      fprintf(stderr,
+              "错误: 分布式 Backend 需要用 -c 或 -j 指定推理结果文件\n");
+      return -1;
+    }
+    if (distributed_frontend && args->output_file != nullptr) {
+      fprintf(stderr,
+              "错误: 分布式 Frontend 不产生推理结果，请在 Backend 指定 -c/-j\n");
+      return -1;
+    }
+
+    // 独立模式和 Frontend 必须有输入源。
+    if (!distributed_backend && args->num_pcap_files == 0 &&
+        !args->interface) {
       fprintf(stderr, "错误: 在线推理模式需要指定输入源 (-p <file.pcap> 或 -i "
                       "<interface>)\n");
       print_usage(argv[0]);
@@ -739,7 +833,8 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
     }
 
     // 如果是PCAP文件输入，必须有输出文件
-    if (args->num_pcap_files > 0 && !args->output_file) {
+    if (!distributed_frontend && args->num_pcap_files > 0 &&
+        !args->output_file) {
       fprintf(stderr, "错误: 在线推理模式（PCAP文件输入）需要指定输出文件 (-c "
                       "<output.csv> 或 -j <output.json>)\n");
       fprintf(stderr, "提示: 使用 -c 参数指定CSV格式输出，或使用 -j "
@@ -756,7 +851,7 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
     }
 
     // 如果是网口实时抓包，输出文件是可选的
-    if (args->interface && !args->output_file) {
+    if (!distributed_frontend && args->interface && !args->output_file) {
       printf(
           "提示: 网口实时抓包模式未指定输出文件，推理结果将仅打印到控制台\n");
     }
@@ -848,9 +943,16 @@ int main(int argc, char *argv[]) {
       ktag_demo_pipeline_config_overrides overrides;
       overrides.force_enable = args.pipeline_mode != nullptr ||
                                args.feature_threads != 0U ||
-                               args.inference_threads != 0U;
+                               args.inference_threads != 0U ||
+                               args.distributed_role != nullptr;
       overrides.feature_threads = args.feature_threads;
       overrides.inference_threads = args.inference_threads;
+      if (args.distributed_role != nullptr) {
+        overrides.distributed_role_set = true;
+        overrides.node_id = args.node_id;
+        (void)ktag_demo_distributed_role_from_name(
+            args.distributed_role, &overrides.distributed_role);
+      }
       if (args.pipeline_mode != nullptr) {
         overrides.mode_set = true;
         (void)ktag_demo_pipeline_mode_from_name(args.pipeline_mode,

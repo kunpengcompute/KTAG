@@ -21,7 +21,9 @@ enum class ktag_demo_pipeline_output_format { csv, json };
  * the public inference result returned for the same record.
  */
 struct ktag_demo_pipeline_prediction {
+  uint64_t frontend_id_hash = 0U;
   uint32_t source_index = 0U;
+  bool ground_truth_valid = true;
   ktag_feature_record_details details{};
   ktag_prediction_record record{};
 };

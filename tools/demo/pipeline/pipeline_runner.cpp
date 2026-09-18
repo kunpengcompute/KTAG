@@ -8,6 +8,15 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "feature_plugin_loader.h"
 #include "schema_feature_writer.h"
 
+#ifndef KTAG_ENABLE_DPDK_UB
+#define KTAG_ENABLE_DPDK_UB 0
+#endif
+
+#if KTAG_ENABLE_DPDK_UB
+#include "ub_feature_wire.h"
+#include "ub_ring_transport.h"
+#endif
+
 #include "ktag_capture.h"
 #include "ktag_feature.h"
 #include "ktag_inference.h"
@@ -23,8 +32,10 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -164,6 +175,8 @@ private:
 
 using feature_record_owned = ktag_demo_schema_feature_record;
 using pipeline_prediction = ktag_demo_pipeline_prediction;
+using feature_record_handler =
+    std::function<bool(feature_record_owned &&, std::string *)>;
 
 struct capture_statistics {
   uint64_t packets = 0U;
@@ -287,6 +300,9 @@ bool flow_key_less(const ktag_flow_key &left, const ktag_flow_key &right) {
 
 bool prediction_less(const pipeline_prediction &left,
                      const pipeline_prediction &right) {
+  if (left.frontend_id_hash != right.frontend_id_hash) {
+    return left.frontend_id_hash < right.frontend_id_hash;
+  }
   if (left.source_index != right.source_index) {
     return left.source_index < right.source_index;
   }
@@ -339,6 +355,7 @@ bool append_predictions(
   try {
     for (uint32_t index = 0U; index < count; ++index) {
       pipeline_prediction result;
+      result.frontend_id_hash = 0U;
       result.source_index = source_index;
       const ktag_status status =
           ktag_prediction_batch_get_record(batch, index, &result.record);
@@ -366,6 +383,52 @@ bool append_predictions(
     return false;
   }
 }
+
+#if KTAG_ENABLE_DPDK_UB
+bool append_distributed_predictions(
+    const ktag_prediction_batch *batch,
+    const std::vector<ktag_feature_record_details> &details,
+    const std::vector<uint32_t> &source_indices,
+    const std::vector<uint64_t> &frontend_hashes,
+    const std::vector<uint8_t> &ground_truth_valid,
+    std::vector<pipeline_prediction> *predictions, std::string *error) {
+  if (batch == nullptr || predictions == nullptr || error == nullptr ||
+      details.size() != source_indices.size() ||
+      details.size() != frontend_hashes.size() ||
+      details.size() != ground_truth_valid.size()) {
+    if (error != nullptr) {
+      *error = "distributed Prediction metadata is inconsistent";
+    }
+    return false;
+  }
+  const uint32_t count = ktag_prediction_batch_get_count(batch);
+  try {
+    for (uint32_t index = 0U; index < count; ++index) {
+      pipeline_prediction result;
+      const ktag_status status =
+          ktag_prediction_batch_get_record(batch, index, &result.record);
+      if (status != KTAG_SUCCESS) {
+        *error = "failed to read distributed Prediction Batch record";
+        return false;
+      }
+      const uint32_t record_index = result.record.source_record_index;
+      if (record_index >= details.size()) {
+        *error = "distributed Prediction source index exceeds its Batch";
+        return false;
+      }
+      result.details = details[record_index];
+      result.source_index = source_indices[record_index];
+      result.frontend_id_hash = frontend_hashes[record_index];
+      result.ground_truth_valid = ground_truth_valid[record_index] != 0U;
+      predictions->push_back(result);
+    }
+    return true;
+  } catch (...) {
+    *error = "out of memory collecting distributed Predictions";
+    return false;
+  }
+}
+#endif
 
 bool copy_feature_records(const ktag_feature_batch *batch,
                           uint32_t source_index,
@@ -856,9 +919,11 @@ public:
   parallel_source_executor(const ktag_demo_pipeline_config &config,
                            const ktag_feature_schema *schema,
                            const ktag_feature_registry *registry,
-                           uint32_t source_index)
+                           uint32_t source_index,
+                           feature_record_handler record_handler = {})
       : config_(config), schema_(schema), registry_(registry),
         source_index_(source_index),
+        record_handler_(std::move(record_handler)),
         feature_queue_(config.feature_queue_capacity),
         active_feature_workers_(config.feature_threads),
         feature_stats_(config.feature_threads),
@@ -878,7 +943,8 @@ public:
     predictions_ = predictions;
     feature_records_ = feature_records;
     live_ = live;
-    if ((config_.feature_only && feature_records_ == nullptr) ||
+    if ((config_.feature_only && feature_records_ == nullptr &&
+         !record_handler_) ||
         (!config_.feature_only && predictions_ == nullptr)) {
       *error = "parallel pipeline output storage is required";
       return false;
@@ -1283,7 +1349,13 @@ private:
       if (failed_.load(std::memory_order_acquire)) {
         break;
       }
-      {
+      if (record_handler_) {
+        std::string error;
+        if (!record_handler_(std::move(record), &error)) {
+          fail(error.empty() ? "Feature Record handler failed" : error);
+          break;
+        }
+      } else {
         std::lock_guard<std::mutex> lock(prediction_mutex_);
         try {
           feature_records_->push_back(std::move(record));
@@ -1337,6 +1409,7 @@ private:
   const ktag_feature_schema *schema_;
   const ktag_feature_registry *registry_;
   uint32_t source_index_;
+  feature_record_handler record_handler_;
   capture_ptr capture_;
   domain_store_ptr domain_store_;
   std::vector<feature_context_ptr> feature_contexts_;
@@ -1366,11 +1439,846 @@ bool run_parallel_source(
     const ktag_feature_registry *registry, const char *source, bool live,
     uint32_t source_index, std::vector<pipeline_prediction> *predictions,
     std::vector<ktag_demo_schema_feature_record> *feature_records,
-    pipeline_source_statistics *statistics, std::string *error) {
-  parallel_source_executor executor(config, schema, registry, source_index);
+    pipeline_source_statistics *statistics, std::string *error,
+    feature_record_handler record_handler = {}) {
+  parallel_source_executor executor(config, schema, registry, source_index,
+                                    std::move(record_handler));
   return executor.run(source, live, predictions, feature_records, statistics,
                       error);
 }
+
+#if KTAG_ENABLE_DPDK_UB
+
+uint64_t ub_identity_hash(const std::string &identity) {
+  uint64_t hash = 14695981039346656037ULL;
+  for (unsigned char byte : identity) {
+    hash ^= byte;
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+void ub_poll_backoff(uint32_t poll_us) {
+  if (poll_us == 0U) {
+    std::this_thread::yield();
+  } else {
+    std::this_thread::sleep_for(std::chrono::microseconds(poll_us));
+  }
+}
+
+ktag_demo_ub_transport_config make_ub_transport_config(
+    const ktag_demo_pipeline_config &config, ktag_demo_ub_role role) {
+  ktag_demo_ub_transport_config transport;
+  transport.role = role;
+  transport.provider_nodes = config.ub.provider_nodes;
+  transport.user_nodes = config.ub.user_nodes;
+  transport.region = config.ub.region;
+  transport.shm_prefix = config.ub.shm_prefix;
+  transport.provider_shm_size =
+      static_cast<size_t>(config.ub.provider_shm_size);
+  transport.queues_per_provider = config.ub.queues_per_provider;
+  transport.queue_depth = config.ub.queue_depth;
+  transport.data_element_size = config.ub.data_element_size;
+  transport.eal_arguments = config.ub.eal_arguments;
+  return transport;
+}
+
+void ub_send_one_blocking(ktag_demo_ub_ring_transport *transport,
+                          uint32_t queue_id, void *buffer, uint32_t poll_us,
+                          uint64_t *retry_count) {
+  void *buffers[1] = {buffer};
+  while (transport->send_burst(queue_id, buffers, 1U) != 1U) {
+    if (retry_count != nullptr) {
+      ++(*retry_count);
+    }
+    ub_poll_backoff(poll_us);
+  }
+}
+
+bool validate_ub_contract(const ktag_demo_ub_frame_info &info,
+                          uint64_t frontend_hash, uint64_t epoch,
+                          uint64_t schema_hash, uint64_t ruleset_hash,
+                          std::string *error) {
+  if (info.contract.frontend_id_hash != frontend_hash) {
+    *error = "UB frame arrived on the wrong Frontend queue";
+    return false;
+  }
+  if (epoch != 0U && info.contract.epoch != epoch) {
+    *error = "UB frame epoch does not match this Backend run";
+    return false;
+  }
+  if (info.contract.schema_hash != schema_hash) {
+    *error = "UB frame Schema hash does not match local configuration";
+    return false;
+  }
+  if (info.contract.ruleset_hash != ruleset_hash) {
+    *error = "UB frame ruleset hash does not match local YAML";
+    return false;
+  }
+  return true;
+}
+
+class ub_frontend_record_sender {
+public:
+  ~ub_frontend_record_sender() {
+    if (ready_buffer_ != nullptr && transport_ != nullptr) {
+      transport_->return_buffer(ready_buffer_);
+    }
+  }
+
+  bool initialize(const ktag_demo_pipeline_config &config,
+                  uint64_t schema_hash, uint32_t value_count,
+                  std::string *error) {
+    config_ = &config;
+    schema_hash_ = schema_hash;
+    value_count_ = value_count;
+    frontend_hash_ = ub_identity_hash(config.ub.node_id);
+    const size_t required = ktag_demo_ub_feature_frame_size(value_count);
+    if (required == 0U || required > config.ub.data_element_size) {
+      std::ostringstream message;
+      message << "UB data_element_size=" << config.ub.data_element_size
+              << " cannot hold the configured Feature frame (required="
+              << required << ')';
+      *error = message.str();
+      return false;
+    }
+    transport_ = ktag_demo_ub_ring_transport::create(
+        make_ub_transport_config(config, ktag_demo_ub_role::provider), error);
+    if (!transport_) {
+      return false;
+    }
+    if (!transport_->queue_mapping(config.ub.node_id, 0U, &mapping_, error)) {
+      return false;
+    }
+    uint32_t actual_size = 0U;
+    while (actual_size == 0U) {
+      ++receive_polls_;
+      ub_poll_backoff(config.ub.poll_us);
+      actual_size =
+          transport_->data_element_size(mapping_.provider_node_index);
+    }
+    const uint32_t expected_runtime_size =
+        ktag_demo_ub_runtime_data_element_size(config.ub.data_element_size);
+    if (expected_runtime_size == 0U || actual_size != expected_runtime_size) {
+      std::ostringstream message;
+      message << "Frontend/Backend UB runtime element size does not match: "
+              << "payload=" << config.ub.data_element_size
+              << ", expected_runtime=" << expected_runtime_size
+              << ", actual_runtime=" << actual_size;
+      *error = message.str();
+      return false;
+    }
+    if (!take_credit(&ready_buffer_, error)) {
+      return false;
+    }
+    std::printf("UB Frontend ready: node=%s, provider_index=%u, queue=%u, "
+                "element=%u, epoch=%llu\n",
+                config.ub.node_id.c_str(), mapping_.provider_node_index,
+                mapping_.tx_queue_id, actual_size,
+                static_cast<unsigned long long>(epoch_));
+    return true;
+  }
+
+  bool send(feature_record_owned &&record, bool ground_truth_valid,
+            std::string *error) {
+    if (record.values.size() != value_count_) {
+      *error = "Frontend Feature value count changed after Schema freeze";
+      return false;
+    }
+    void *buffer = ready_buffer_;
+    ready_buffer_ = nullptr;
+    if (buffer == nullptr && !take_credit(&buffer, error)) {
+      return false;
+    }
+    ktag_demo_ub_frame_contract contract = base_contract();
+    contract.sequence = sequence_ + 1U;
+    size_t encoded_size = 0U;
+    if (!ktag_demo_ub_encode_feature_frame(
+            buffer, config_->ub.data_element_size, contract, record,
+            ground_truth_valid, &encoded_size, error)) {
+      send_error(buffer);
+      return false;
+    }
+    (void)encoded_size;
+    ub_send_one_blocking(transport_.get(), mapping_.tx_queue_id, buffer,
+                         config_->ub.poll_us, &send_retries_);
+    sequence_ = contract.sequence;
+    ++sent_features_;
+    return true;
+  }
+
+  bool drain(std::string *error) {
+    void *buffer = ready_buffer_;
+    ready_buffer_ = nullptr;
+    if (buffer == nullptr && !take_credit(&buffer, error)) {
+      return false;
+    }
+    ktag_demo_ub_frame_contract contract = base_contract();
+    contract.sequence = sequence_;
+    size_t encoded_size = 0U;
+    if (!ktag_demo_ub_encode_control_frame(
+            buffer, config_->ub.data_element_size,
+            ktag_demo_ub_message_type::drain, contract, &encoded_size,
+            error)) {
+      transport_->return_buffer(buffer);
+      return false;
+    }
+    (void)encoded_size;
+    ub_send_one_blocking(transport_.get(), mapping_.tx_queue_id, buffer,
+                         config_->ub.poll_us, &send_retries_);
+
+    while (true) {
+      void *reply = nullptr;
+      if (transport_->receive_burst(mapping_.rx_queue_id, &reply, 1U) == 0U) {
+        ++receive_polls_;
+        ub_poll_backoff(config_->ub.poll_us);
+        continue;
+      }
+      ktag_demo_ub_frame_info info;
+      std::string frame_error;
+      const bool valid = ktag_demo_ub_inspect_frame(
+          reply, config_->ub.data_element_size, &info, &frame_error);
+      if (!valid ||
+          !validate_ub_contract(info, frontend_hash_, epoch_, schema_hash_,
+                                config_->ub.ruleset_hash, &frame_error)) {
+        transport_->return_buffer(reply);
+        *error = valid ? frame_error : "invalid UB shutdown frame: " +
+                                           frame_error;
+        return false;
+      }
+      if (info.message_type == ktag_demo_ub_message_type::credit) {
+        transport_->return_buffer(reply);
+        continue;
+      }
+      if (info.message_type == ktag_demo_ub_message_type::error) {
+        transport_->return_buffer(reply);
+        *error = "Backend rejected the Frontend UB stream";
+        return false;
+      }
+      if (info.message_type != ktag_demo_ub_message_type::drain_ack ||
+          info.contract.sequence != sequence_) {
+        transport_->return_buffer(reply);
+        *error = "Frontend received an unexpected UB shutdown message";
+        return false;
+      }
+      transport_->return_buffer(reply);
+      std::printf("UB Frontend drained: features=%llu, send_retries=%llu, "
+                  "empty_polls=%llu\n",
+                  static_cast<unsigned long long>(sent_features_),
+                  static_cast<unsigned long long>(send_retries_),
+                  static_cast<unsigned long long>(receive_polls_));
+      return true;
+    }
+  }
+
+  void abort_best_effort() {
+    void *buffer = ready_buffer_;
+    ready_buffer_ = nullptr;
+    if (buffer == nullptr && transport_ != nullptr) {
+      (void)transport_->receive_burst(mapping_.rx_queue_id, &buffer, 1U);
+    }
+    if (buffer != nullptr) {
+      send_error(buffer);
+    }
+  }
+
+private:
+  ktag_demo_ub_frame_contract base_contract() const {
+    ktag_demo_ub_frame_contract contract;
+    contract.frontend_id_hash = frontend_hash_;
+    contract.epoch = epoch_;
+    contract.schema_hash = schema_hash_;
+    contract.ruleset_hash = config_->ub.ruleset_hash;
+    return contract;
+  }
+
+  bool take_credit(void **buffer, std::string *error) {
+    while (true) {
+      void *received = nullptr;
+      if (transport_->receive_burst(mapping_.rx_queue_id, &received, 1U) ==
+          0U) {
+        ++receive_polls_;
+        ub_poll_backoff(config_->ub.poll_us);
+        continue;
+      }
+      ktag_demo_ub_frame_info info;
+      std::string frame_error;
+      if (!ktag_demo_ub_inspect_frame(received,
+                                      config_->ub.data_element_size, &info,
+                                      &frame_error)) {
+        send_error(received);
+        *error = "invalid UB CREDIT frame: " + frame_error;
+        return false;
+      }
+      if (info.message_type == ktag_demo_ub_message_type::error) {
+        transport_->return_buffer(received);
+        *error = "Backend rejected the Frontend during UB startup";
+        return false;
+      }
+      if (info.message_type != ktag_demo_ub_message_type::credit) {
+        send_error(received);
+        *error = "Frontend expected a CREDIT frame from Backend";
+        return false;
+      }
+      const uint64_t expected_epoch = epoch_;
+      if (!validate_ub_contract(info, frontend_hash_, expected_epoch,
+                                schema_hash_, config_->ub.ruleset_hash,
+                                &frame_error) ||
+          info.contract.epoch == 0U) {
+        send_error(received);
+        *error = frame_error.empty() ? "UB CREDIT epoch must be non-zero"
+                                     : frame_error;
+        return false;
+      }
+      if (epoch_ == 0U) {
+        epoch_ = info.contract.epoch;
+      }
+      *buffer = received;
+      return true;
+    }
+  }
+
+  void send_error(void *buffer) {
+    if (buffer == nullptr || transport_ == nullptr || config_ == nullptr) {
+      return;
+    }
+    ktag_demo_ub_frame_contract contract = base_contract();
+    contract.sequence = sequence_;
+    size_t encoded_size = 0U;
+    std::string ignored;
+    if (ktag_demo_ub_encode_control_frame(
+            buffer, config_->ub.data_element_size,
+            ktag_demo_ub_message_type::error, contract, &encoded_size,
+            &ignored)) {
+      ub_send_one_blocking(transport_.get(), mapping_.tx_queue_id, buffer,
+                           config_->ub.poll_us, &send_retries_);
+    } else {
+      transport_->return_buffer(buffer);
+    }
+  }
+
+  const ktag_demo_pipeline_config *config_ = nullptr;
+  std::unique_ptr<ktag_demo_ub_ring_transport> transport_;
+  ktag_demo_ub_queue_mapping mapping_{};
+  void *ready_buffer_ = nullptr;
+  uint64_t frontend_hash_ = 0U;
+  uint64_t epoch_ = 0U;
+  uint64_t sequence_ = 0U;
+  uint64_t schema_hash_ = 0U;
+  uint32_t value_count_ = 0U;
+  uint64_t sent_features_ = 0U;
+  uint64_t send_retries_ = 0U;
+  uint64_t receive_polls_ = 0U;
+};
+
+struct ub_backend_provider_state {
+  std::string hostname;
+  uint64_t frontend_hash = 0U;
+  ktag_demo_ub_queue_mapping mapping{};
+  uint64_t last_sequence = 0U;
+  uint64_t received_features = 0U;
+  bool drained = false;
+  void *drain_buffer = nullptr;
+};
+
+class ub_backend_executor {
+public:
+  ~ub_backend_executor() {
+    if (transport_ != nullptr) {
+      for (auto &provider : providers_) {
+        if (provider.drain_buffer != nullptr) {
+          transport_->free_buffer(provider.drain_buffer);
+        }
+      }
+    }
+  }
+
+  bool initialize(const ktag_demo_pipeline_config &config,
+                  const ktag_feature_schema *schema, std::string *error) {
+    config_ = &config;
+    schema_hash_ = ktag_feature_schema_get_hash(schema);
+    value_count_ = ktag_feature_schema_get_value_count(schema);
+    const size_t required = ktag_demo_ub_feature_frame_size(value_count_);
+    if (required == 0U || required > config.ub.data_element_size) {
+      std::ostringstream message;
+      message << "UB data_element_size=" << config.ub.data_element_size
+              << " cannot hold the configured Feature frame (required="
+              << required << ')';
+      *error = message.str();
+      return false;
+    }
+    inference_ = create_inference_context(config, schema);
+    input_.reset(
+        ktag_feature_batch_create(schema, config.inference_batch_size));
+    output_.reset(
+        ktag_prediction_batch_create(config.inference_batch_size));
+    if (!inference_ || !input_ || !output_) {
+      *error = std::string("failed to create distributed Backend Inference "
+                           "contexts: ") +
+               ktag_inference_get_last_error();
+      return false;
+    }
+    transport_ = ktag_demo_ub_ring_transport::create(
+        make_ub_transport_config(config, ktag_demo_ub_role::user), error);
+    if (!transport_) {
+      return false;
+    }
+    epoch_ = static_cast<uint64_t>(
+                 std::chrono::duration_cast<std::chrono::nanoseconds>(
+                     std::chrono::system_clock::now().time_since_epoch())
+                     .count()) ^
+             (static_cast<uint64_t>(getpid()) << 32U);
+    if (epoch_ == 0U) {
+      epoch_ = 1U;
+    }
+    try {
+      providers_.reserve(config.ub.provider_nodes.size());
+      for (const auto &hostname : config.ub.provider_nodes) {
+        ub_backend_provider_state provider;
+        provider.hostname = hostname;
+        provider.frontend_hash = ub_identity_hash(hostname);
+        if (!transport_->queue_mapping(hostname, 0U, &provider.mapping,
+                                       error)) {
+          return false;
+        }
+        const uint32_t actual_size = transport_->data_element_size(
+            provider.mapping.provider_node_index);
+        const uint32_t expected_runtime_size =
+            ktag_demo_ub_runtime_data_element_size(
+                config.ub.data_element_size);
+        if (expected_runtime_size == 0U ||
+            actual_size != expected_runtime_size) {
+          std::ostringstream message;
+          message << "Provider/Backend UB runtime element size does not "
+                     "match: payload="
+                  << config.ub.data_element_size
+                  << ", expected_runtime=" << expected_runtime_size
+                  << ", actual_runtime=" << actual_size;
+          *error = message.str();
+          return false;
+        }
+        providers_.push_back(std::move(provider));
+      }
+    } catch (...) {
+      *error = "out of memory creating Backend Provider state";
+      return false;
+    }
+    if (!prepost_credits(error)) {
+      return false;
+    }
+    std::printf("UB Backend ready: providers=%zu, credits/provider=%u, "
+                "element=%u, epoch=%llu\n",
+                providers_.size(), config.ub.credits_per_provider,
+                config.ub.data_element_size,
+                static_cast<unsigned long long>(epoch_));
+    for (const auto &provider : providers_) {
+      std::printf("  Provider: hostname=%s, frontend_id_hash=%llu, queue=%u\n",
+                  provider.hostname.c_str(),
+                  static_cast<unsigned long long>(provider.frontend_hash),
+                  provider.mapping.rx_queue_id);
+    }
+    return true;
+  }
+
+  bool run(std::vector<pipeline_prediction> *predictions,
+           pipeline_run_statistics *statistics, std::string *error) {
+    std::vector<ktag_feature_record_details> details;
+    std::vector<uint32_t> source_indices;
+    std::vector<uint64_t> frontend_hashes;
+    std::vector<uint8_t> ground_truth_valid;
+    try {
+      details.reserve(config_->inference_batch_size);
+      source_indices.reserve(config_->inference_batch_size);
+      frontend_hashes.reserve(config_->inference_batch_size);
+      ground_truth_valid.reserve(config_->inference_batch_size);
+    } catch (...) {
+      *error = "out of memory reserving distributed Inference Batch";
+      return false;
+    }
+    auto first_record_at = std::chrono::steady_clock::time_point{};
+    uint32_t drained_count = 0U;
+    while (drained_count < providers_.size()) {
+      if (pipeline_interrupted != 0) {
+        *error = "Backend interrupted before all Frontends sent DRAIN";
+        return false;
+      }
+      bool received_any = false;
+      for (auto &provider : providers_) {
+        if (provider.drained) {
+          continue;
+        }
+        void *buffer = nullptr;
+        if (transport_->receive_burst(provider.mapping.rx_queue_id, &buffer,
+                                      1U) == 0U) {
+          continue;
+        }
+        received_any = true;
+        ktag_demo_ub_frame_info info;
+        std::string frame_error;
+        if (!ktag_demo_ub_inspect_frame(
+                buffer, config_->ub.data_element_size, &info, &frame_error) ||
+            !validate_ub_contract(info, provider.frontend_hash, epoch_,
+                                  schema_hash_, config_->ub.ruleset_hash,
+                                  &frame_error)) {
+          transport_->free_buffer(buffer);
+          *error = "invalid UB frame from " + provider.hostname + ": " +
+                   frame_error;
+          return false;
+        }
+        if (info.message_type == ktag_demo_ub_message_type::error) {
+          transport_->free_buffer(buffer);
+          *error = "Frontend " + provider.hostname +
+                   " rejected the UB stream contract";
+          return false;
+        }
+        if (info.message_type == ktag_demo_ub_message_type::drain) {
+          if (info.contract.sequence != provider.last_sequence) {
+            transport_->free_buffer(buffer);
+            *error = "DRAIN sequence does not match the last Feature from " +
+                     provider.hostname;
+            return false;
+          }
+          provider.drained = true;
+          provider.drain_buffer = buffer;
+          ++drained_count;
+          if (!details.empty() &&
+              !infer_batch(inference_.get(), input_.get(), output_.get(),
+                           &details, &source_indices, &frontend_hashes,
+                           &ground_truth_valid, predictions, statistics,
+                           error)) {
+            return false;
+          }
+          continue;
+        }
+        if (info.message_type != ktag_demo_ub_message_type::feature ||
+            info.value_count != value_count_ ||
+            info.contract.sequence != provider.last_sequence + 1U) {
+          transport_->free_buffer(buffer);
+          *error = "Feature type, value_count or sequence is invalid for " +
+                   provider.hostname;
+          return false;
+        }
+        feature_record_owned record;
+        if (!ktag_demo_ub_decode_feature_frame(
+                buffer, config_->ub.data_element_size, &info, &record,
+                &frame_error)) {
+          transport_->free_buffer(buffer);
+          *error = "failed to decode Feature from " + provider.hostname +
+                   ": " + frame_error;
+          return false;
+        }
+        if (ktag_feature_batch_append(
+                input_.get(), &record.details.metadata, record.values.data(),
+                static_cast<uint32_t>(record.values.size())) != KTAG_SUCCESS) {
+          transport_->free_buffer(buffer);
+          *error = "failed to append a distributed Feature to Inference "
+                   "Batch";
+          return false;
+        }
+        try {
+          details.push_back(record.details);
+          source_indices.push_back(record.source_index);
+          frontend_hashes.push_back(provider.frontend_hash);
+          ground_truth_valid.push_back(
+              (info.flags &
+               KTAG_DEMO_UB_FRAME_FLAG_GROUND_TRUTH_VALID) != 0U);
+        } catch (...) {
+          transport_->free_buffer(buffer);
+          *error = "out of memory retaining distributed Feature metadata";
+          return false;
+        }
+        provider.last_sequence = info.contract.sequence;
+        ++provider.received_features;
+        ++received_features_;
+        if (details.size() == 1U) {
+          first_record_at = std::chrono::steady_clock::now();
+        }
+        if (!return_credit(provider, buffer, error)) {
+          return false;
+        }
+        if (details.size() >= config_->inference_batch_size &&
+            !infer_batch(inference_.get(), input_.get(), output_.get(),
+                         &details, &source_indices, &frontend_hashes,
+                         &ground_truth_valid,
+                         predictions, statistics, error)) {
+          return false;
+        }
+      }
+
+      if (!details.empty() &&
+          elapsed_nanoseconds(first_record_at) >=
+              static_cast<uint64_t>(
+                  config_->inference_batch_timeout_us) *
+                  1000U &&
+          !infer_batch(inference_.get(), input_.get(), output_.get(),
+                       &details, &source_indices, &frontend_hashes,
+                       &ground_truth_valid,
+                       predictions, statistics, error)) {
+        return false;
+      }
+      if (!received_any) {
+        ++receive_polls_;
+        ub_poll_backoff(config_->ub.poll_us);
+      }
+    }
+
+    if (!details.empty() &&
+        !infer_batch(inference_.get(), input_.get(), output_.get(), &details,
+                     &source_indices, &frontend_hashes,
+                     &ground_truth_valid, predictions, statistics, error)) {
+      return false;
+    }
+    for (auto &provider : providers_) {
+      ktag_demo_ub_frame_contract contract = provider_contract(provider);
+      contract.sequence = provider.last_sequence;
+      size_t encoded_size = 0U;
+      if (!ktag_demo_ub_encode_control_frame(
+              provider.drain_buffer, config_->ub.data_element_size,
+              ktag_demo_ub_message_type::drain_ack, contract, &encoded_size,
+              error)) {
+        return false;
+      }
+      (void)encoded_size;
+      ub_send_one_blocking(transport_.get(), provider.mapping.tx_queue_id,
+                           provider.drain_buffer, config_->ub.poll_us,
+                           &send_retries_);
+      provider.drain_buffer = nullptr;
+    }
+    statistics->emitted_flows += received_features_;
+    std::printf("UB Backend drained: features=%llu, batches=%llu, "
+                "send_retries=%llu, empty_polls=%llu\n",
+                static_cast<unsigned long long>(received_features_),
+                static_cast<unsigned long long>(inference_batches_),
+                static_cast<unsigned long long>(send_retries_),
+                static_cast<unsigned long long>(receive_polls_));
+    for (const auto &provider : providers_) {
+      std::printf("  Provider drained: hostname=%s, features=%llu, "
+                  "last_sequence=%llu\n",
+                  provider.hostname.c_str(),
+                  static_cast<unsigned long long>(provider.received_features),
+                  static_cast<unsigned long long>(provider.last_sequence));
+    }
+    return true;
+  }
+
+private:
+  ktag_demo_ub_frame_contract
+  provider_contract(const ub_backend_provider_state &provider) const {
+    ktag_demo_ub_frame_contract contract;
+    contract.frontend_id_hash = provider.frontend_hash;
+    contract.epoch = epoch_;
+    contract.schema_hash = schema_hash_;
+    contract.ruleset_hash = config_->ub.ruleset_hash;
+    return contract;
+  }
+
+  bool prepost_credits(std::string *error) {
+    for (auto &provider : providers_) {
+      std::vector<void *> buffers;
+      try {
+        buffers.reserve(config_->ub.credits_per_provider);
+      } catch (...) {
+        *error = "out of memory reserving initial UB CREDIT buffers";
+        return false;
+      }
+      for (uint32_t index = 0U;
+           index < config_->ub.credits_per_provider; ++index) {
+        void *buffer =
+            transport_->allocate_buffer(provider.mapping.provider_node_index);
+        if (buffer == nullptr) {
+          for (void *allocated : buffers) {
+            transport_->free_buffer(allocated);
+          }
+          *error = "Provider " + provider.hostname +
+                   " does not have enough UB buffers for configured credits";
+          return false;
+        }
+        buffers.push_back(buffer);
+      }
+      const ktag_demo_ub_frame_contract contract =
+          provider_contract(provider);
+      for (size_t index = 0U; index < buffers.size(); ++index) {
+        size_t encoded_size = 0U;
+        if (!ktag_demo_ub_encode_control_frame(
+                buffers[index], config_->ub.data_element_size,
+                ktag_demo_ub_message_type::credit, contract, &encoded_size,
+                error)) {
+          for (size_t pending = index; pending < buffers.size(); ++pending) {
+            transport_->free_buffer(buffers[pending]);
+          }
+          return false;
+        }
+        (void)encoded_size;
+        ub_send_one_blocking(transport_.get(), provider.mapping.tx_queue_id,
+                             buffers[index], config_->ub.poll_us,
+                             &send_retries_);
+      }
+    }
+    return true;
+  }
+
+  bool return_credit(const ub_backend_provider_state &provider, void *buffer,
+                     std::string *error) {
+    ktag_demo_ub_frame_contract contract = provider_contract(provider);
+    size_t encoded_size = 0U;
+    if (!ktag_demo_ub_encode_control_frame(
+            buffer, config_->ub.data_element_size,
+            ktag_demo_ub_message_type::credit, contract, &encoded_size,
+            error)) {
+      transport_->free_buffer(buffer);
+      return false;
+    }
+    (void)encoded_size;
+    ub_send_one_blocking(transport_.get(), provider.mapping.tx_queue_id,
+                         buffer, config_->ub.poll_us, &send_retries_);
+    return true;
+  }
+
+  bool infer_batch(
+      ktag_inference_context *inference, ktag_feature_batch *input,
+      ktag_prediction_batch *output,
+      std::vector<ktag_feature_record_details> *details,
+      std::vector<uint32_t> *source_indices,
+      std::vector<uint64_t> *frontend_hashes,
+      std::vector<uint8_t> *ground_truth_valid,
+      std::vector<pipeline_prediction> *predictions,
+      pipeline_run_statistics *statistics, std::string *error) {
+    const uint32_t input_count = ktag_feature_batch_get_count(input);
+    if (input_count == 0U) {
+      return true;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    const ktag_status status =
+        ktag_inference_predict(inference, input, output);
+    statistics->inference_nanoseconds += elapsed_nanoseconds(start);
+    if (status != KTAG_SUCCESS) {
+      *error = std::string("distributed Backend inference failed: ") +
+               ktag_inference_get_last_error();
+      return false;
+    }
+    const size_t prediction_start = predictions->size();
+    if (!append_distributed_predictions(output, *details, *source_indices,
+                                        *frontend_hashes,
+                                        *ground_truth_valid, predictions,
+                                        error)) {
+      return false;
+    }
+    statistics->inference_inputs += input_count;
+    statistics->predictions += predictions->size() - prediction_start;
+    ++inference_batches_;
+    ktag_feature_batch_clear(input);
+    details->clear();
+    source_indices->clear();
+    frontend_hashes->clear();
+    ground_truth_valid->clear();
+    return true;
+  }
+
+  const ktag_demo_pipeline_config *config_ = nullptr;
+  inference_context_ptr inference_;
+  feature_batch_ptr input_;
+  prediction_batch_ptr output_;
+  std::unique_ptr<ktag_demo_ub_ring_transport> transport_;
+  std::vector<ub_backend_provider_state> providers_;
+  uint64_t epoch_ = 0U;
+  uint64_t schema_hash_ = 0U;
+  uint32_t value_count_ = 0U;
+  uint64_t received_features_ = 0U;
+  uint64_t inference_batches_ = 0U;
+  uint64_t send_retries_ = 0U;
+  uint64_t receive_polls_ = 0U;
+};
+
+bool run_ub_frontend_inputs(
+    const ktag_demo_pipeline_config &config,
+    const ktag_feature_schema *schema,
+    const ktag_feature_registry *registry, const char **pcap_files,
+    int pcap_file_count, const char *interface_name,
+    pipeline_run_statistics *statistics,
+    std::vector<std::pair<std::string, std::string>> *partial_captures,
+    std::string *error) {
+  ub_frontend_record_sender sender;
+  if (!sender.initialize(config, ktag_feature_schema_get_hash(schema),
+                         ktag_feature_schema_get_value_count(schema), error)) {
+    return false;
+  }
+  bool success = true;
+  if (interface_name != nullptr && interface_name[0] != '\0') {
+    std::printf("\n========== UB Frontend 网口采集 =========="
+                "\n网口: %s\n",
+                interface_name);
+    feature_record_handler handler =
+        [&sender](feature_record_owned &&record,
+                  std::string *handler_error) {
+          return sender.send(std::move(record), false, handler_error);
+        };
+    pipeline_source_statistics source_statistics;
+    success = run_parallel_source(
+        config, schema, registry, interface_name, true, 0U, nullptr, nullptr,
+        &source_statistics, error, handler);
+    if (success) {
+      add_source_statistics(statistics, source_statistics);
+    }
+  } else {
+    std::printf("\n========== UB Frontend PCAP 特征发送 =========="
+                "\n文件数量: %d\n",
+                pcap_file_count);
+    feature_record_handler handler =
+        [&sender](feature_record_owned &&record,
+                  std::string *handler_error) {
+          return sender.send(std::move(record), true, handler_error);
+        };
+    const auto configured_labels =
+        config.ub.ground_truth_labels.find(config.ub.node_id);
+    if (configured_labels != config.ub.ground_truth_labels.end() &&
+        configured_labels->second.size() !=
+            static_cast<size_t>(pcap_file_count)) {
+      *error = "ground_truth_labels for " + config.ub.node_id +
+               " must contain exactly one label for each -p input";
+      sender.abort_best_effort();
+      return false;
+    }
+    for (int index = 0;
+         index < pcap_file_count && success && pipeline_interrupted == 0;
+         ++index) {
+      const uint32_t source_index =
+          configured_labels == config.ub.ground_truth_labels.end()
+              ? static_cast<uint32_t>(index)
+              : configured_labels->second[static_cast<size_t>(index)];
+      std::printf("\n处理文件 %d/%d: %s (ground_truth_label=%u)\n",
+                  index + 1, pcap_file_count, pcap_files[index],
+                  source_index);
+      pipeline_source_statistics source_statistics;
+      success = run_parallel_source(
+          config, schema, registry, pcap_files[index], false,
+          source_index, nullptr, nullptr, &source_statistics, error, handler);
+      if (success) {
+        add_source_statistics(statistics, source_statistics);
+        if (!source_statistics.partial_capture_error.empty()) {
+          partial_captures->emplace_back(
+              pcap_files[index], source_statistics.partial_capture_error);
+        }
+      }
+    }
+  }
+  if (!success) {
+    sender.abort_best_effort();
+    return false;
+  }
+  return sender.drain(error);
+}
+
+bool run_ub_backend(const ktag_demo_pipeline_config &config,
+                    const ktag_feature_schema *schema,
+                    std::vector<pipeline_prediction> *predictions,
+                    pipeline_run_statistics *statistics,
+                    std::string *error) {
+  ub_backend_executor executor;
+  return executor.initialize(config, schema, error) &&
+         executor.run(predictions, statistics, error);
+}
+
+#endif /* KTAG_ENABLE_DPDK_UB */
 
 bool same_address(const ktag_ip_address &left, const ktag_ip_address &right) {
   if (left.version != right.version ||
@@ -1488,7 +2396,11 @@ bool validate_prediction_output(const pipeline_prediction &prediction,
 
 bool write_prediction_csv(std::ostream &output,
                           const std::vector<pipeline_prediction> &predictions,
+                          bool include_frontend,
                           std::string *error) {
+  if (include_frontend) {
+    output << "frontend_id_hash,";
+  }
   output << "source_index,flow_id,ip_version,src_ip,dst_ip,src_port,"
             "dst_port,protocol,flow_key,first_packet_sequence,"
             "last_packet_sequence,label,confidence\n";
@@ -1498,6 +2410,9 @@ bool write_prediction_csv(std::ostream &output,
     }
     const auto &details = prediction.details;
     const auto &metadata = details.metadata;
+    if (include_frontend) {
+      output << prediction.frontend_id_hash << ',';
+    }
     output << prediction.source_index << ',' << metadata.flow_id << ','
            << static_cast<uint32_t>(details.source_address.version) << ',';
     write_csv_text(output, address_text(details.source_address));
@@ -1515,6 +2430,7 @@ bool write_prediction_csv(std::ostream &output,
 
 bool write_prediction_json(std::ostream &output,
                            const std::vector<pipeline_prediction> &predictions,
+                           bool include_frontend,
                            std::string *error) {
   output << "[\n";
   for (size_t index = 0U; index < predictions.size(); ++index) {
@@ -1524,7 +2440,12 @@ bool write_prediction_json(std::ostream &output,
     }
     const auto &details = prediction.details;
     const auto &metadata = details.metadata;
-    output << "  {\"source_index\":" << prediction.source_index
+    output << "  {";
+    if (include_frontend) {
+      output << "\"frontend_id_hash\":" << prediction.frontend_id_hash
+             << ',';
+    }
+    output << "\"source_index\":" << prediction.source_index
            << ",\"flow_id\":" << metadata.flow_id << ",\"ip_version\":"
            << static_cast<uint32_t>(details.source_address.version)
            << ",\"src_ip\":";
@@ -1549,7 +2470,8 @@ bool write_prediction_json(std::ostream &output,
 bool write_predictions_impl(const char *path,
                             ktag_demo_pipeline_output_format format,
                             const std::vector<pipeline_prediction> &predictions,
-                            std::string *error) {
+                            std::string *error,
+                            bool include_frontend = false) {
   if (error == nullptr) {
     return false;
   }
@@ -1558,8 +2480,10 @@ bool write_predictions_impl(const char *path,
     buffer << std::setprecision(9);
     const bool success =
         format == ktag_demo_pipeline_output_format::csv
-            ? write_prediction_csv(buffer, predictions, error)
-            : write_prediction_json(buffer, predictions, error);
+            ? write_prediction_csv(buffer, predictions, include_frontend,
+                                   error)
+            : write_prediction_json(buffer, predictions, include_frontend,
+                                    error);
     if (success) {
       const std::string text = buffer.str();
       if (std::fwrite(text.data(), 1U, text.size(), stdout) != text.size()) {
@@ -1576,8 +2500,10 @@ bool write_predictions_impl(const char *path,
   }
   output << std::setprecision(9);
   const bool success = format == ktag_demo_pipeline_output_format::csv
-                           ? write_prediction_csv(output, predictions, error)
-                           : write_prediction_json(output, predictions, error);
+                           ? write_prediction_csv(output, predictions,
+                                                  include_frontend, error)
+                           : write_prediction_json(output, predictions,
+                                                   include_frontend, error);
   if (!success && error->empty()) {
     *error = "failed while writing pipeline output";
   }
@@ -1602,8 +2528,26 @@ int ktag_demo_run_pipeline_internal(
     const char *output_file, ktag_demo_pipeline_output_format output_format) {
   pipeline_interrupted = 0;
   signal_scope signals;
+  const bool distributed_frontend =
+      config.ub.enabled &&
+      config.ub.role == ktag_demo_distributed_role::frontend;
+  const bool distributed_backend =
+      config.ub.enabled &&
+      config.ub.role == ktag_demo_distributed_role::backend;
+#if !KTAG_ENABLE_DPDK_UB
+  if (config.ub.enabled) {
+    std::fprintf(stderr,
+                 "pipeline: DPDK UB support is disabled in this build\n");
+    return -1;
+  }
+#endif
   std::printf("========== %s ==========\n",
-              config.feature_only ? "Schema 特征提取模式" : "在线推理模式");
+              distributed_frontend
+                  ? "UB Frontend 特征发送模式"
+                  : (distributed_backend
+                         ? "UB Backend 推理模式"
+                         : (config.feature_only ? "Schema 特征提取模式"
+                                                : "在线推理模式")));
   std::printf("配置文件: %s\n", config_file == nullptr ? "" : config_file);
   std::printf("管线模式: %s\n", ktag_demo_pipeline_mode_name(config.mode));
   std::printf("特征线程数: %u\n", config.feature_threads);
@@ -1614,6 +2558,11 @@ int ktag_demo_run_pipeline_internal(
               ktag_demo_feature_lifecycle_mode_name(config.lifecycle_mode));
   std::printf("背压策略: %s\n",
               ktag_demo_backpressure_name(config.backpressure));
+  if (config.ub.enabled) {
+    std::printf("UB 角色: %s, node_id=%s\n",
+                ktag_demo_distributed_role_name(config.ub.role),
+                config.ub.node_id.c_str());
+  }
   if (!config.feature_only) {
     std::printf("模型包: %s\n", config.model_package_path.c_str());
   }
@@ -1718,7 +2667,17 @@ int ktag_demo_run_pipeline_internal(
   pipeline_run_statistics run_statistics;
   const auto run_start = std::chrono::steady_clock::now();
   bool success = true;
-  if (interface_name != nullptr && interface_name[0] != '\0') {
+#if KTAG_ENABLE_DPDK_UB
+  if (distributed_frontend) {
+    success = run_ub_frontend_inputs(
+        config, schema.get(), registry.get(), pcap_files, pcap_file_count,
+        interface_name, &run_statistics, &partial_captures, &error);
+  } else if (distributed_backend) {
+    success = run_ub_backend(config, schema.get(), &predictions,
+                             &run_statistics, &error);
+  } else
+#endif
+      if (interface_name != nullptr && interface_name[0] != '\0') {
     std::printf("\n========== 网口实时抓包模式 ==========\n");
     std::printf("网口: %s\n", interface_name);
     std::printf("输出: %s\n",
@@ -1780,7 +2739,10 @@ int ktag_demo_run_pipeline_internal(
 
   if (success) {
     const auto io_start = std::chrono::steady_clock::now();
-    if (config.feature_only) {
+    if (distributed_frontend) {
+      /* Frontend output is the UB Feature stream; only Backend writes
+       * Prediction files. */
+    } else if (config.feature_only) {
       std::sort(feature_records.begin(), feature_records.end(),
                 ktag_demo_schema_feature_record_less);
       success = output_format == ktag_demo_pipeline_output_format::csv &&
@@ -1791,8 +2753,11 @@ int ktag_demo_run_pipeline_internal(
       }
     } else {
       std::sort(predictions.begin(), predictions.end(), prediction_less);
-      success = ktag_demo_write_pipeline_predictions(output_file, output_format,
-                                                     predictions, &error);
+      success = distributed_backend
+                    ? write_predictions_impl(output_file, output_format,
+                                             predictions, &error, true)
+                    : ktag_demo_write_pipeline_predictions(
+                          output_file, output_format, predictions, &error);
     }
     run_statistics.file_io_nanoseconds += elapsed_nanoseconds(io_start);
   }
@@ -1827,7 +2792,11 @@ int ktag_demo_run_pipeline_internal(
         &performance,
         config.mode == ktag_demo_pipeline_mode::single_thread ? 0 : 1);
 
-    if (config.feature_only) {
+    if (distributed_frontend) {
+      std::printf("UB 发送特征记录数: %llu\n",
+                  static_cast<unsigned long long>(
+                      run_statistics.emitted_flows));
+    } else if (config.feature_only) {
       std::printf("Schema CSV记录数: %llu\n",
                   static_cast<unsigned long long>(feature_records.size()));
     } else {
@@ -1861,6 +2830,18 @@ int ktag_demo_run_pipeline_internal(
                 static_cast<unsigned long long>(run_statistics.queue_failures),
                 pipeline_interrupted != 0 ? "是" : "否");
 
+    if (distributed_backend && !predictions.empty()) {
+      std::map<int64_t, uint64_t> predicted_counts;
+      for (const auto &prediction : predictions) {
+        ++predicted_counts[prediction.record.label];
+      }
+      std::printf("\n预测类别计数:\n");
+      for (const auto &entry : predicted_counts) {
+        std::printf("  label=%lld: %llu\n",
+                    static_cast<long long>(entry.first),
+                    static_cast<unsigned long long>(entry.second));
+      }
+    }
     if (!config.feature_only && interface_name == nullptr &&
         !predictions.empty()) {
       std::vector<int> labels;
@@ -1868,18 +2849,25 @@ int ktag_demo_run_pipeline_internal(
       labels.reserve(predictions.size());
       predicted_labels.reserve(predictions.size());
       for (const auto &prediction : predictions) {
+        if (!prediction.ground_truth_valid) {
+          continue;
+        }
         labels.push_back(static_cast<int>(prediction.source_index));
         predicted_labels.push_back(static_cast<int>(prediction.record.label));
       }
-      ClassificationReport *report = calculate_classification_report(
-          labels.data(), predicted_labels.data(),
-          static_cast<int>(predictions.size()));
-      if (report != nullptr) {
-        (void)print_and_save_classification_report(report, output_file);
-        free_classification_report(report);
+      if (labels.empty()) {
+        std::printf("无有效 ground truth，不生成 Classification Report。\n");
+      } else {
+        ClassificationReport *report = calculate_classification_report(
+            labels.data(), predicted_labels.data(),
+            static_cast<int>(labels.size()));
+        if (report != nullptr) {
+          (void)print_and_save_classification_report(report, output_file);
+          free_classification_report(report);
+        }
       }
     }
-    if (output_file != nullptr) {
+    if (!distributed_frontend && output_file != nullptr) {
       std::printf("%s已保存到: %s\n",
                   config.feature_only ? "Schema 特征 CSV" : "推理结果",
                   output_file);

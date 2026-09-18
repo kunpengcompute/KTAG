@@ -1,0 +1,86 @@
+# UB 1:1 分布式验收配置：Frontend Provider = computer01，Backend User =
+# controller。两台机器必须使用同一份文件（sha256sum 一致）。
+#
+# 命名规则 ：所有 Provider 的 hostname 必须字典序小于
+# 唯一的 User。computer01 < controller（第 3 个字符 m < n）成立；
+# 将来 3:1 扩容为 computer01/02/03 + controller 也天然合法。
+# 原因是本地 DPDK librte_ub_ring 的 node index 排序缺陷：resolve_index()
+# 按字典序排序计算 index，而 User 映射/find_peer_by_buf 使用原始数组下标；
+# 只有排序后顺序与原始顺序一致（后端排在所有前端之后）时两套 index 才重合。
+# 违反规则的后果是首个 CREDIT 即段错误（崩溃，不是 queue 报错）。
+#
+# 启动顺序：先启动 Frontend（等待 wait_shms 映射 User 内存），后启动
+# Backend（wait_shms 60 秒超时，Frontend 必须在此之前初始化完成）。
+#
+# 启动命令（--distributed-role 会强制启用本 distributed 段）：
+#
+#   Frontend (computer01):
+#     output/kdadk_demo -r tools/demo/config-ub-1to1.yaml \
+#       -p /data/class0.pcap -p /data/class1.pcap \
+#       --distributed-role frontend --node-id "$(hostname)"
+#
+#   Backend (controller):
+#     output/kdadk_demo -r tools/demo/config-ub-1to1.yaml \
+#       --distributed-role backend --node-id "$(hostname)" \
+#       -c /data/result/distributed-1to1.csv
+
+pipeline:
+  enabled: false
+  mode: feature_parallel
+  # Backend 需要模型包；Frontend 会自动进入 feature_only，不读该路径。
+  # 相对路径按本配置文件所在目录解析。
+  model_package_path: ../../result/legacy_model_package
+
+  capture:
+    packet_pool_size: 65536
+
+  feature:
+    threads: 4
+    queue_capacity: 65536
+    flow_hash_seed: 2026
+    lifecycle_mode: legacy
+    expire_interval_ms: 1000
+
+  inference:
+    # 分布式 Backend 第一版实现强制 threads: 1。
+    threads: 1
+    batch_size: 256
+    batch_timeout_us: 1000
+    queue_capacity: 4096
+    intra_op_threads: 1
+    inter_op_threads: 1
+
+  backpressure:
+    # 分布式 UB 仅允许 block。
+    policy: block
+
+  distributed:
+    ub_ring:
+      enabled: false
+      # 命名规则：provider hostname 必须字典序小于 user。
+      # 前端=computer01，后端=controller（computer01 < controller 成立）。
+      provider_nodes: [computer01]
+      user_nodes: [controller]
+      region: ktag_ub_region
+      shm_prefix: ktag_feature
+      provider_shm_size: 268435456
+      queues_per_provider: 1
+      queue_depth: 1024
+      data_element_size: 4096
+      credits_per_provider: 256
+      poll_us: 50
+      # 可选：1:1 PCAP 验收需要 Classification Report 时取消注释；
+      # 键必须是 provider_nodes 中的 hostname，数组长度等于该节点 -p 数量。
+      # ground_truth_labels:
+      #   computer01: [0, 1]
+      # 第一项是 EAL 的 argv[0]；-l 为绑核列表，现场按 CPU 拓扑调整。
+      eal_arguments: [kdadk_demo, --no-huge, -l, "0"]
+
+  plugins: []
+  schema:
+    # 与单机基线一致：冻结契约 ktag_legacy_v1（354 值，Hash
+    # 0xdd48882b53bebfa5；模型包按 manifest 选 351 个输入值）。
+    name: ktag_legacy_v1
+    version: 1
+    remove_features: []
+    add_features: []

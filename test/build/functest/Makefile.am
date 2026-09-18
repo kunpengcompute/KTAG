@@ -75,6 +75,7 @@ SOURCES_MUD = $(foreach d,$(SRC_FILES_DIRS),$(wildcard $(addprefix $(d)/*,$(SRCE
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_config.cpp
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_runner.cpp
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/schema_feature_writer.cpp
+SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/ub_feature_wire.cpp
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/plugin/feature_plugin_loader.cpp
 SOURCES_MUD += $(KDADK_APPID_modules_DIR)/tools/demo/utils.cpp
 
@@ -124,6 +125,7 @@ clean :
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_config.o
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/pipeline_runner.o
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/schema_feature_writer.o
+	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/pipeline/ub_feature_wire.o
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/plugin/feature_plugin_loader.o
 	@-$(RM) $(KDADK_APPID_modules_DIR)/tools/demo/utils.o
 

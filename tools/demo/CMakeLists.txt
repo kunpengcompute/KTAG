@@ -28,6 +28,7 @@ add_executable(
     pipeline/pipeline_config.cpp
     pipeline/pipeline_runner.cpp
     pipeline/schema_feature_writer.cpp
+    pipeline/ub_feature_wire.cpp
     plugin/feature_plugin_loader.cpp
 )
 
@@ -50,6 +51,24 @@ target_link_libraries(kdadk_demo PRIVATE
     Threads::Threads
     ${CMAKE_DL_LIBS}
 )
+
+if(KTAG_ENABLE_DPDK_UB)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(DPDK REQUIRED IMPORTED_TARGET libdpdk)
+    target_sources(kdadk_demo PRIVATE
+        pipeline/ub_ring_transport.cpp
+    )
+    target_compile_definitions(kdadk_demo PRIVATE
+        KTAG_ENABLE_DPDK_UB=1
+    )
+    target_link_libraries(kdadk_demo PRIVATE
+        PkgConfig::DPDK
+    )
+else()
+    target_compile_definitions(kdadk_demo PRIVATE
+        KTAG_ENABLE_DPDK_UB=0
+    )
+endif()
 
 # The demo intentionally exercises both the new three-layer API and the
 # retained legacy command path; customer builds still see deprecation warnings.
