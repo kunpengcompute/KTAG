@@ -22,18 +22,16 @@
 ### 构建
 
 ```bash
-cd KTAG
-sh build.sh
+sh /opt/KTAG/build.sh
 ```
 
 ### 运行
 
 ```bash
-cd output
-./ktag_three_layer_example MODEL_PACKAGE_DIR INPUT.pcap
+/opt/KTAG/output/ktag_three_layer_example MODEL_PACKAGE_DIR INPUT.pcap
 ```
 
-其中 `MODEL_PACKAGE_DIR` 是一个 Schema-bound 模型包目录，由训练脚本或模型升级工具生成，内含 `manifest.json`、`scaler.json` 和 `model.onnx`。如果你还没有模型包，可以先通过 `tools/model_package/upgrade_legacy_model.py` 将旧模型转为新格式，或通过 `tools/demo/python/training.py` 训练一个新模型。
+其中 `MODEL_PACKAGE_DIR` 是一个 Schema-bound 模型包目录，由训练脚本或模型升级工具生成，内含 `manifest.json`、`scaler.json` 和 `model.onnx`。如果你还没有模型包，可以先通过 `/opt/KTAG/tools/model_package/upgrade_legacy_model.py` 将旧模型转为新格式，或通过 `/opt/KTAG/tools/demo/python/training.py` 训练一个新模型。
 
 ### 代码要点
 
@@ -54,8 +52,8 @@ cd output
 ### 独立编译验证
 
 ```bash
-cc -std=c11 -Wall -Wextra -Werror -Iinclude \
-  -c examples/feature_provider/custom_feature_provider.c \
+cc -std=c11 -Wall -Wextra -Werror -I/opt/KTAG/include \
+  -c /opt/KTAG/examples/feature_provider/custom_feature_provider.c \
   -o /tmp/custom_feature_provider.o
 ```
 
@@ -78,7 +76,7 @@ cc -std=c11 -Wall -Wextra -Werror -Iinclude \
 插件随 Demo 一起构建，产物位于：
 
 ```text
-output/plugins/libktag_example_feature_plugin.so
+/opt/KTAG/output/plugins/libktag_example_feature_plugin.so
 ```
 
 ### 配置示例
@@ -87,7 +85,7 @@ output/plugins/libktag_example_feature_plugin.so
 pipeline:
   enabled: true
   plugins:
-    - ../../output/plugins/libktag_example_feature_plugin.so
+    - /opt/KTAG/output/plugins/libktag_example_feature_plugin.so
   schema:
     add_features:
       - customer.packet_counts
@@ -117,10 +115,10 @@ pipeline:
 
 ```bash
 # 先把 KTAG 安装到临时前缀
-cmake --install build --prefix /tmp/ktag-stage
+cmake --install /opt/KTAG/build --prefix /tmp/ktag-stage
 
 # 构建外部消费工程
-cmake -S examples/external_consumer \
+cmake -S /opt/KTAG/examples/external_consumer \
   -B /tmp/ktag-external-consumer-build \
   -DCMAKE_PREFIX_PATH=/tmp/ktag-stage
 cmake --build /tmp/ktag-external-consumer-build --parallel 4
