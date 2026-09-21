@@ -67,6 +67,25 @@ pipeline:
   capture:
     packet_pool_size: 65536
 
+    # 收包后端：pcap（默认，libpcap）或 dpdk（需以 -DKTAG_ENABLE_DPDK=ON 编译）。
+    # 命令行 --dpdk 强制使用 dpdk。
+    backend: pcap
+    # 以下 DPDK 选项仅在 backend: dpdk 时生效。
+    # device_name 为 PCI 地址（"0000:03:00.0"）或 vdev 名（离线回放 pcap 时用
+    # "net_pcap0"）；留空则选第一个可用端口。
+    dpdk:
+      device_name: "0000:03:00.0"
+      # EAL 参数（空格分隔）。只有进程内第一次成功初始化生效。
+      eal_args: "-a 0000:03:00.0 --log-level=lib.eal:7"
+      # >1 时按 RSS 配置多队列，next() 轮转排空各队列；不支持 RSS 的 PMD
+      # (如 net_pcap) 只建队列不设哈希。
+      rx_queue_count: 1
+      rx_queue_depth: 1024
+      mbuf_pool_size: 0   # 0 表示 rx_queue_depth * 2
+      burst_size: 64      # 上限 64，超过会被 open 拒绝
+      rx_idle_eof_us: 0   # 0 表示关闭；离线 vdev 可用它判定文件读完
+      poll_interval_us: 0 # 0 表示忙轮询
+
   feature:
     threads: 4
     queue_capacity: 65536

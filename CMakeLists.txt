@@ -61,6 +61,8 @@ option(KTAG_BUILD_PROXY_FEATURES
 option(KTAG_ENABLE_DPDK_UB
        "Enable the optional DPDK UB transport in kdadk_demo"
        OFF)
+option(KTAG_ENABLE_DPDK
+       "Build the optional DPDK poll-mode live capture backend" OFF)
 option(KTAG_INSTALL_LEGACY_COMPAT
        "Install the deprecated fixed-vector compatibility libraries and headers"
        ON)
@@ -86,6 +88,7 @@ set(KTAG_PUBLIC_HEADERS
     include/ktag_export.h
     include/ktag_types.h
     include/ktag_capture.h
+    include/ktag_capture_dpdk.h
     include/ktag_feature.h
     include/ktag_feature_plugin.h
     include/ktag_inference.h

@@ -10,6 +10,10 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "pipeline/pipeline_config.h"
 #include "pipeline/pipeline_runner.h"
 
+#ifdef KTAG_DEMO_HAVE_DPDK
+#include "ktag_capture_dpdk.h"
+#endif
+
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -31,7 +35,9 @@ enum {
   KTAG_DEMO_OPT_INFERENCE_THREADS,
   KTAG_DEMO_OPT_FEATURE_CONFIG,
   KTAG_DEMO_OPT_DISTRIBUTED_ROLE,
-  KTAG_DEMO_OPT_NODE_ID
+  KTAG_DEMO_OPT_NODE_ID,
+  KTAG_DEMO_OPT_DPDK,
+  KTAG_DEMO_OPT_DPDK_EAL_ARGS
 };
 
 typedef struct {
@@ -51,6 +57,8 @@ typedef struct {
   uint32_t inference_threads; // 0 表示使用 YAML
   char *distributed_role;     // frontend 或 backend
   char *node_id;              // UB 拓扑中的本机 hostname
+  int use_dpdk;               // --dpdk: 用 DPDK PMD 收网卡报文
+  char *dpdk_eal_args; // --dpdk-eal-args: EAL 参数(空格分隔字符串)
 } CommandLineArgs;
 
 int feature_extraction_mode(const char *pcap_file, const char *output_file,
@@ -447,6 +455,11 @@ void print_usage(const char *prog_name) {
   printf("  --inference-threads N   Inference Worker 数量（仅新 pipeline）\n");
   printf("  --distributed-role R    UB 节点角色: frontend/backend\n");
   printf("  --node-id HOSTNAME      本机在 UB 拓扑中的 hostname\n");
+  printf(
+      "  --dpdk                  用 DPDK PMD 收网卡报文（仅新 pipeline，需编译"
+      "支持）\n");
+  printf("  --dpdk-eal-args <str>   DPDK EAL 参数，如 \"-a "
+         "0000:03:00.0\"（可选）\n");
   printf("  -c <output.csv>         输出CSV文件路径 (与 -j 互斥)\n");
   printf("  -j <output.json>        输出JSON文件路径 (与 -c 互斥)\n");
   printf("  -w                      输出是否带有rawbow (仅用于 -f "
@@ -481,6 +494,8 @@ void print_usage(const char *prog_name) {
   printf("\n");
   printf("  # 在线推理 - 网口实时抓包，输出JSON\n");
   printf("  %s -r config.yaml -i eth0 -j result.json\n", prog_name);
+  printf("  %s -r config.yaml -i 0000:03:00.0 --dpdk -j result.json\n",
+         prog_name);
   printf("\n");
   printf("  # UB 分布式推理（所有节点使用同一份 YAML）\n");
   printf("  %s -r config.yaml -i eth0 --distributed-role frontend "
@@ -555,6 +570,9 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       {"distributed-role", required_argument, nullptr,
        KTAG_DEMO_OPT_DISTRIBUTED_ROLE},
       {"node-id", required_argument, nullptr, KTAG_DEMO_OPT_NODE_ID},
+      {"dpdk", no_argument, nullptr, KTAG_DEMO_OPT_DPDK},
+      {"dpdk-eal-args", required_argument, nullptr,
+       KTAG_DEMO_OPT_DPDK_EAL_ARGS},
       {nullptr, 0, nullptr, 0}};
   while ((opt = getopt_long(argc, argv, "t:e:f:r:p:i:m:c:j:n:wlh", long_options,
                             nullptr)) != -1) {
@@ -639,6 +657,12 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       }
       args->node_id = optarg;
       break;
+    case KTAG_DEMO_OPT_DPDK:
+      args->use_dpdk = 1;
+      break;
+    case KTAG_DEMO_OPT_DPDK_EAL_ARGS:
+      args->dpdk_eal_args = optarg;
+      break;
     case 'c':
       if (json_specified) {
         fprintf(stderr, "错误: -c 和 -j 选项不能同时使用\n");
@@ -695,11 +719,11 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
     return -1;
   }
 
-  const int has_pipeline_cli = args->pipeline_mode != nullptr ||
-                               args->feature_threads != 0U ||
-                               args->inference_threads != 0U ||
-                               args->distributed_role != nullptr ||
-                               args->node_id != nullptr;
+  const int has_pipeline_cli =
+      args->pipeline_mode != nullptr || args->feature_threads != 0U ||
+      args->inference_threads != 0U || args->distributed_role != nullptr ||
+      args->node_id != nullptr || args->use_dpdk != 0 ||
+      args->dpdk_eal_args != nullptr;
   if (args->feature_config_file != nullptr && args->operation != 2) {
     fprintf(stderr, "错误: --config 只能与 Schema 特征提取模式 -f 一起使用\n");
     return -1;
@@ -718,8 +742,7 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
     return -1;
   }
   if ((args->distributed_role == nullptr) != (args->node_id == nullptr)) {
-    fprintf(stderr,
-            "错误: --distributed-role 和 --node-id 必须同时指定\n");
+    fprintf(stderr, "错误: --distributed-role 和 --node-id 必须同时指定\n");
     return -1;
   }
   if (args->node_id != nullptr) {
@@ -734,16 +757,19 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       return -1;
     }
   }
-  if (args->distributed_role != nullptr &&
-      args->pipeline_mode != nullptr &&
+  if (args->distributed_role != nullptr && args->pipeline_mode != nullptr &&
       strcmp(args->pipeline_mode, "legacy") == 0) {
     fprintf(stderr, "错误: UB 分布式模式不支持 legacy pipeline\n");
     return -1;
   }
   if (args->distributed_role != nullptr && !KTAG_ENABLE_DPDK_UB) {
-    fprintf(stderr,
-            "错误: 当前构建未启用 DPDK UB，请使用 "
-            "-DKTAG_ENABLE_DPDK_UB=ON 重新构建\n");
+    fprintf(stderr, "错误: 当前构建未启用 DPDK UB，请使用 "
+                    "-DKTAG_ENABLE_DPDK_UB=ON 重新构建\n");
+    return -1;
+  }
+  if ((args->use_dpdk != 0 || args->dpdk_eal_args != nullptr) &&
+      args->interface == nullptr) {
+    fprintf(stderr, "错误: --dpdk 需要指定网卡设备 (-i <PCI地址或vdev名>)\n");
     return -1;
   }
 
@@ -808,8 +834,7 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
 
     if (distributed_backend &&
         (args->num_pcap_files != 0 || args->interface != nullptr)) {
-      fprintf(stderr,
-              "错误: 分布式 Backend 的输入来自 UB，不能指定 -p/-i\n");
+      fprintf(stderr, "错误: 分布式 Backend 的输入来自 UB，不能指定 -p/-i\n");
       return -1;
     }
     if (distributed_backend && args->output_file == nullptr) {
@@ -818,14 +843,14 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       return -1;
     }
     if (distributed_frontend && args->output_file != nullptr) {
-      fprintf(stderr,
-              "错误: 分布式 Frontend 不产生推理结果，请在 Backend 指定 -c/-j\n");
+      fprintf(
+          stderr,
+          "错误: 分布式 Frontend 不产生推理结果，请在 Backend 指定 -c/-j\n");
       return -1;
     }
 
     // 独立模式和 Frontend 必须有输入源。
-    if (!distributed_backend && args->num_pcap_files == 0 &&
-        !args->interface) {
+    if (!distributed_backend && args->num_pcap_files == 0 && !args->interface) {
       fprintf(stderr, "错误: 在线推理模式需要指定输入源 (-p <file.pcap> 或 -i "
                       "<interface>)\n");
       print_usage(argv[0]);
@@ -931,6 +956,12 @@ int main(int argc, char *argv[]) {
     {
       const bool force_legacy = args.pipeline_mode != nullptr &&
                                 strcmp(args.pipeline_mode, "legacy") == 0;
+      if (force_legacy && args.use_dpdk) {
+        fprintf(stderr, "错误: DPDK 收包仅支持新的 pipeline 模式，"
+                        "不能与 --pipeline-mode legacy 一起使用\n");
+        ret = -1;
+        break;
+      }
       if (force_legacy) {
         ret = online_inference_mode(
             args.config_file, (const char **)args.pcap_files,
@@ -941,18 +972,20 @@ int main(int argc, char *argv[]) {
 
       ktag_demo_pipeline_config pipeline_config;
       ktag_demo_pipeline_config_overrides overrides;
-      overrides.force_enable = args.pipeline_mode != nullptr ||
-                               args.feature_threads != 0U ||
-                               args.inference_threads != 0U ||
-                               args.distributed_role != nullptr;
+      overrides.force_enable =
+          args.pipeline_mode != nullptr || args.feature_threads != 0U ||
+          args.inference_threads != 0U || args.distributed_role != nullptr ||
+          args.use_dpdk != 0 || args.dpdk_eal_args != nullptr;
       overrides.feature_threads = args.feature_threads;
       overrides.inference_threads = args.inference_threads;
       if (args.distributed_role != nullptr) {
         overrides.distributed_role_set = true;
         overrides.node_id = args.node_id;
-        (void)ktag_demo_distributed_role_from_name(
-            args.distributed_role, &overrides.distributed_role);
+        (void)ktag_demo_distributed_role_from_name(args.distributed_role,
+                                                   &overrides.distributed_role);
       }
+      overrides.force_dpdk = args.use_dpdk != 0;
+      overrides.dpdk_eal_args = args.dpdk_eal_args;
       if (args.pipeline_mode != nullptr) {
         overrides.mode_set = true;
         (void)ktag_demo_pipeline_mode_from_name(args.pipeline_mode,
@@ -967,6 +1000,25 @@ int main(int argc, char *argv[]) {
                 pipeline_error.c_str());
         ret = -1;
       } else if (pipeline_result == ktag_demo_pipeline_config_result::enabled) {
+        if (pipeline_config.capture_backend ==
+            ktag_demo_capture_backend::dpdk) {
+#ifdef KTAG_DEMO_HAVE_DPDK
+          /* EAL init is idempotent and must run on the main thread; the
+           * factory also inits lazily as a fallback. */
+          const ktag_status eal_status =
+              ktag_dpdk_eal_init(pipeline_config.dpdk_eal_args.c_str());
+          if (eal_status != KTAG_SUCCESS) {
+            fprintf(stderr, "DPDK EAL init failed: %s\n",
+                    ktag_dpdk_capture_get_last_error());
+            ret = -1;
+            break;
+          }
+#else
+          fprintf(stderr, "错误: DPDK 收包需要以 -DKTAG_ENABLE_DPDK=ON 编译\n");
+          ret = -1;
+          break;
+#endif
+        }
         const auto format = args.output_format == FILE_FORMAT_JSON
                                 ? ktag_demo_pipeline_output_format::json
                                 : ktag_demo_pipeline_output_format::csv;

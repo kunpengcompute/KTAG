@@ -29,6 +29,8 @@ add_executable(
     pipeline/pipeline_runner.cpp
     pipeline/schema_feature_writer.cpp
     pipeline/ub_feature_wire.cpp
+    pipeline/demo_capture_source.cpp
+    pipeline/demo_capture_dpdk_source.cpp
     plugin/feature_plugin_loader.cpp
 )
 
@@ -68,6 +70,12 @@ else()
     target_compile_definitions(kdadk_demo PRIVATE
         KTAG_ENABLE_DPDK_UB=0
     )
+endif()
+
+# Optional DPDK poll-mode capture backend.
+if(KTAG_ENABLE_DPDK)
+    target_compile_definitions(kdadk_demo PRIVATE KTAG_DEMO_HAVE_DPDK=1)
+    target_link_libraries(kdadk_demo PRIVATE ktag_capture_dpdk)
 endif()
 
 # The demo intentionally exercises both the new three-layer API and the

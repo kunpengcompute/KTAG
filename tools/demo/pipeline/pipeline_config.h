@@ -20,6 +20,8 @@ enum class ktag_demo_pipeline_mode {
 
 enum class ktag_demo_feature_lifecycle_mode { legacy_compat, modern };
 
+enum class ktag_demo_capture_backend { pcap, dpdk };
+
 enum class ktag_demo_distributed_role { disabled, frontend, backend };
 
 struct ktag_demo_ub_config {
@@ -61,6 +63,18 @@ struct ktag_demo_pipeline_config {
   ktag_demo_feature_lifecycle_mode lifecycle_mode =
       ktag_demo_feature_lifecycle_mode::legacy_compat;
 
+  /* Capture backend selection (pcap default; dpdk optional). */
+  ktag_demo_capture_backend capture_backend = ktag_demo_capture_backend::pcap;
+  /* DPDK backend options; only used when capture_backend == dpdk. */
+  std::string dpdk_device_name;
+  std::string dpdk_eal_args;
+  uint32_t dpdk_rx_queue_count = 1U;
+  uint32_t dpdk_rx_queue_depth = 1024U;
+  uint32_t dpdk_mbuf_pool_size = 0U;
+  uint32_t dpdk_burst_size = 64U;
+  uint64_t dpdk_rx_idle_eof_us = 0U;
+  uint32_t dpdk_poll_interval_us = 0U;
+
   uint32_t inference_threads = 1U;
   uint32_t inference_batch_size = 256U;
   uint32_t inference_batch_timeout_us = 1000U;
@@ -92,6 +106,8 @@ struct ktag_demo_pipeline_config_overrides {
   ktag_demo_distributed_role distributed_role =
       ktag_demo_distributed_role::disabled;
   std::string node_id;
+  bool force_dpdk = false;
+  const char *dpdk_eal_args = nullptr;
 };
 
 enum class ktag_demo_pipeline_config_result { enabled, disabled, error };
@@ -115,7 +131,10 @@ ktag_demo_feature_lifecycle_mode_name(ktag_demo_feature_lifecycle_mode mode);
 const char *ktag_demo_backpressure_name(ktag_demo_backpressure_policy policy);
 bool ktag_demo_distributed_role_from_name(const char *name,
                                           ktag_demo_distributed_role *role);
-const char *
-ktag_demo_distributed_role_name(ktag_demo_distributed_role role);
+const char *ktag_demo_distributed_role_name(ktag_demo_distributed_role role);
+
+bool ktag_demo_capture_backend_from_name(const char *name,
+                                         ktag_demo_capture_backend *backend);
+const char *ktag_demo_capture_backend_name(ktag_demo_capture_backend backend);
 
 #endif /* KTAG_DEMO_PIPELINE_CONFIG_H */
