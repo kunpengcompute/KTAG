@@ -206,7 +206,11 @@ struct pipeline_source_statistics {
     uint64_t predictions = 0U;
     uint64_t capture_nanoseconds = 0U;
     uint64_t feature_nanoseconds = 0U;
+    uint64_t feature_elapsed_nanoseconds = 0U;
+    uint64_t feature_cpu_nanoseconds = 0U;
     uint64_t inference_nanoseconds = 0U;
+    uint64_t inference_elapsed_nanoseconds = 0U;
+    uint64_t inference_cpu_nanoseconds = 0U;
     uint64_t elapsed_nanoseconds = 0U;
     uint64_t queue_drops = 0U;
     uint64_t queue_failures = 0U;
@@ -223,7 +227,11 @@ struct pipeline_run_statistics {
     uint64_t predictions = 0U;
     uint64_t capture_nanoseconds = 0U;
     uint64_t feature_nanoseconds = 0U;
+    uint64_t feature_elapsed_nanoseconds = 0U;
+    uint64_t feature_cpu_nanoseconds = 0U;
     uint64_t inference_nanoseconds = 0U;
+    uint64_t inference_elapsed_nanoseconds = 0U;
+    uint64_t inference_cpu_nanoseconds = 0U;
     uint64_t file_io_nanoseconds = 0U;
     uint64_t elapsed_nanoseconds = 0U;
     uint64_t queue_drops = 0U;
@@ -256,7 +264,12 @@ void add_source_statistics(pipeline_run_statistics *total,
     total->predictions += source.predictions;
     total->capture_nanoseconds += source.capture_nanoseconds;
     total->feature_nanoseconds += source.feature_nanoseconds;
+    total->feature_elapsed_nanoseconds += source.feature_elapsed_nanoseconds;
+    total->feature_cpu_nanoseconds += source.feature_cpu_nanoseconds;
     total->inference_nanoseconds += source.inference_nanoseconds;
+    total->inference_elapsed_nanoseconds +=
+        source.inference_elapsed_nanoseconds;
+    total->inference_cpu_nanoseconds += source.inference_cpu_nanoseconds;
     total->queue_drops += source.queue_drops;
     total->queue_failures += source.queue_failures;
 }
@@ -895,6 +908,12 @@ bool run_single_source(
         statistics->unsupported_packets, feature_statistics.rejected_packets);
     statistics->packets = packet_count;
     statistics->elapsed_nanoseconds = elapsed_nanoseconds(execution_start);
+    statistics->feature_elapsed_nanoseconds =
+        statistics->feature_nanoseconds;
+    statistics->feature_cpu_nanoseconds = statistics->feature_nanoseconds;
+    statistics->inference_elapsed_nanoseconds =
+        statistics->inference_nanoseconds;
+    statistics->inference_cpu_nanoseconds = statistics->inference_nanoseconds;
     return true;
 }
 
@@ -1395,6 +1414,12 @@ private:
             statistics->emitted_flows += worker.emitted_flows;
             statistics->feature_nanoseconds = std::max(
                 statistics->feature_nanoseconds, worker.work_nanoseconds);
+            /* Workers execute concurrently: max is stage compute time, while
+             * the sum below is CPU work consumed by all workers. */
+            statistics->feature_elapsed_nanoseconds = std::max(
+                statistics->feature_elapsed_nanoseconds,
+                worker.elapsed_nanoseconds);
+            statistics->feature_cpu_nanoseconds += worker.work_nanoseconds;
             statistics->queue_drops +=
                 queue.dropped_newest + queue.dropped_oldest;
             statistics->queue_failures += queue.failures;
@@ -1408,7 +1433,17 @@ private:
             const auto &worker = inference_stats_[index];
             statistics->inference_inputs += worker.input_records;
             statistics->predictions += worker.predictions;
-            statistics->inference_nanoseconds += worker.work_nanoseconds;
+            if (!config_.feature_only) {
+                /* Match the Feature-stage parallel timing semantics. */
+                statistics->inference_nanoseconds = std::max(
+                    statistics->inference_nanoseconds,
+                    worker.work_nanoseconds);
+                statistics->inference_elapsed_nanoseconds = std::max(
+                    statistics->inference_elapsed_nanoseconds,
+                    worker.elapsed_nanoseconds);
+                statistics->inference_cpu_nanoseconds +=
+                    worker.work_nanoseconds;
+            }
         }
     }
 
@@ -1883,6 +1918,7 @@ public:
 
   bool run(std::vector<pipeline_prediction> *predictions,
            pipeline_run_statistics *statistics, std::string *error) {
+    const auto execution_start = std::chrono::steady_clock::now();
     std::vector<ktag_feature_record_details> details;
     std::vector<uint32_t> source_indices;
     std::vector<uint64_t> frontend_hashes;
@@ -2042,6 +2078,10 @@ public:
       provider.drain_buffer = nullptr;
     }
     statistics->emitted_flows += received_features_;
+    statistics->inference_elapsed_nanoseconds +=
+        elapsed_nanoseconds(execution_start);
+    statistics->inference_cpu_nanoseconds +=
+        statistics->inference_nanoseconds;
     std::printf("UB Backend drained: features=%llu, batches=%llu, "
                 "send_retries=%llu, empty_polls=%llu\n",
                 static_cast<unsigned long long>(received_features_),
@@ -2771,8 +2811,16 @@ int ktag_demo_run_pipeline_internal(
         run_statistics.capture_nanoseconds / nanoseconds_per_second;
     performance.feature_extraction_time =
         run_statistics.feature_nanoseconds / nanoseconds_per_second;
+    performance.feature_elapsed_time =
+        run_statistics.feature_elapsed_nanoseconds / nanoseconds_per_second;
+    performance.feature_cpu_time =
+        run_statistics.feature_cpu_nanoseconds / nanoseconds_per_second;
     performance.inference_time =
         run_statistics.inference_nanoseconds / nanoseconds_per_second;
+    performance.inference_elapsed_time =
+        run_statistics.inference_elapsed_nanoseconds / nanoseconds_per_second;
+    performance.inference_cpu_time =
+        run_statistics.inference_cpu_nanoseconds / nanoseconds_per_second;
     performance.file_io_time =
         run_statistics.file_io_nanoseconds / nanoseconds_per_second;
     performance.total_time = performance.feature_extraction_time +
@@ -2782,6 +2830,8 @@ int ktag_demo_run_pipeline_internal(
         run_statistics.elapsed_nanoseconds / nanoseconds_per_second;
     performance.total_packets = run_statistics.packets;
     performance.total_bytes = run_statistics.bytes;
+    performance.inference_inputs = run_statistics.inference_inputs;
+    performance.predictions = run_statistics.predictions;
     print_performance_stats_ex(
         &performance,
         config.mode == ktag_demo_pipeline_mode::single_thread ? 0 : 1);
