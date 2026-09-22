@@ -78,12 +78,6 @@ private:
     bool installed_term_ = false;
 };
 
-struct capture_deleter {
-    void operator()(ktag_capture_context *value) const {
-        ktag_capture_close(value);
-    }
-};
-
 struct schema_deleter {
     void operator()(ktag_feature_schema *value) const {
         ktag_feature_schema_destroy(value);
@@ -461,24 +455,6 @@ bool copy_feature_records(const ktag_feature_batch *batch,
     }
 }
 
-ktag_capture_config make_capture_config(const char *source, bool live,
-                                        bool owned, uint32_t packet_pool_size) {
-    ktag_capture_config config{};
-    config.struct_size = sizeof(config);
-    config.api_version = KTAG_API_VERSION;
-    config.source_type = live ? KTAG_CAPTURE_SOURCE_LIVE_INTERFACE
-                              : KTAG_CAPTURE_SOURCE_PCAP_FILE;
-    config.source = source;
-    config.packet_mode =
-        owned ? KTAG_CAPTURE_PACKET_OWNED : KTAG_CAPTURE_PACKET_BORROWED;
-    config.snapshot_length = 65535U;
-    config.promiscuous = live ? 1U : 0U;
-    config.read_timeout_ms = live ? 10U : 0U;
-    config.live_buffer_size = live ? 1024U * 1024U * 1024U : 0U;
-    config.packet_buffer_capacity = packet_pool_size;
-    return config;
-}
-
 domain_store_ptr create_domain_store() {
     ktag_domain_store_config config{};
     config.struct_size = sizeof(config);
@@ -791,12 +767,9 @@ bool run_single_source(
     pipeline_source_statistics *statistics, std::string *error) {
     *statistics = pipeline_source_statistics{};
     const auto execution_start = std::chrono::steady_clock::now();
-    const ktag_capture_config capture_config =
-        make_capture_config(source, live, false, config.packet_pool_size);
-    capture_ptr capture(ktag_capture_open(&capture_config));
+    std::unique_ptr<demo_capture_source> capture =
+        create_demo_capture_source(config, source, live, false, error);
     if (!capture) {
-        *error = std::string("capture open failed: ") +
-                 ktag_capture_get_last_error();
         return false;
     }
     domain_store_ptr domain_store = create_domain_store();
@@ -826,8 +799,7 @@ bool run_single_source(
     ktag_packet_init(&packet);
     while (pipeline_interrupted == 0) {
         const auto capture_start = std::chrono::steady_clock::now();
-        const ktag_status capture_status =
-            ktag_capture_next(capture.get(), &packet);
+        const ktag_status capture_status = capture->next(&packet);
         statistics->capture_nanoseconds += elapsed_nanoseconds(capture_start);
         if (capture_status == KTAG_STATUS_TIMEOUT) {
             continue;
@@ -836,7 +808,7 @@ bool run_single_source(
             break;
         }
         if (capture_status != KTAG_SUCCESS) {
-            const char *capture_error = ktag_capture_get_last_error();
+            const char *capture_error = capture->last_error();
             const char *capture_message =
                 capture_error == nullptr ? "" : capture_error;
             if (is_recoverable_truncated_capture(
