@@ -5,9 +5,12 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 #include "ub_feature_wire.h"
 
+#include <algorithm>
+#include <array>
 #include <cerrno>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <unordered_set>
 #include <utility>
 
@@ -67,8 +70,12 @@ bool validate_config(const ktag_demo_ub_transport_config &config,
         set_error(error, "UB total queue count exceeds the DPDK limit");
         return false;
     }
+    if (config.provider_shm_size == 0U) {
+        set_error(error, "UB Provider shm size is required for both roles");
+        return false;
+    }
     if (config.role == ktag_demo_ub_role::provider &&
-        (config.provider_shm_size == 0U || config.queue_depth < 2U ||
+        (config.queue_depth < 2U ||
          (config.queue_depth & (config.queue_depth - 1U)) != 0U)) {
         set_error(
             error,
@@ -175,6 +182,7 @@ struct ktag_demo_ub_ring_transport::implementation {
     ktag_demo_ub_role role = ktag_demo_ub_role::provider;
     rte_ub_ring_handle *handle = nullptr;
     bool owns_eal = false;
+    size_t provider_shm_size = 0U;
 };
 
 ktag_demo_ub_ring_transport::ktag_demo_ub_ring_transport(
@@ -198,6 +206,7 @@ ktag_demo_ub_ring_transport::create(const ktag_demo_ub_transport_config &config,
         return nullptr;
     }
     state->role = config.role;
+    state->provider_shm_size = config.provider_shm_size;
     bool owns_eal = false;
     if (!initialize_eal(config, &owns_eal, error)) {
         return nullptr;
@@ -298,13 +307,54 @@ ktag_demo_ub_ring_transport::allocate_buffer(uint32_t provider_node_index) {
 uint16_t ktag_demo_ub_ring_transport::send_burst(uint32_t queue_id,
                                                  void **buffers,
                                                  uint16_t count) {
-    return rte_ub_ring_send_burst(state_->handle, queue_id, buffers, count);
+    if (buffers == nullptr || count == 0U) {
+        return 0U;
+    }
+    // The application owns local payload pointers. DPDK queues carry packed
+    // {provider, offset}, never a virtual address from either process.
+    // Use bounded scratch space and preserve the caller's pointers on partial
+    // sends: the caller may retry or free the unsent buffers.
+    std::array<void *, 64> elements{};
+    const uint16_t batch = std::min<uint16_t>(count, elements.size());
+    for (uint16_t i = 0; i < batch; ++i) {
+        if (buffers[i] == nullptr) {
+            throw std::runtime_error("UB send buffer is null");
+        }
+        const auto *header = ub_ring_buf_hdr(buffers[i]);
+        if (header->magic != UB_RING_BUF_MAGIC) {
+            throw std::runtime_error("UB send buffer ownership header is invalid");
+        }
+        elements[i] = ub_ring_elem_pack(header->node_index, header->offset);
+    }
+    return rte_ub_ring_send_burst(state_->handle, queue_id, elements.data(), batch);
 }
 
 uint16_t ktag_demo_ub_ring_transport::receive_burst(uint32_t queue_id,
                                                     void **buffers,
                                                     uint16_t count) {
-    return rte_ub_ring_recv_burst(state_->handle, queue_id, buffers, count);
+    if (buffers == nullptr || count == 0U) {
+        return 0U;
+    }
+    const uint16_t received =
+        rte_ub_ring_recv_burst(state_->handle, queue_id, buffers, count);
+    for (uint16_t i = 0; i < received; ++i) {
+        const uint32_t provider = ub_ring_elem_get_node(buffers[i]);
+        const uint64_t offset = ub_ring_elem_get_offset(buffers[i]);
+        void *area = rte_ub_ring_get_data_buf_area(state_->handle, provider);
+        const uint32_t stride =
+            rte_ub_ring_get_data_elt_size(state_->handle, provider);
+        // Element zero is reserved by DPDK. The configured shm size supplies
+        // an upper bound (not the exact buffer-area size). In particular this
+        // rejects a raw remote virtual address from an incompatible sender.
+        if (area == nullptr || stride <= UB_RING_BUF_HDR_SIZE ||
+            offset == 0U || offset % stride != 0U ||
+            state_->provider_shm_size < stride ||
+            offset > state_->provider_shm_size - stride) {
+            throw std::runtime_error("UB received invalid packed buffer element");
+        }
+        buffers[i] = ub_ring_buf_ptr(area, offset);
+    }
+    return received;
 }
 
 void ktag_demo_ub_ring_transport::free_buffer(void *buffer) {
