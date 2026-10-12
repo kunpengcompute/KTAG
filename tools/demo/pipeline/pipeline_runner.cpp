@@ -208,6 +208,8 @@ struct pipeline_source_statistics {
   uint64_t predictions = 0U;
   uint64_t capture_nanoseconds = 0U;
   uint64_t feature_nanoseconds = 0U;
+  uint64_t feature_wall_nanoseconds = 0U;
+  uint64_t feature_work_sum_nanoseconds = 0U;
   uint64_t inference_nanoseconds = 0U;
   uint64_t elapsed_nanoseconds = 0U;
   uint64_t queue_drops = 0U;
@@ -226,6 +228,8 @@ struct pipeline_run_statistics {
   uint64_t predictions = 0U;
   uint64_t capture_nanoseconds = 0U;
   uint64_t feature_nanoseconds = 0U;
+  uint64_t feature_wall_nanoseconds = 0U;
+  uint64_t feature_work_sum_nanoseconds = 0U;
   uint64_t inference_nanoseconds = 0U;
   uint64_t file_io_nanoseconds = 0U;
   uint64_t elapsed_nanoseconds = 0U;
@@ -267,6 +271,8 @@ void add_source_statistics(pipeline_run_statistics *total,
   total->predictions += source.predictions;
   total->capture_nanoseconds += source.capture_nanoseconds;
   total->feature_nanoseconds += source.feature_nanoseconds;
+  total->feature_wall_nanoseconds += source.feature_wall_nanoseconds;
+  total->feature_work_sum_nanoseconds += source.feature_work_sum_nanoseconds;
   total->inference_nanoseconds += source.inference_nanoseconds;
   total->queue_drops += source.queue_drops;
   total->queue_failures += source.queue_failures;
@@ -1383,6 +1389,10 @@ private:
       statistics->emitted_flows += worker.emitted_flows;
       statistics->feature_nanoseconds =
           std::max(statistics->feature_nanoseconds, worker.work_nanoseconds);
+      statistics->feature_wall_nanoseconds =
+          std::max(statistics->feature_wall_nanoseconds,
+                   worker.elapsed_nanoseconds);
+      statistics->feature_work_sum_nanoseconds += worker.work_nanoseconds;
       statistics->queue_drops += queue.dropped_newest + queue.dropped_oldest;
       statistics->queue_failures += queue.failures;
     }
@@ -1450,48 +1460,73 @@ void print_ub_throughput(const char *label, uint64_t input_bytes,
     return;
   }
   const double seconds = static_cast<double>(nanoseconds) / 1.0e9;
-  // Decimal units: MB = 10^6 bytes, Gbps = 10^9 bits/second.
+  // Keep the unit conversion used by the existing performance report.
+  constexpr double bytes_per_megabyte = 1024.0 * 1024.0;
+  constexpr double bits_per_gigabit = 1024.0 * 1024.0 * 1024.0;
   const double bytes = static_cast<double>(input_bytes);
   std::printf("%s: %10.4f MB/s (%10.4f Gbps)\n", label,
-              bytes / 1.0e6 / seconds, bytes * 8.0 / 1.0e9 / seconds);
+              bytes / bytes_per_megabyte / seconds,
+              bytes * 8.0 / bits_per_gigabit / seconds);
 }
 
 void print_ub_performance_stats(const pipeline_run_statistics &statistics,
                                bool frontend) {
   constexpr double nanoseconds_per_second = 1.0e9;
-  std::printf("\n======================= UB 分布式性能统计 "
-              "=======================\n");
-  std::printf("吞吐量字节口径: 前端实际读取的输入报文字节；MB=10^6 字节\n");
-  std::printf("输入报文总量: %llu 字节（%.4f MB），%llu 个包\n",
-              static_cast<unsigned long long>(statistics.bytes),
-              static_cast<double>(statistics.bytes) / 1.0e6,
-              static_cast<unsigned long long>(statistics.packets));
+  constexpr double bytes_per_megabyte = 1024.0 * 1024.0;
+  std::printf("\n======================= 性能统计 =======================\n");
   if (frontend) {
-    std::printf("PCAP读取累计耗时: %10.4f 秒\n",
+    std::printf("PCAP 读取累计耗时: %10.4f 秒\n",
                 statistics.capture_nanoseconds / nanoseconds_per_second);
-    std::printf("特征计算耗时（各文件最忙线程累计）: %10.4f 秒\n",
+    std::printf("特征计算耗时: %10.4f 秒\n",
                 statistics.feature_nanoseconds / nanoseconds_per_second);
-    std::printf("核心计时范围: 首条报文开始特征处理 → 收到后端完成确认\n");
-    std::printf("核心墙钟耗时（含 UB 传输、等待和后端推理）: %10.4f 秒\n",
-                statistics.distributed_core_nanoseconds / nanoseconds_per_second);
-    print_ub_throughput("核心处理吞吐量", statistics.bytes,
-                        statistics.distributed_core_nanoseconds);
+    std::printf("特征线程经过耗时: %10.4f 秒\n",
+                statistics.feature_wall_nanoseconds / nanoseconds_per_second);
+    std::printf("特征 CPU 累计计算量: %10.4f CPU 秒\n",
+                statistics.feature_work_sum_nanoseconds /
+                    nanoseconds_per_second);
   } else {
     std::printf("推理计算累计耗时: %10.4f 秒\n",
                 statistics.inference_nanoseconds / nanoseconds_per_second);
     std::printf("推理阶段墙钟耗时（首条特征接收到末次推理完成）: %10.4f 秒\n",
                 statistics.distributed_inference_wall_nanoseconds /
                     nanoseconds_per_second);
-    print_ub_throughput("推理计算吞吐量（等价输入报文）", statistics.bytes,
-                        statistics.inference_nanoseconds);
-    print_ub_throughput("推理有效吞吐量（等价输入报文）", statistics.bytes,
-                        statistics.distributed_inference_wall_nanoseconds);
-    std::printf("结果文件IO耗时: %10.4f 秒\n",
-                statistics.file_io_nanoseconds / nanoseconds_per_second);
   }
-  std::printf("本节点总运行耗时（含初始化和清理）: %10.4f 秒\n",
+  std::printf("文件 IO 耗时: %10.4f 秒\n",
+              statistics.file_io_nanoseconds / nanoseconds_per_second);
+  const double local_compute_seconds =
+      statistics.feature_nanoseconds / nanoseconds_per_second +
+      statistics.inference_nanoseconds / nanoseconds_per_second +
+      statistics.file_io_nanoseconds / nanoseconds_per_second;
+  std::printf("核心累计耗时: %10.4f 秒 (本节点计算累计，多线程阶段可并行重叠)\n",
+              local_compute_seconds);
+  if (frontend) {
+    std::printf("核心链路耗时（特征提取、UB 传输、等待及后端推理）: %10.4f 秒\n",
+                statistics.distributed_core_nanoseconds /
+                    nanoseconds_per_second);
+    std::printf("核心计时范围: 首条报文开始特征处理 → 收到后端完成确认\n");
+  }
+  std::printf("端到端总耗时: %10.4f 秒 (包含 PCAP 读取等所有开销)\n",
               statistics.elapsed_nanoseconds / nanoseconds_per_second);
-  std::printf("===========================================================\n");
+  std::printf("处理包数: %10llu 个\n",
+              static_cast<unsigned long long>(statistics.packets));
+  std::printf("总数据量: %10.4f MB\n",
+              static_cast<double>(statistics.bytes) / bytes_per_megabyte);
+  if (frontend) {
+    print_ub_throughput("特征计算吞吐量", statistics.bytes,
+                        statistics.feature_nanoseconds);
+    print_ub_throughput("特征有效吞吐量", statistics.bytes,
+                        statistics.feature_wall_nanoseconds);
+    print_ub_throughput("核心处理吞吐量（UB 全链路）", statistics.bytes,
+                        statistics.distributed_core_nanoseconds);
+  } else {
+    print_ub_throughput("推理计算吞吐量", statistics.bytes,
+                        statistics.inference_nanoseconds);
+    print_ub_throughput("推理有效吞吐量", statistics.bytes,
+                        statistics.distributed_inference_wall_nanoseconds);
+  }
+  print_ub_throughput("端到端吞吐量", statistics.bytes,
+                      statistics.elapsed_nanoseconds);
+  std::printf("========================================================\n\n");
 }
 
 uint64_t ub_identity_hash(const std::string &identity) {
