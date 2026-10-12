@@ -1,0 +1,44 @@
+# Same Legacy V1 schema and extraction/model settings as config-ub-1to1.yaml.
+schema:
+  name: ktag_legacy_v1
+  version: 1
+feature:
+  threads: 4
+  packet_queue_capacity: 65536
+  feature_queue_capacity: 4096
+  flow_hash_seed: 2026
+  flow_capacity: 65536
+  lifecycle_mode: legacy
+  expire_interval_ms: 1000
+inference:
+  model_package_path: ../../result/legacy_model_package
+  batch_size: 256
+  batch_timeout_us: 1000
+  intra_op_threads: 1
+  inter_op_threads: 1
+capture:
+  snapshot_length: 65535
+  live_buffer_bytes: 67108864
+replay:
+  program: tcpreplay
+  rate_mode: original
+  # For a fixed rate: rate_mode: mbps and rate_mbps: 1000
+  rate_mbps: null
+  source_mac: "02:00:00:90:00:01"
+  destination_mac: "02:00:00:90:00:02"
+  loop: 1
+  preload_pcap: false
+  drain_timeout_s: 30
+  quiet_period_ms: 100
+transport:
+  port: 19090
+  batch_records: 256
+  batch_timeout_us: 1000
+  max_uncompressed_bytes: 4194304
+  progress_timeout_s: 120
+compression:
+  codec: zstd
+  level: 1
+  target_ratio: 10.0
+backpressure:
+  policy: block
