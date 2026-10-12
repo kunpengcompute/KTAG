@@ -4,6 +4,8 @@
 #include "kdadk_test.h"
 #include "kdadk_feature_extract.h"
 
+#include <cstring>
+
 TEST(KDADK_FEATURE_EXTRACT, CALCULATE_MEAN_Basic)
 {
     std::vector<uint32_t> test_data = {1, 2, 3, 4, 5};
@@ -465,6 +467,33 @@ TEST_F(FeatureExtractorTest, InitAndDestroy) {
     // 测试空指针销毁
     extractor_destroy(nullptr);
     SUCCEED() << "Destroy NULL extractor should not crash";
+}
+
+TEST_F(FeatureExtractorTest, ExplicitDynamicPlugin)
+{
+    kdadk_feature_extractor_config config{};
+    config.struct_size = sizeof(config);
+    config.api_version = KTAG_API_VERSION;
+    config.link_type = DLT_EN10MB;
+    config.feature_plugin_path =
+        "../../../output/plugins/libktag_traffic_features.so";
+
+    extractor = extractor_init_with_config(&config);
+    ASSERT_NE(extractor, nullptr) << extractor_get_last_error();
+}
+
+TEST_F(FeatureExtractorTest, MissingDynamicPluginReportsError)
+{
+    kdadk_feature_extractor_config config{};
+    config.struct_size = sizeof(config);
+    config.api_version = KTAG_API_VERSION;
+    config.link_type = DLT_EN10MB;
+    config.feature_plugin_path = "/missing/libktag_traffic_features.so";
+
+    extractor = extractor_init_with_config(&config);
+    ASSERT_EQ(extractor, nullptr);
+    EXPECT_NE(std::strstr(extractor_get_last_error(), "failed to load plugin"),
+              nullptr);
 }
 
 TEST_F(FeatureExtractorTest, DifferentLinkTypes) {

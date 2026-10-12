@@ -108,6 +108,7 @@ pipeline:
     policy: block
 
   plugins:
+    - ../../output/plugins/libktag_traffic_features.so
     - ../../output/plugins/libktag_proxy_features.so
 
   schema:

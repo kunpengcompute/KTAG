@@ -2,6 +2,7 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include "kdadk_test.h"
+#include "feature_extract.h"
 
 size_t getFileSize(const char *fileName) {
 

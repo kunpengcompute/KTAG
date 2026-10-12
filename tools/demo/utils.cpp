@@ -323,12 +323,26 @@ void print_performance_stats_ex(const PerformanceStats *stats,
   printf(stages_overlap ? "PCAP读取累计耗时: %10.4f 秒\n"
                         : "PCAP读取耗时:       %10.4f 秒\n",
          stats->pcap_read_time);
-  printf(stages_overlap ? "特征线程最大工作耗时: %10.4f 秒\n"
-                        : "特征提取耗时:         %10.4f 秒\n",
-         stats->feature_extraction_time);
-  printf(stages_overlap ? "推理累计耗时:     %10.4f 秒\n"
-                        : "推理耗时:           %10.4f 秒\n",
-         stats->inference_time);
+  if (stages_overlap) {
+    printf("特征计算耗时（最忙线程）: %10.4f 秒\n",
+           stats->feature_extraction_time);
+    printf("特征线程经过耗时（最慢线程）: %10.4f 秒\n",
+           stats->feature_elapsed_time);
+    printf("特征CPU累计计算量: %10.4f CPU秒\n",
+           stats->feature_cpu_time);
+    if (stats->inference_time > 0 || stats->inference_elapsed_time > 0) {
+      printf("推理计算耗时（最忙线程）: %10.4f 秒\n",
+             stats->inference_time);
+      printf("推理线程经过耗时（最慢线程）: %10.4f 秒\n",
+             stats->inference_elapsed_time);
+      printf("推理CPU累计计算量: %10.4f CPU秒\n",
+             stats->inference_cpu_time);
+    }
+  } else {
+    printf("特征提取耗时:         %10.4f 秒\n",
+           stats->feature_extraction_time);
+    printf("推理耗时:           %10.4f 秒\n", stats->inference_time);
+  }
   printf("文件IO耗时:         %10.4f 秒\n", stats->file_io_time);
   printf(stages_overlap
              ? "核心累计耗时:   %10.4f 秒 (多线程阶段可并行重叠)\n"
@@ -345,7 +359,19 @@ void print_performance_stats_ex(const PerformanceStats *stats,
                   stats->feature_extraction_time;
     double gbps = (stats->total_bytes * 8.0) / (1024.0 * 1024.0 * 1024.0) /
                   stats->feature_extraction_time;
-    printf("特征提取吞吐量: %10.4f MB/s (%10.4f Gbps)\n", mbps, gbps);
+    printf(stages_overlap
+               ? "特征计算吞吐量: %10.4f MB/s (%10.4f Gbps)\n"
+               : "特征提取吞吐量: %10.4f MB/s (%10.4f Gbps)\n",
+           mbps, gbps);
+  }
+
+  if (stages_overlap && stats->feature_elapsed_time > 0) {
+    double mbps = (stats->total_bytes / (1024.0 * 1024.0)) /
+                  stats->feature_elapsed_time;
+    double gbps = (stats->total_bytes * 8.0) /
+                  (1024.0 * 1024.0 * 1024.0) /
+                  stats->feature_elapsed_time;
+    printf("特征有效吞吐量: %10.4f MB/s (%10.4f Gbps)\n", mbps, gbps);
   }
 
   if (stats->inference_time > 0) {
@@ -353,7 +379,26 @@ void print_performance_stats_ex(const PerformanceStats *stats,
         (stats->total_bytes / (1024.0 * 1024.0)) / stats->inference_time;
     double gbps = (stats->total_bytes * 8.0) / (1024.0 * 1024.0 * 1024.0) /
                   stats->inference_time;
-    printf("推理吞吐量:     %10.4f MB/s (%10.4f Gbps)\n", mbps, gbps);
+    printf(stages_overlap
+               ? "推理计算吞吐量: %10.4f MB/s (%10.4f Gbps)\n"
+               : "推理吞吐量:     %10.4f MB/s (%10.4f Gbps)\n",
+           mbps, gbps);
+  }
+
+  if (stages_overlap && stats->inference_elapsed_time > 0) {
+    double mbps = (stats->total_bytes / (1024.0 * 1024.0)) /
+                  stats->inference_elapsed_time;
+    double gbps = (stats->total_bytes * 8.0) /
+                  (1024.0 * 1024.0 * 1024.0) /
+                  stats->inference_elapsed_time;
+    printf("推理有效吞吐量: %10.4f MB/s (%10.4f Gbps)\n", mbps, gbps);
+  }
+
+  if (stages_overlap && stats->inference_time > 0 &&
+      stats->inference_inputs > 0) {
+    const double samples_per_second =
+        stats->inference_inputs / stats->inference_time;
+    printf("推理计算样本率: %10.4f samples/s\n", samples_per_second);
   }
 
   if (stats->total_time > 0) {

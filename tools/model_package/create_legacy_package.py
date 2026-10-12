@@ -41,9 +41,9 @@ def _legacy_descriptors():
         ("network.dst_port", "builtin.legacy.tuple", 1),
         ("network.protocol", "builtin.legacy.tuple", 1),
     ]
-    provider = "builtin.legacy.traffic_statistics"
     for direction in ("send", "receive"):
         prefix = f"traffic.{direction}"
+        provider = "builtin.legacy.traffic_statistics"
         descriptors.extend(
             [
                 (f"{prefix}.byte_count", provider, 1),

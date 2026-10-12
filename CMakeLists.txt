@@ -55,8 +55,14 @@ endif()
 set(EXECUTABLE_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/output")
 option(KTAG_BUILD_TOOLS "Build KTAG command-line tools and demos" ON)
 option(KTAG_BUILD_EXAMPLES "Build public three-layer integration examples" ON)
+option(KTAG_BUILD_FEATURE_PLUGINS
+       "Build the official Feature Provider plugins"
+       ON)
 option(KTAG_BUILD_PROXY_FEATURES
        "Build the official proxy protocol Feature Provider plugin"
+       ON)
+option(KTAG_BUILD_LEGACY_COMPAT
+       "Build the deprecated fixed-vector compatibility libraries"
        ON)
 option(KTAG_ENABLE_DPDK_UB
        "Enable the optional DPDK UB transport in kdadk_demo"
@@ -67,6 +73,22 @@ option(KTAG_INSTALL_LEGACY_COMPAT
        "Install the deprecated fixed-vector compatibility libraries and headers"
        ON)
 
+if(KTAG_INSTALL_LEGACY_COMPAT AND NOT KTAG_BUILD_LEGACY_COMPAT)
+    message(FATAL_ERROR
+        "KTAG_INSTALL_LEGACY_COMPAT requires KTAG_BUILD_LEGACY_COMPAT")
+endif()
+if(KTAG_BUILD_LEGACY_COMPAT AND NOT KTAG_BUILD_FEATURE_PLUGINS)
+    message(FATAL_ERROR
+        "KTAG_BUILD_LEGACY_COMPAT requires KTAG_BUILD_FEATURE_PLUGINS because "
+        "the default compatibility constructor dynamically loads the official "
+        "Traffic Feature Plugin")
+endif()
+if(KTAG_BUILD_TOOLS AND NOT KTAG_BUILD_LEGACY_COMPAT)
+    message(FATAL_ERROR
+        "KTAG_BUILD_TOOLS currently requires KTAG_BUILD_LEGACY_COMPAT because "
+        "kdadk_demo retains the legacy command paths")
+endif()
+
 # Keep the historical KDADK_APPID installation prefix layout while exposing
 # modern CMake imported targets to customers.
 set(KTAG_INSTALL_LIBDIR "lib/KDADK_APPID")
@@ -74,7 +96,7 @@ set(KTAG_INSTALL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/KDADK_APPID")
 set(KTAG_INSTALL_CMAKEDIR "lib/cmake/KTAG")
 
 ADD_SUBDIRECTORY(src)
-if(KTAG_BUILD_PROXY_FEATURES)
+if(KTAG_BUILD_FEATURE_PLUGINS)
     ADD_SUBDIRECTORY(plugins)
 endif()
 if(KTAG_BUILD_EXAMPLES)
@@ -91,6 +113,7 @@ set(KTAG_PUBLIC_HEADERS
     include/ktag_capture_dpdk.h
     include/ktag_feature.h
     include/ktag_feature_plugin.h
+    include/ktag_traffic_features.h
     include/ktag_inference.h
 )
 install(FILES ${KTAG_PUBLIC_HEADERS}
@@ -98,7 +121,7 @@ install(FILES ${KTAG_PUBLIC_HEADERS}
 
 # The compatibility headers expose historical implementation types and have a
 # wider include dependency closure. Preserve that closure while the adapter is
-# retained; new integrations should use only the six ktag_*.h headers above.
+# retained; new integrations should use only the public ktag_*.h headers above.
 if(KTAG_INSTALL_LEGACY_COMPAT)
     install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
             DESTINATION "${KTAG_INSTALL_INCLUDEDIR}"

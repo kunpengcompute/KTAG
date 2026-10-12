@@ -24,13 +24,23 @@ typedef struct {
 
 typedef struct {
     double pcap_read_time;
+    /* Parallel stages use the busiest worker's compute time. */
     double feature_extraction_time;
+    /* Slowest worker lifetime, including queue waits and backpressure. */
+    double feature_elapsed_time;
+    /* Sum of compute time across all Feature workers (CPU-seconds). */
+    double feature_cpu_time;
     double inference_time;
+    double inference_elapsed_time;
+    /* Sum of compute time across all Inference workers (CPU-seconds). */
+    double inference_cpu_time;
     double file_io_time;
     double total_time;
     double end_to_end_time;
     uint64_t total_bytes;
     uint64_t total_packets;
+    uint64_t inference_inputs;
+    uint64_t predictions;
 } PerformanceStats;
 
 #endif /* KTAG_DEMO_REPORT_TYPES_H */
