@@ -5,8 +5,7 @@
 ## 目录结构
 
 - `demo`：用于特征提取、训练、评估和在线推理的 C++ 示例程序。
-- [`tcp_feature_bench`](tcp_feature_bench/README.md)：后端 PCAP 打流、前端实时提取及 Zstd 压缩、TCP 回传后端解压推理的两机用例；独立构建开关，输出吞吐和压缩统计。
-- [`tcp_pcap_bench`](tcp_pcap_bench/README.md)：前端本地读取 PCAP、提取及 Zstd 压缩、TCP 回传后端推理；独立于打流目标，沿用原 PCAP 读取语义并输出计时 / 吞吐统计。
+- [`tcp_pcap_bench`](tcp_pcap_bench/README.md)：前端本地读取 PCAP、提取及 Zstd 压缩、TCP 回传后端推理；沿用原 PCAP 读取语义，使用独立构建开关并输出计时 / 吞吐统计。
 - `demo/python`：demo 在模型训练和评估时调用的 Python 辅助脚本。
 - `demo/config.yaml`：现有应用分类的完整训练、评估和推理示例。
 - `demo/proxy_config.yaml`：`ktag_proxy_v1` 的训练、评估、特征提取和推理配置；

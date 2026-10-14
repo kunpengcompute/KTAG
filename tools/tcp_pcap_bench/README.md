@@ -1,6 +1,6 @@
 # 前端本地 PCAP → Zstd → TCP → 后端推理
 
-本用例独立于 `tools/tcp_feature_bench` 的后端打流模式。PCAP 放前端，模型包放后端；前端不执行推理，后端不读取输入 PCAP、不打流。
+PCAP 放前端，模型包放后端；前端不执行推理，后端不读取输入 PCAP、不打流。设计说明见 [本地 PCAP TCP 压缩用例设计](../../docs/zh/tcp_pcap_bench_design.md)。
 
 ```text
 前端本地 PCAP → owned 报文池 → 4 个按流分配的 Feature worker
@@ -16,17 +16,17 @@
 
 两端需要 Linux、C++17、CMake、libpcap、yaml-cpp、libzstd（1.4.0+）、ONNX Runtime。直接复用已有 KTAG 依赖，不要求 tcpreplay、tcprewrite、DPDK、UB 库或服务。当前项目根构建配置按 aarch64；下面适用于现场的 ARM Linux 服务器。
 
-新目标不编译或链接旧实时用例的 `live_capture.cpp`、`replay_controller.cpp`、frontend/backend 和配置校验。仅复用 KTAG 公共库和旧 demo 的纯内部帧编码。默认关闭两个 TCP 构建开关；启用本地目标时显式关闭打流目标。
+本目标仅复用 KTAG 公共库和 Demo 的纯内部帧编码，不编译实时抓包或打流实现。`KTAG_BUILD_TCP_PCAP_BENCH` 默认关闭，需要时单独启用。
 
 在 KTAG 根目录执行；ONNX 路径改为实际包含 `include/onnxruntime_c_api.h` 和 `lib/libonnxruntime.so` 的安装根目录：
 
 ```bash
 export KTAG_ORT=/actual/onnxruntime
 cmake -S . -B build/tcp-pcap-bench \
+  -DKDADK_APPID_VERSION_INFO=1.0.1 \
   -DONNXRUNTIME_ROOT="$KTAG_ORT" \
   -DKTAG_BUILD_TOOLS=OFF \
   -DKTAG_BUILD_TCP_PCAP_BENCH=ON \
-  -DKTAG_BUILD_TCP_FEATURE_BENCH=OFF \
   -DKTAG_BUILD_EXAMPLES=OFF -DKTAG_BUILD_PROXY_FEATURES=OFF \
   -DKTAG_ENABLE_DPDK=OFF -DKTAG_ENABLE_DPDK_UB=OFF
 cmake --build build/tcp-pcap-bench --target \
@@ -36,6 +36,8 @@ cmake --build build/tcp-pcap-bench --target \
 ldd output/ktag_tcp_pcap_bench
 output/ktag_tcp_pcap_bench --help
 ```
+
+`KDADK_APPID_VERSION_INFO` 必须传入；上面的 `1.0.1` 对应当前 `dependence.xml` 中的 `KDADK_APPID_INFO_VERSION`。原 `build.sh` 会读取并传入此值，直接运行 CMake 时不会自动读取。项目版本变更时须同步使用 XML 中的版本号。
 
 若非标准安装路径的动态库未找到，按实际位置设置运行库搜索路径；sudo 启动时需要显式传入，但本地模式通常不需要 sudo：
 
@@ -106,6 +108,12 @@ input_complete == true
 ## 性能和无损验证
 
 前端主指标 `core_ns` 从首次 Feature process 调用前，到收到并验证最终 DONE；`pipeline_ns` 另记读取线程启动到 DONE，覆盖首次 process 前的读取。`input_gbit_s` 是 captured bytes × 8 / core seconds / 10^9；`records_s` 是提交推理记录数 / core seconds。
+
+最终回显在完整 JSON 之前打印中文性能统计和管线统计，展示格式参照 UB demo，但实现全部放在本目录，不调用或链接 UB 的统计实现。前端第一行是 `核心处理吞吐量（TCP 压缩全链路）`，后端第一行是 `推理有效吞吐量（后端接收至推理）`。后端阶段指标不能替代前端全链路指标。
+
+为方便直接对照旧 UB 回显，人读吞吐首先使用 MiB/s 和 Gibit/s：分别为 `bytes / seconds / 1024²` 和 `bytes × 8 / seconds / 1024³`。UB 旧版虽写 MB/s、Gbps，实际也是上述二进制计算。下一行同时提供十进制 Gbit/s 换算。JSON 原有单位和字段保持兼容：第一个字段 `core_throughput_gbit_s` 和 `input_gbit_s` 仍使用十进制，`input_gibit_s_ub_legacy` 对应与 UB 直接比较的二进制值；后端 `core_throughput_gbit_s` 为 `null`。失败或没有有效核心计时区间时，首行显示 `N/A`；兼容尾部截断仍成功退出，并在首行注明部分 PCAP 输入。
+
+统计展示相似不代表所有阶段指标完全一致。TCP 的 `特征计算累计耗时` 是所有工作线程 API 调用经过时间之和，不能与 UB 的 `特征计算耗时（最忙线程）` 直接比较；TCP 的特征 CPU 秒使用线程 CPU 时钟，而 UB 当前打印的特征 CPU 累计计算量实际来自 API 调用经过时间之和。TCP `端到端总耗时` 使用 `total_wall_ns`，范围为进程内 Metrics 创建到本次统计采样，包含初始化和结果输出；`pipeline_ns` 的读取开始到 DONE 耗时另外展示。两套用例严格比较应使用前端核心吞吐，并核对相同 PCAP、实际读取包数 / 字节数、Schema、提取参数、模型和 CPU 资源。
 
 计时包含计时开始后的读文件、磁盘 / 页缓存等待、提取、组批、编码、压缩、传输、背压、解压、校验、推理、文件切换和收尾。包时间戳用于特征计算，不用于性能分母。不扣除读文件时间构造所谓纯计算吞吐；各并行阶段累计耗时不可相加当作总时间。
 

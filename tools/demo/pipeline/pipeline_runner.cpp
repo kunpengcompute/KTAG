@@ -24,6 +24,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 #include <arpa/inet.h>
 #include <signal.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
@@ -1888,8 +1889,10 @@ public:
     config_ = &config;
     schema_hash_ = ktag_feature_schema_get_hash(schema);
     value_count_ = ktag_feature_schema_get_value_count(schema);
-    const size_t required = ktag_demo_ub_feature_frame_size(value_count_);
-    if (required == 0U || required > config.ub.data_element_size) {
+    const size_t feature_size = ktag_demo_ub_feature_frame_size(value_count_);
+    const size_t required = std::max(
+        feature_size, static_cast<size_t>(KTAG_DEMO_UB_DRAIN_FRAME_SIZE));
+    if (feature_size == 0U || required > config.ub.data_element_size) {
       std::ostringstream message;
       message << "UB data_element_size=" << config.ub.data_element_size
               << " cannot hold the configured Feature frame (required="
@@ -1910,6 +1913,12 @@ public:
     transport_ = ktag_demo_ub_ring_transport::create(
         make_ub_transport_config(config, ktag_demo_ub_role::user), error);
     if (!transport_) {
+      return false;
+    }
+    try {
+      local_frame_.resize(required);
+    } catch (...) {
+      *error = "out of memory allocating UB local receive buffer";
       return false;
     }
     epoch_ = static_cast<uint64_t>(
@@ -1955,10 +1964,11 @@ public:
       return false;
     }
     std::printf("UB Backend ready: providers=%zu, credits/provider=%u, "
-                "element=%u, epoch=%llu\n",
+                "element=%u, epoch=%llu, receive=rte_memcpy_sync, "
+                "copy_bytes=%zu\n",
                 providers_.size(), config.ub.credits_per_provider,
                 config.ub.data_element_size,
-                static_cast<unsigned long long>(epoch_));
+                static_cast<unsigned long long>(epoch_), local_frame_.size());
     for (const auto &provider : providers_) {
       std::printf("  Provider: hostname=%s, frontend_id_hash=%llu, queue=%u\n",
                   provider.hostname.c_str(),
@@ -1995,17 +2005,30 @@ public:
         if (provider.drained) {
           continue;
         }
-        void *buffer = nullptr;
-        if (transport_->receive_burst(provider.mapping.rx_queue_id, &buffer,
-                                      1U) == 0U) {
+        ktag_demo_ub_copy_receipt receipt;
+        bool received = false;
+        try {
+          received = transport_->receive_copy(
+              provider.mapping.rx_queue_id, local_frame_.data(),
+              local_frame_.size(), local_frame_.size(), &receipt);
+        } catch (const std::exception &failure) {
+          *error = "UB receive/copy from " + provider.hostname + ": " +
+                   failure.what();
+          return false;
+        }
+        if (!received) {
           continue;
         }
-        const auto received_at = std::chrono::steady_clock::now();
+        // Only this local snapshot is passed to frame readers. Keep the UB
+        // buffer for CREDIT, DRAIN_ACK and error-path recycling.
+        void *buffer = receipt.ub_buffer;
+        const void *frame = local_frame_.data();
+        const auto received_at = receipt.received_at;
         received_any = true;
         ktag_demo_ub_frame_info info;
         std::string frame_error;
-        if (!ktag_demo_ub_inspect_frame(buffer, config_->ub.data_element_size,
-                                        &info, &frame_error) ||
+        if (!ktag_demo_ub_inspect_frame(frame, local_frame_.size(), &info,
+                                        &frame_error) ||
             !validate_ub_contract(info, provider.frontend_hash, epoch_,
                                   schema_hash_, config_->ub.ruleset_hash,
                                   &frame_error)) {
@@ -2029,7 +2052,7 @@ public:
           }
           ktag_demo_ub_stream_statistics stream_statistics;
           if (!ktag_demo_ub_decode_drain_frame(
-                  buffer, config_->ub.data_element_size, &stream_statistics,
+                  frame, local_frame_.size(), &stream_statistics,
                   &frame_error) ||
               stream_statistics.feature_records != provider.received_features) {
             transport_->free_buffer(buffer);
@@ -2072,8 +2095,7 @@ public:
           first_feature_received_at_ = received_at;
         }
         feature_record_owned record;
-        if (!ktag_demo_ub_decode_feature_frame(buffer,
-                                               config_->ub.data_element_size,
+        if (!ktag_demo_ub_decode_feature_frame(frame, local_frame_.size(),
                                                &info, &record, &frame_error)) {
           transport_->free_buffer(buffer);
           *error = "failed to decode Feature from " + provider.hostname + ": " +
@@ -2301,6 +2323,7 @@ private:
   prediction_batch_ptr output_;
   std::unique_ptr<ktag_demo_ub_ring_transport> transport_;
   std::vector<ub_backend_provider_state> providers_;
+  std::vector<uint8_t> local_frame_;
   uint64_t epoch_ = 0U;
   uint64_t schema_hash_ = 0U;
   uint32_t value_count_ = 0U;

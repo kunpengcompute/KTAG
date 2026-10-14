@@ -4,6 +4,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #ifndef KTAG_DEMO_UB_RING_TRANSPORT_H
 #define KTAG_DEMO_UB_RING_TRANSPORT_H
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -30,6 +31,12 @@ struct ktag_demo_ub_queue_mapping {
   uint32_t provider_node_index = 0U;
   uint32_t tx_queue_id = 0U;
   uint32_t rx_queue_id = 0U;
+};
+
+struct ktag_demo_ub_copy_receipt {
+  // Resource-management handle only; decode the caller's local copy instead.
+  void *ub_buffer = nullptr;
+  std::chrono::steady_clock::time_point received_at{};
 };
 
 /*
@@ -71,6 +78,14 @@ public:
   uint16_t send_burst(uint32_t queue_id, void **buffers, uint16_t count);
   uint16_t receive_burst(uint32_t queue_id, void **buffers, uint16_t count);
 
+  // Backend-only, nonblocking receive. Copies exactly copy_size bytes before
+  // returning true. False means empty; invalid arguments/elements throw.
+  // The caller allocates/reuses local_buffer and retains ownership of it.
+  // A successful receipt owns the original UB buffer until sent or freed.
+  bool receive_copy(uint32_t queue_id, void *local_buffer,
+                    size_t local_capacity, size_t copy_size,
+                    ktag_demo_ub_copy_receipt *receipt);
+
   /* User returns locally; Provider returns through the shared return ring. */
   void free_buffer(void *buffer);
   void return_buffer(void *buffer);
@@ -78,6 +93,8 @@ public:
 
 private:
   struct implementation;
+
+  void *resolve_received_element(void *element) const;
 
   explicit ktag_demo_ub_ring_transport(
       std::unique_ptr<implementation> state);

@@ -54,8 +54,6 @@ endif()
 
 set(EXECUTABLE_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/output")
 option(KTAG_BUILD_TOOLS "Build KTAG command-line tools and demos" ON)
-option(KTAG_BUILD_TCP_FEATURE_BENCH
-       "Build the Linux TCP/Zstd feature extraction and inference demo" OFF)
 option(KTAG_BUILD_TCP_PCAP_BENCH
        "Build the independent Linux local-PCAP TCP/Zstd demo" OFF)
 option(KTAG_BUILD_EXAMPLES "Build public three-layer integration examples" ON)
@@ -87,9 +85,6 @@ endif()
 if(KTAG_BUILD_TOOLS)
     ADD_SUBDIRECTORY(tools)
 else()
-    if(KTAG_BUILD_TCP_FEATURE_BENCH)
-        ADD_SUBDIRECTORY(tools/tcp_feature_bench)
-    endif()
     if(KTAG_BUILD_TCP_PCAP_BENCH)
         ADD_SUBDIRECTORY(tools/tcp_pcap_bench)
     endif()
