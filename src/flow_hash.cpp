@@ -2,6 +2,7 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include "flow_hash.h"
+#include "rawbow_token_dfa.h"
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -290,8 +291,7 @@ void add_rawbow_to_node(flow_hash *hash_table, flow_hash_node *node, std::string
         return;
     }
 
-    std::vector<std::string> tokens = tokenize_url(message);
-    std::vector<std::string> filtered_tokens = filter_tokens(tokens);
+    std::vector<std::string> filtered_tokens = rawbow_dfa::collect_filtered_tokens(message, rawbow_dfa::kUnlimitedTokens);
 
     for (std::string token : filtered_tokens) {
         if (node->rawbow_cnt >= MAX_RAWBOW_CNT) {

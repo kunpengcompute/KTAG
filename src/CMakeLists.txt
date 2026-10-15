@@ -156,6 +156,7 @@ add_library(ktag_feature SHARED
     ${PROJECT_SOURCE_DIR}/src/feature/feature_plugin_loader.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/domain_store.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_context.cpp
+    ${PROJECT_SOURCE_DIR}/src/rawbow_token_dfa.cpp
 )
 add_library(KTAG::feature ALIAS ktag_feature)
 
@@ -191,6 +192,7 @@ set_target_properties(ktag_feature PROPERTIES
 set(KTAG_FIXED_VECTOR_FEATURE_SOURCES
     ${PROJECT_SOURCE_DIR}/src/kdadk_feature_extract.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
+    ${PROJECT_SOURCE_DIR}/src/rawbow_token_dfa.cpp
     ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
 )
 if(KTAG_BUILD_LEGACY_COMPAT)
