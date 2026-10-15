@@ -192,6 +192,7 @@ set_target_properties(ktag_feature PROPERTIES
 set(KTAG_FIXED_VECTOR_FEATURE_SOURCES
     ${PROJECT_SOURCE_DIR}/src/kdadk_feature_extract.cpp
     ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
+    ${PROJECT_SOURCE_DIR}/src/rawbow_token_dfa.cpp
     ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
 )
 if(KTAG_BUILD_LEGACY_COMPAT)
