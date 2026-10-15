@@ -156,6 +156,7 @@ add_library(ktag_feature SHARED
     ${PROJECT_SOURCE_DIR}/src/feature/feature_plugin_loader.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/domain_store.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_context.cpp
+    ${PROJECT_SOURCE_DIR}/src/rawbow_token_dfa.cpp
 )
 add_library(KTAG::feature ALIAS ktag_feature)
 
