@@ -156,7 +156,6 @@ bool valid_message_type(uint32_t value) {
 
 bool control_message_type(ktag_demo_ub_message_type type) {
   return type == ktag_demo_ub_message_type::credit ||
-         type == ktag_demo_ub_message_type::drain ||
          type == ktag_demo_ub_message_type::drain_ack ||
          type == ktag_demo_ub_message_type::error;
 }
@@ -306,10 +305,21 @@ bool read_header(const void *buffer, size_t buffer_size,
     set_error(error, "UB frame header is truncated");
     return false;
   }
-  if (magic != KTAG_DEMO_UB_FRAME_MAGIC ||
-      version != KTAG_DEMO_UB_FRAME_VERSION ||
-      header_size != KTAG_DEMO_UB_FRAME_HEADER_SIZE) {
-    set_error(error, "UB frame magic or version is incompatible");
+  if (magic != KTAG_DEMO_UB_FRAME_MAGIC) {
+    set_error(error, "UB frame magic is incompatible");
+    return false;
+  }
+  if (version != KTAG_DEMO_UB_FRAME_VERSION) {
+    if (error != nullptr) {
+      *error = "UB frame version is incompatible: expected=" +
+               std::to_string(KTAG_DEMO_UB_FRAME_VERSION) +
+               ", received=" + std::to_string(version) +
+               "; rebuild and deploy both endpoints";
+    }
+    return false;
+  }
+  if (header_size != KTAG_DEMO_UB_FRAME_HEADER_SIZE) {
+    set_error(error, "UB frame header size is incompatible");
     return false;
   }
   if (!valid_message_type(message_type)) {
@@ -334,6 +344,13 @@ bool read_header(const void *buffer, size_t buffer_size,
         decoded.frame_size !=
             ktag_demo_ub_feature_frame_size(decoded.value_count)) {
       set_error(error, "UB Feature frame shape is inconsistent");
+      return false;
+    }
+  } else if (decoded.message_type == ktag_demo_ub_message_type::drain) {
+    if (decoded.record_count != 0U || decoded.value_count != 0U ||
+        decoded.frame_size != KTAG_DEMO_UB_DRAIN_FRAME_SIZE ||
+        decoded.flags != 0U) {
+      set_error(error, "UB DRAIN frame must contain stream statistics");
       return false;
     }
   } else if (decoded.record_count != 0U || decoded.value_count != 0U ||
@@ -383,6 +400,73 @@ bool ktag_demo_ub_encode_control_frame(
     return false;
   }
   *encoded_size = writer.size();
+  return true;
+}
+
+bool ktag_demo_ub_encode_drain_frame(
+    void *buffer, size_t buffer_capacity,
+    const ktag_demo_ub_frame_contract &contract,
+    const ktag_demo_ub_stream_statistics &statistics, size_t *encoded_size,
+    std::string *error) {
+  if (error != nullptr) {
+    error->clear();
+  }
+  if (buffer == nullptr || encoded_size == nullptr ||
+      buffer_capacity < KTAG_DEMO_UB_DRAIN_FRAME_SIZE) {
+    set_error(error, "UB buffer is too small for DRAIN statistics");
+    return false;
+  }
+  if (statistics.feature_records != contract.sequence) {
+    set_error(error, "UB DRAIN statistics do not match the Feature sequence");
+    return false;
+  }
+  auto *payload = static_cast<uint8_t *>(buffer) + KTAG_DEMO_UB_FRAME_HEADER_SIZE;
+  wire_writer writer(payload,
+                     KTAG_DEMO_UB_DRAIN_FRAME_SIZE - KTAG_DEMO_UB_FRAME_HEADER_SIZE);
+  if (!writer.put_u64(statistics.input_packets) ||
+      !writer.put_u64(statistics.input_bytes) ||
+      !writer.put_u64(statistics.feature_records)) {
+    set_error(error, "failed to encode UB DRAIN statistics");
+    return false;
+  }
+  wire_writer header_writer(buffer, KTAG_DEMO_UB_FRAME_HEADER_SIZE);
+  if (!put_header(&header_writer, ktag_demo_ub_message_type::drain, 0U,
+                  KTAG_DEMO_UB_DRAIN_FRAME_SIZE, 0U, 0U, 0U, contract,
+                  crc32(payload, writer.size()))) {
+    set_error(error, "failed to encode UB DRAIN header");
+    return false;
+  }
+  *encoded_size = KTAG_DEMO_UB_DRAIN_FRAME_SIZE;
+  return true;
+}
+
+bool ktag_demo_ub_decode_drain_frame(
+    const void *buffer, size_t buffer_size,
+    ktag_demo_ub_stream_statistics *statistics, std::string *error) {
+  if (statistics == nullptr) {
+    set_error(error, "UB DRAIN statistics output is required");
+    return false;
+  }
+  ktag_demo_ub_frame_info info;
+  if (!ktag_demo_ub_inspect_frame(buffer, buffer_size, &info, error)) {
+    return false;
+  }
+  if (info.message_type != ktag_demo_ub_message_type::drain) {
+    set_error(error, "UB frame is not a DRAIN frame");
+    return false;
+  }
+  wire_reader reader(
+      static_cast<const uint8_t *>(buffer) + KTAG_DEMO_UB_FRAME_HEADER_SIZE,
+      KTAG_DEMO_UB_DRAIN_FRAME_SIZE - KTAG_DEMO_UB_FRAME_HEADER_SIZE);
+  ktag_demo_ub_stream_statistics decoded;
+  if (!reader.get_u64(&decoded.input_packets) ||
+      !reader.get_u64(&decoded.input_bytes) ||
+      !reader.get_u64(&decoded.feature_records) ||
+      decoded.feature_records != info.contract.sequence) {
+    set_error(error, "UB DRAIN statistics do not match the Feature sequence");
+    return false;
+  }
+  *statistics = decoded;
   return true;
 }
 

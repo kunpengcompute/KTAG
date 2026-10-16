@@ -1360,6 +1360,60 @@ TEST(KTAGDemoUbFeatureWire, ValidatesControlAndRejectsCorruption)
         false, &encoded_size, &error));
 }
 
+TEST(KTAGDemoUbFeatureWire, DrainStatisticsRejectCorruptionAndVersionMismatch)
+{
+    ktag_demo_ub_frame_contract contract;
+    contract.epoch = 9U;
+    contract.sequence = 26339U;
+    ktag_demo_ub_stream_statistics input;
+    // Reports must survive workloads exceeding 4 GiB and 32-bit counters.
+    input.input_packets = (1ULL << 32U) + 17U;
+    input.input_bytes = (1ULL << 40U) + 123U;
+    input.feature_records = contract.sequence;
+    std::array<uint8_t, KTAG_DEMO_UB_DRAIN_FRAME_SIZE> buffer{};
+    size_t encoded_size = 0U;
+    std::string error;
+    ASSERT_TRUE(ktag_demo_ub_encode_drain_frame(
+        buffer.data(), buffer.size(), contract, input, &encoded_size, &error))
+        << error;
+    EXPECT_EQ(buffer.size(), encoded_size);
+    ktag_demo_ub_stream_statistics output;
+    ASSERT_TRUE(ktag_demo_ub_decode_drain_frame(
+        buffer.data(), buffer.size(), &output, &error)) << error;
+    EXPECT_EQ(input.input_packets, output.input_packets);
+    EXPECT_EQ(input.input_bytes, output.input_bytes);
+    EXPECT_EQ(input.feature_records, output.feature_records);
+
+    EXPECT_FALSE(ktag_demo_ub_decode_drain_frame(
+        buffer.data(), buffer.size() - 1U, &output, &error));
+    buffer.back() ^= 1U;
+    EXPECT_FALSE(ktag_demo_ub_decode_drain_frame(
+        buffer.data(), buffer.size(), &output, &error));
+    EXPECT_NE(std::string::npos, error.find("CRC"));
+    buffer.back() ^= 1U;
+    buffer[8] = 1U; // Version 1 peers cannot supply the input-byte summary.
+    EXPECT_FALSE(ktag_demo_ub_decode_drain_frame(
+        buffer.data(), buffer.size(), &output, &error));
+    EXPECT_NE(std::string::npos, error.find("incompatible"));
+
+    input.feature_records -= 1U;
+    EXPECT_FALSE(ktag_demo_ub_encode_drain_frame(
+        buffer.data(), buffer.size(), contract, input, &encoded_size, &error));
+    EXPECT_FALSE(ktag_demo_ub_encode_control_frame(
+        buffer.data(), buffer.size(), ktag_demo_ub_message_type::drain,
+        contract, &encoded_size, &error));
+
+    contract.sequence = 0U;
+    input = ktag_demo_ub_stream_statistics{};
+    ASSERT_TRUE(ktag_demo_ub_encode_drain_frame(
+        buffer.data(), buffer.size(), contract, input, &encoded_size, &error))
+        << error;
+    ASSERT_TRUE(ktag_demo_ub_decode_drain_frame(
+        buffer.data(), buffer.size(), &output, &error)) << error;
+    EXPECT_EQ(0U, output.input_bytes);
+    EXPECT_EQ(0U, output.feature_records);
+}
+
 TEST(KTAGDemoPredictionWriter, WritesDualStackMetadataAndConfidenceContract)
 {
     std::vector<ktag_demo_pipeline_prediction> predictions{

@@ -16,6 +16,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 #include <rte_eal.h>
 #include <rte_errno.h>
+#include <rte_memcpy.h>
 #include <rte_ub_ring.h>
 
 namespace {
@@ -183,6 +184,7 @@ struct ktag_demo_ub_ring_transport::implementation {
     rte_ub_ring_handle *handle = nullptr;
     bool owns_eal = false;
     size_t provider_shm_size = 0U;
+    uint32_t payload_capacity = 0U;
 };
 
 ktag_demo_ub_ring_transport::ktag_demo_ub_ring_transport(
@@ -207,6 +209,7 @@ ktag_demo_ub_ring_transport::create(const ktag_demo_ub_transport_config &config,
     }
     state->role = config.role;
     state->provider_shm_size = config.provider_shm_size;
+    state->payload_capacity = config.data_element_size;
     bool owns_eal = false;
     if (!initialize_eal(config, &owns_eal, error)) {
         return nullptr;
@@ -338,23 +341,71 @@ uint16_t ktag_demo_ub_ring_transport::receive_burst(uint32_t queue_id,
     const uint16_t received =
         rte_ub_ring_recv_burst(state_->handle, queue_id, buffers, count);
     for (uint16_t i = 0; i < received; ++i) {
-        const uint32_t provider = ub_ring_elem_get_node(buffers[i]);
-        const uint64_t offset = ub_ring_elem_get_offset(buffers[i]);
-        void *area = rte_ub_ring_get_data_buf_area(state_->handle, provider);
-        const uint32_t stride =
-            rte_ub_ring_get_data_elt_size(state_->handle, provider);
-        // Element zero is reserved by DPDK. The configured shm size supplies
-        // an upper bound (not the exact buffer-area size). In particular this
-        // rejects a raw remote virtual address from an incompatible sender.
-        if (area == nullptr || stride <= UB_RING_BUF_HDR_SIZE ||
-            offset == 0U || offset % stride != 0U ||
-            state_->provider_shm_size < stride ||
-            offset > state_->provider_shm_size - stride) {
-            throw std::runtime_error("UB received invalid packed buffer element");
-        }
-        buffers[i] = ub_ring_buf_ptr(area, offset);
+        buffers[i] = resolve_received_element(buffers[i]);
     }
     return received;
+}
+
+void *ktag_demo_ub_ring_transport::resolve_received_element(void *element) const {
+    const uint32_t provider = ub_ring_elem_get_node(element);
+    const uint64_t offset = ub_ring_elem_get_offset(element);
+    void *area = rte_ub_ring_get_data_buf_area(state_->handle, provider);
+    const uint32_t stride =
+        rte_ub_ring_get_data_elt_size(state_->handle, provider);
+    // Keep the existing packed-element validation for both receive paths.
+    // The shm size is an upper bound, not the exact buffer-area size.
+    if (area == nullptr || stride <= UB_RING_BUF_HDR_SIZE ||
+        offset == 0U || offset % stride != 0U ||
+        state_->provider_shm_size < stride ||
+        offset > state_->provider_shm_size - stride) {
+        throw std::runtime_error("UB received invalid packed buffer element");
+    }
+    return ub_ring_buf_ptr(area, offset);
+}
+
+bool ktag_demo_ub_ring_transport::receive_copy(
+    uint32_t queue_id, void *local_buffer, size_t local_capacity,
+    size_t copy_size, ktag_demo_ub_copy_receipt *receipt) {
+    if (receipt == nullptr) {
+        throw std::invalid_argument("UB copy receipt is required");
+    }
+    *receipt = {};
+    if (state_->role != ktag_demo_ub_role::user ||
+        local_buffer == nullptr || copy_size == 0U ||
+        queue_id >= total_queues()) {
+        throw std::invalid_argument("invalid UB copy receive arguments");
+    }
+    const uint32_t provider =
+        rte_ub_ring_queue_to_provider(state_->handle, queue_id);
+    const uint32_t stride = data_element_size(provider);
+    if (copy_size > local_capacity || copy_size > state_->payload_capacity ||
+        stride <= UB_RING_BUF_HDR_SIZE ||
+        copy_size > stride - UB_RING_BUF_HDR_SIZE) {
+        // Reject capacity errors before consuming a queue element.
+        throw std::length_error("UB copy exceeds local or UB payload capacity");
+    }
+
+    void *element = nullptr;
+    if (rte_ub_ring_recv_burst(state_->handle, queue_id, &element, 1U) == 0U) {
+        return false;
+    }
+    const auto received_at = std::chrono::steady_clock::now();
+    if (ub_ring_elem_get_node(element) != provider) {
+        throw std::runtime_error("UB received element from wrong Provider");
+    }
+    void *buffer = resolve_received_element(element);
+    const auto destination = reinterpret_cast<uintptr_t>(local_buffer);
+    const auto source = reinterpret_cast<uintptr_t>(buffer);
+    if ((destination >= source && destination - source < copy_size) ||
+        (source > destination && source - destination < copy_size)) {
+        free_buffer(buffer);
+        throw std::invalid_argument("UB copy source and destination overlap");
+    }
+
+    rte_memcpy(local_buffer, buffer, copy_size);
+    receipt->ub_buffer = buffer;
+    receipt->received_at = received_at;
+    return true;
 }
 
 void ktag_demo_ub_ring_transport::free_buffer(void *buffer) {

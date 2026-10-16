@@ -1,6 +1,6 @@
 .vscode/
 /docs/*
-!/docs/zh/
+/docs/zh/
 /build/
 /output/
 /result/

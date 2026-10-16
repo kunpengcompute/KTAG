@@ -1,0 +1,32 @@
+# Mirrors the ordinary PCAP frontend settings in config-ub-1to1.yaml.
+schema:
+  name: ktag_legacy_v1
+  version: 1
+capture:
+  backend: pcap
+  packet_pool_size: 65536
+feature:
+  threads: 4
+  packet_queue_capacity: 65536
+  flow_hash_seed: 2026
+  lifecycle_mode: legacy
+  expire_interval_ms: 1000
+inference:
+  batch_size: 256
+  batch_timeout_us: 1000
+  queue_capacity: 4096
+  intra_op_threads: 1
+  inter_op_threads: 1
+  prediction_limit: 1000000
+transport:
+  port: 19090
+  batch_records: 256
+  batch_timeout_us: 1000
+  max_uncompressed_bytes: 4194304
+  progress_timeout_s: 120
+compression:
+  codec: zstd
+  level: 1
+  target_ratio: 10.0
+backpressure:
+  policy: block

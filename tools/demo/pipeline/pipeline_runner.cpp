@@ -24,6 +24,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 #include <arpa/inet.h>
 #include <signal.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
@@ -35,6 +36,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -186,6 +188,7 @@ struct feature_worker_statistics {
   uint64_t rejected_packets = 0U;
   uint64_t elapsed_nanoseconds = 0U;
   uint64_t work_nanoseconds = 0U;
+  std::chrono::steady_clock::time_point first_process_at{};
 };
 
 struct inference_worker_statistics {
@@ -206,11 +209,14 @@ struct pipeline_source_statistics {
   uint64_t predictions = 0U;
   uint64_t capture_nanoseconds = 0U;
   uint64_t feature_nanoseconds = 0U;
+  uint64_t feature_wall_nanoseconds = 0U;
+  uint64_t feature_work_sum_nanoseconds = 0U;
   uint64_t inference_nanoseconds = 0U;
   uint64_t elapsed_nanoseconds = 0U;
   uint64_t queue_drops = 0U;
   uint64_t queue_failures = 0U;
   std::string partial_capture_error;
+  std::chrono::steady_clock::time_point first_feature_at{};
 };
 
 struct pipeline_run_statistics {
@@ -223,11 +229,16 @@ struct pipeline_run_statistics {
   uint64_t predictions = 0U;
   uint64_t capture_nanoseconds = 0U;
   uint64_t feature_nanoseconds = 0U;
+  uint64_t feature_wall_nanoseconds = 0U;
+  uint64_t feature_work_sum_nanoseconds = 0U;
   uint64_t inference_nanoseconds = 0U;
   uint64_t file_io_nanoseconds = 0U;
   uint64_t elapsed_nanoseconds = 0U;
   uint64_t queue_drops = 0U;
   uint64_t queue_failures = 0U;
+  std::chrono::steady_clock::time_point first_feature_at{};
+  uint64_t distributed_core_nanoseconds = 0U;
+  uint64_t distributed_inference_wall_nanoseconds = 0U;
 };
 
 uint64_t
@@ -247,6 +258,11 @@ bool is_recoverable_truncated_capture(bool live, ktag_status status,
 
 void add_source_statistics(pipeline_run_statistics *total,
                            const pipeline_source_statistics &source) {
+  if (source.first_feature_at != std::chrono::steady_clock::time_point{} &&
+      (total->first_feature_at == std::chrono::steady_clock::time_point{} ||
+       source.first_feature_at < total->first_feature_at)) {
+    total->first_feature_at = source.first_feature_at;
+  }
   total->packets += source.packets;
   total->bytes += source.bytes;
   total->unsupported_packets += source.unsupported_packets;
@@ -256,6 +272,8 @@ void add_source_statistics(pipeline_run_statistics *total,
   total->predictions += source.predictions;
   total->capture_nanoseconds += source.capture_nanoseconds;
   total->feature_nanoseconds += source.feature_nanoseconds;
+  total->feature_wall_nanoseconds += source.feature_wall_nanoseconds;
+  total->feature_work_sum_nanoseconds += source.feature_work_sum_nanoseconds;
   total->inference_nanoseconds += source.inference_nanoseconds;
   total->queue_drops += source.queue_drops;
   total->queue_failures += source.queue_failures;
@@ -1145,6 +1163,10 @@ private:
       ++feature_stats_[worker_index].packets;
       const uint64_t now_us = timestamp_us(packet.get()->timestamp);
       const auto process_start = std::chrono::steady_clock::now();
+      if (feature_stats_[worker_index].first_process_at ==
+          std::chrono::steady_clock::time_point{}) {
+        feature_stats_[worker_index].first_process_at = process_start;
+      }
       const ktag_status status = ktag_feature_process_packet(
           feature_contexts_[worker_index].get(), packet.get(), output.get());
       feature_stats_[worker_index].work_nanoseconds +=
@@ -1358,10 +1380,20 @@ private:
     for (uint32_t index = 0U; index < packet_queues_.size(); ++index) {
       const auto queue = packet_queues_[index]->statistics();
       const auto &worker = feature_stats_[index];
+      if (worker.first_process_at != std::chrono::steady_clock::time_point{} &&
+          (statistics->first_feature_at ==
+               std::chrono::steady_clock::time_point{} ||
+           worker.first_process_at < statistics->first_feature_at)) {
+        statistics->first_feature_at = worker.first_process_at;
+      }
       statistics->unsupported_packets += worker.rejected_packets;
       statistics->emitted_flows += worker.emitted_flows;
       statistics->feature_nanoseconds =
           std::max(statistics->feature_nanoseconds, worker.work_nanoseconds);
+      statistics->feature_wall_nanoseconds =
+          std::max(statistics->feature_wall_nanoseconds,
+                   worker.elapsed_nanoseconds);
+      statistics->feature_work_sum_nanoseconds += worker.work_nanoseconds;
       statistics->queue_drops += queue.dropped_newest + queue.dropped_oldest;
       statistics->queue_failures += queue.failures;
     }
@@ -1421,6 +1453,82 @@ bool run_parallel_source(
 }
 
 #if KTAG_ENABLE_DPDK_UB
+
+void print_ub_throughput(const char *label, uint64_t input_bytes,
+                         uint64_t nanoseconds) {
+  if (nanoseconds == 0U) {
+    std::printf("%s: N/A（无有效计时区间）\n", label);
+    return;
+  }
+  const double seconds = static_cast<double>(nanoseconds) / 1.0e9;
+  // Keep the unit conversion used by the existing performance report.
+  constexpr double bytes_per_megabyte = 1024.0 * 1024.0;
+  constexpr double bits_per_gigabit = 1024.0 * 1024.0 * 1024.0;
+  const double bytes = static_cast<double>(input_bytes);
+  std::printf("%s: %10.4f MB/s (%10.4f Gbps)\n", label,
+              bytes / bytes_per_megabyte / seconds,
+              bytes * 8.0 / bits_per_gigabit / seconds);
+}
+
+void print_ub_performance_stats(const pipeline_run_statistics &statistics,
+                               bool frontend) {
+  constexpr double nanoseconds_per_second = 1.0e9;
+  constexpr double bytes_per_megabyte = 1024.0 * 1024.0;
+  std::printf("\n======================= 性能统计 =======================\n");
+  if (frontend) {
+    std::printf("PCAP 读取累计耗时: %10.4f 秒\n",
+                statistics.capture_nanoseconds / nanoseconds_per_second);
+    std::printf("特征计算耗时: %10.4f 秒\n",
+                statistics.feature_nanoseconds / nanoseconds_per_second);
+    std::printf("特征线程经过耗时: %10.4f 秒\n",
+                statistics.feature_wall_nanoseconds / nanoseconds_per_second);
+    std::printf("特征 CPU 累计计算量: %10.4f CPU 秒\n",
+                statistics.feature_work_sum_nanoseconds /
+                    nanoseconds_per_second);
+  } else {
+    std::printf("推理计算累计耗时: %10.4f 秒\n",
+                statistics.inference_nanoseconds / nanoseconds_per_second);
+    std::printf("推理阶段墙钟耗时（首条特征接收到末次推理完成）: %10.4f 秒\n",
+                statistics.distributed_inference_wall_nanoseconds /
+                    nanoseconds_per_second);
+  }
+  std::printf("文件 IO 耗时: %10.4f 秒\n",
+              statistics.file_io_nanoseconds / nanoseconds_per_second);
+  const double local_compute_seconds =
+      statistics.feature_nanoseconds / nanoseconds_per_second +
+      statistics.inference_nanoseconds / nanoseconds_per_second +
+      statistics.file_io_nanoseconds / nanoseconds_per_second;
+  std::printf("核心累计耗时: %10.4f 秒 (本节点计算累计，多线程阶段可并行重叠)\n",
+              local_compute_seconds);
+  if (frontend) {
+    std::printf("核心链路耗时（特征提取、UB 传输、等待及后端推理）: %10.4f 秒\n",
+                statistics.distributed_core_nanoseconds /
+                    nanoseconds_per_second);
+    std::printf("核心计时范围: 首条报文开始特征处理 → 收到后端完成确认\n");
+  }
+  std::printf("端到端总耗时: %10.4f 秒 (包含 PCAP 读取等所有开销)\n",
+              statistics.elapsed_nanoseconds / nanoseconds_per_second);
+  std::printf("处理包数: %10llu 个\n",
+              static_cast<unsigned long long>(statistics.packets));
+  std::printf("总数据量: %10.4f MB\n",
+              static_cast<double>(statistics.bytes) / bytes_per_megabyte);
+  if (frontend) {
+    print_ub_throughput("特征计算吞吐量", statistics.bytes,
+                        statistics.feature_nanoseconds);
+    print_ub_throughput("特征有效吞吐量", statistics.bytes,
+                        statistics.feature_wall_nanoseconds);
+    print_ub_throughput("核心处理吞吐量（UB 全链路）", statistics.bytes,
+                        statistics.distributed_core_nanoseconds);
+  } else {
+    print_ub_throughput("推理计算吞吐量", statistics.bytes,
+                        statistics.inference_nanoseconds);
+    print_ub_throughput("推理有效吞吐量", statistics.bytes,
+                        statistics.distributed_inference_wall_nanoseconds);
+  }
+  print_ub_throughput("端到端吞吐量", statistics.bytes,
+                      statistics.elapsed_nanoseconds);
+  std::printf("========================================================\n\n");
+}
 
 uint64_t ub_identity_hash(const std::string &identity) {
   uint64_t hash = 14695981039346656037ULL;
@@ -1579,7 +1687,7 @@ public:
     return true;
   }
 
-  bool drain(std::string *error) {
+  bool drain(pipeline_run_statistics *statistics, std::string *error) {
     void *buffer = ready_buffer_;
     ready_buffer_ = nullptr;
     if (buffer == nullptr && !take_credit(&buffer, error)) {
@@ -1587,10 +1695,14 @@ public:
     }
     ktag_demo_ub_frame_contract contract = base_contract();
     contract.sequence = sequence_;
+    ktag_demo_ub_stream_statistics stream_statistics;
+    stream_statistics.input_packets = statistics->packets;
+    stream_statistics.input_bytes = statistics->bytes;
+    stream_statistics.feature_records = statistics->emitted_flows;
     size_t encoded_size = 0U;
-    if (!ktag_demo_ub_encode_control_frame(
-            buffer, config_->ub.data_element_size,
-            ktag_demo_ub_message_type::drain, contract, &encoded_size, error)) {
+    if (!ktag_demo_ub_encode_drain_frame(
+            buffer, config_->ub.data_element_size, contract, stream_statistics,
+            &encoded_size, error)) {
       transport_->return_buffer(buffer);
       return false;
     }
@@ -1605,6 +1717,7 @@ public:
         ub_poll_backoff(config_->ub.poll_us);
         continue;
       }
+      const auto received_at = std::chrono::steady_clock::now();
       ktag_demo_ub_frame_info info;
       std::string frame_error;
       const bool valid = ktag_demo_ub_inspect_frame(
@@ -1631,6 +1744,15 @@ public:
         transport_->return_buffer(reply);
         *error = "Frontend received an unexpected UB shutdown message";
         return false;
+      }
+      if (statistics->first_feature_at !=
+          std::chrono::steady_clock::time_point{}) {
+        // One frontend clock covers extraction, transport, backend inference
+        // and the completion reply. Never subtract clocks on different hosts.
+        statistics->distributed_core_nanoseconds = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                received_at - statistics->first_feature_at)
+                .count());
       }
       transport_->return_buffer(reply);
       std::printf("UB Frontend drained: features=%llu, send_retries=%llu, "
@@ -1767,8 +1889,10 @@ public:
     config_ = &config;
     schema_hash_ = ktag_feature_schema_get_hash(schema);
     value_count_ = ktag_feature_schema_get_value_count(schema);
-    const size_t required = ktag_demo_ub_feature_frame_size(value_count_);
-    if (required == 0U || required > config.ub.data_element_size) {
+    const size_t feature_size = ktag_demo_ub_feature_frame_size(value_count_);
+    const size_t required = std::max(
+        feature_size, static_cast<size_t>(KTAG_DEMO_UB_DRAIN_FRAME_SIZE));
+    if (feature_size == 0U || required > config.ub.data_element_size) {
       std::ostringstream message;
       message << "UB data_element_size=" << config.ub.data_element_size
               << " cannot hold the configured Feature frame (required="
@@ -1789,6 +1913,12 @@ public:
     transport_ = ktag_demo_ub_ring_transport::create(
         make_ub_transport_config(config, ktag_demo_ub_role::user), error);
     if (!transport_) {
+      return false;
+    }
+    try {
+      local_frame_.resize(required);
+    } catch (...) {
+      *error = "out of memory allocating UB local receive buffer";
       return false;
     }
     epoch_ = static_cast<uint64_t>(
@@ -1834,10 +1964,11 @@ public:
       return false;
     }
     std::printf("UB Backend ready: providers=%zu, credits/provider=%u, "
-                "element=%u, epoch=%llu\n",
+                "element=%u, epoch=%llu, receive=rte_memcpy_sync, "
+                "copy_bytes=%zu\n",
                 providers_.size(), config.ub.credits_per_provider,
                 config.ub.data_element_size,
-                static_cast<unsigned long long>(epoch_));
+                static_cast<unsigned long long>(epoch_), local_frame_.size());
     for (const auto &provider : providers_) {
       std::printf("  Provider: hostname=%s, frontend_id_hash=%llu, queue=%u\n",
                   provider.hostname.c_str(),
@@ -1874,16 +2005,30 @@ public:
         if (provider.drained) {
           continue;
         }
-        void *buffer = nullptr;
-        if (transport_->receive_burst(provider.mapping.rx_queue_id, &buffer,
-                                      1U) == 0U) {
+        ktag_demo_ub_copy_receipt receipt;
+        bool received = false;
+        try {
+          received = transport_->receive_copy(
+              provider.mapping.rx_queue_id, local_frame_.data(),
+              local_frame_.size(), local_frame_.size(), &receipt);
+        } catch (const std::exception &failure) {
+          *error = "UB receive/copy from " + provider.hostname + ": " +
+                   failure.what();
+          return false;
+        }
+        if (!received) {
           continue;
         }
+        // Only this local snapshot is passed to frame readers. Keep the UB
+        // buffer for CREDIT, DRAIN_ACK and error-path recycling.
+        void *buffer = receipt.ub_buffer;
+        const void *frame = local_frame_.data();
+        const auto received_at = receipt.received_at;
         received_any = true;
         ktag_demo_ub_frame_info info;
         std::string frame_error;
-        if (!ktag_demo_ub_inspect_frame(buffer, config_->ub.data_element_size,
-                                        &info, &frame_error) ||
+        if (!ktag_demo_ub_inspect_frame(frame, local_frame_.size(), &info,
+                                        &frame_error) ||
             !validate_ub_contract(info, provider.frontend_hash, epoch_,
                                   schema_hash_, config_->ub.ruleset_hash,
                                   &frame_error)) {
@@ -1905,6 +2050,26 @@ public:
                      provider.hostname;
             return false;
           }
+          ktag_demo_ub_stream_statistics stream_statistics;
+          if (!ktag_demo_ub_decode_drain_frame(
+                  frame, local_frame_.size(), &stream_statistics,
+                  &frame_error) ||
+              stream_statistics.feature_records != provider.received_features) {
+            transport_->free_buffer(buffer);
+            *error = "invalid DRAIN statistics from " + provider.hostname +
+                     ": " + (frame_error.empty() ? "Feature count mismatch"
+                                                : frame_error);
+            return false;
+          }
+          const uint64_t max_count = std::numeric_limits<uint64_t>::max();
+          if (stream_statistics.input_bytes > max_count - statistics->bytes ||
+              stream_statistics.input_packets > max_count - statistics->packets) {
+            transport_->free_buffer(buffer);
+            *error = "UB input statistics overflow";
+            return false;
+          }
+          statistics->bytes += stream_statistics.input_bytes;
+          statistics->packets += stream_statistics.input_packets;
           provider.drained = true;
           provider.drain_buffer = buffer;
           ++drained_count;
@@ -1925,9 +2090,12 @@ public:
                    provider.hostname;
           return false;
         }
+        if (first_feature_received_at_ ==
+            std::chrono::steady_clock::time_point{}) {
+          first_feature_received_at_ = received_at;
+        }
         feature_record_owned record;
-        if (!ktag_demo_ub_decode_feature_frame(buffer,
-                                               config_->ub.data_element_size,
+        if (!ktag_demo_ub_decode_feature_frame(frame, local_frame_.size(),
                                                &info, &record, &frame_error)) {
           transport_->free_buffer(buffer);
           *error = "failed to decode Feature from " + provider.hostname + ": " +
@@ -1989,6 +2157,18 @@ public:
         !infer_batch(inference_.get(), input_.get(), output_.get(), &details,
                      &source_indices, &frontend_hashes, &ground_truth_valid,
                      predictions, statistics, error)) {
+      return false;
+    }
+    if (first_feature_received_at_ != std::chrono::steady_clock::time_point{} &&
+        last_inference_completed_at_ != std::chrono::steady_clock::time_point{}) {
+      statistics->distributed_inference_wall_nanoseconds =
+          static_cast<uint64_t>(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  last_inference_completed_at_ - first_feature_received_at_)
+                  .count());
+    }
+    if (statistics->inference_inputs != received_features_) {
+      *error = "UB Backend inference count does not match received Features";
       return false;
     }
     for (auto &provider : providers_) {
@@ -2110,7 +2290,11 @@ private:
     }
     const auto start = std::chrono::steady_clock::now();
     const ktag_status status = ktag_inference_predict(inference, input, output);
-    statistics->inference_nanoseconds += elapsed_nanoseconds(start);
+    last_inference_completed_at_ = std::chrono::steady_clock::now();
+    statistics->inference_nanoseconds += static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            last_inference_completed_at_ - start)
+            .count());
     if (status != KTAG_SUCCESS) {
       *error = std::string("distributed Backend inference failed: ") +
                ktag_inference_get_last_error();
@@ -2139,11 +2323,14 @@ private:
   prediction_batch_ptr output_;
   std::unique_ptr<ktag_demo_ub_ring_transport> transport_;
   std::vector<ub_backend_provider_state> providers_;
+  std::vector<uint8_t> local_frame_;
   uint64_t epoch_ = 0U;
   uint64_t schema_hash_ = 0U;
   uint32_t value_count_ = 0U;
   uint64_t received_features_ = 0U;
   uint64_t inference_batches_ = 0U;
+  std::chrono::steady_clock::time_point first_feature_received_at_{};
+  std::chrono::steady_clock::time_point last_inference_completed_at_{};
   uint64_t send_retries_ = 0U;
   uint64_t receive_polls_ = 0U;
 };
@@ -2220,7 +2407,7 @@ bool run_ub_frontend_inputs(
     sender.abort_best_effort();
     return false;
   }
-  return sender.drain(error);
+  return sender.drain(statistics, error);
 }
 
 bool run_ub_backend(const ktag_demo_pipeline_config &config,
@@ -2719,26 +2906,33 @@ int ktag_demo_run_pipeline_internal(
           "WARNING: PCAP文件截断，已保留此前完整报文并生成部分结果: %s (%s)\n",
           partial.first.c_str(), partial.second.c_str());
     }
-    PerformanceStats performance{};
-    constexpr double nanoseconds_per_second = 1000000000.0;
-    performance.pcap_read_time =
-        run_statistics.capture_nanoseconds / nanoseconds_per_second;
-    performance.feature_extraction_time =
-        run_statistics.feature_nanoseconds / nanoseconds_per_second;
-    performance.inference_time =
-        run_statistics.inference_nanoseconds / nanoseconds_per_second;
-    performance.file_io_time =
-        run_statistics.file_io_nanoseconds / nanoseconds_per_second;
-    performance.total_time = performance.feature_extraction_time +
-                             performance.inference_time +
-                             performance.file_io_time;
-    performance.end_to_end_time =
-        run_statistics.elapsed_nanoseconds / nanoseconds_per_second;
-    performance.total_packets = run_statistics.packets;
-    performance.total_bytes = run_statistics.bytes;
-    print_performance_stats_ex(
-        &performance,
-        config.mode == ktag_demo_pipeline_mode::single_thread ? 0 : 1);
+#if KTAG_ENABLE_DPDK_UB
+    if (distributed_frontend || distributed_backend) {
+      print_ub_performance_stats(run_statistics, distributed_frontend);
+    } else
+#endif
+    {
+      PerformanceStats performance{};
+      constexpr double nanoseconds_per_second = 1000000000.0;
+      performance.pcap_read_time =
+          run_statistics.capture_nanoseconds / nanoseconds_per_second;
+      performance.feature_extraction_time =
+          run_statistics.feature_nanoseconds / nanoseconds_per_second;
+      performance.inference_time =
+          run_statistics.inference_nanoseconds / nanoseconds_per_second;
+      performance.file_io_time =
+          run_statistics.file_io_nanoseconds / nanoseconds_per_second;
+      performance.total_time = performance.feature_extraction_time +
+                               performance.inference_time +
+                               performance.file_io_time;
+      performance.end_to_end_time =
+          run_statistics.elapsed_nanoseconds / nanoseconds_per_second;
+      performance.total_packets = run_statistics.packets;
+      performance.total_bytes = run_statistics.bytes;
+      print_performance_stats_ex(
+          &performance,
+          config.mode == ktag_demo_pipeline_mode::single_thread ? 0 : 1);
+    }
 
     if (distributed_frontend) {
       std::printf(
