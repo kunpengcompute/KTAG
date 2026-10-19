@@ -114,6 +114,7 @@ SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/statistics.
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/rawbow_token_dfa.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/http.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/token_histogram.cpp
+SOURCES += $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.cpp
 
 OBJS    = $(foreach x,$(SRCEXTS), \
       $(patsubst %$(x), %.o, $(filter %$(x),$(SOURCES))))
@@ -145,6 +146,7 @@ rrun:
 	env LD_LIBRARY_PATH=$(KTAG_APPID_OUTPUT_DIR)/plugins:/usr/local/ksl/lib/:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./ktag_appid_functest --gtest_filter=$(FILTER)
 
 clean :
+	@-$(RM) $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.o $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.o.d
 	@-$(RM) $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o.d
 	@-$(RM) *.d *.a *.so
 	@-$(RM)	./$(PROGRAM) $(SRC_DEPS)
