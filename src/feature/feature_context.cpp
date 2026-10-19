@@ -21,7 +21,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "dns_observer_internal.h"
 #include "feature_batch_internal.h"
 #include "feature_pipeline_internal.h"
-#include "src/packet_decode_internal.h"
+#include "core/packet_decode_internal.h"
 
 namespace {
 

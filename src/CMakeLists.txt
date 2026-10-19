@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Threads REQUIRED)
 
 add_library(ktag_capture SHARED
-    ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
+    ${PROJECT_SOURCE_DIR}/src/core/packet_decode_internal.cpp
     ${PROJECT_SOURCE_DIR}/src/capture/capture.cpp
     ${PROJECT_SOURCE_DIR}/src/capture/packet_buffer.cpp
     ${PROJECT_SOURCE_DIR}/src/capture/flow_key.cpp
@@ -144,7 +144,7 @@ message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 
 # ============= 生成特征提取动态链接库 =============
 add_library(ktag_feature SHARED
-    ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
+    ${PROJECT_SOURCE_DIR}/src/core/packet_decode_internal.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/dns_observer.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_schema.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_batch.cpp
@@ -259,7 +259,7 @@ endif()
 # ============= 生成动态库(可选) =============
 if(ENABLE_BUILD_LIB AND KTAG_BUILD_LEGACY_COMPAT)
     add_library(ktag_appidlib SHARED
-        ${PROJECT_SOURCE_DIR}/src/legacy/getProductVersion.c
+        ${PROJECT_SOURCE_DIR}/src/core/version.c
     )
 
     target_compile_definitions(ktag_appidlib PRIVATE KTAG_BUILDING_DLL)
