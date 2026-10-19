@@ -8,7 +8,7 @@ add_library(ktag_traffic_features SHARED
     traffic_provider_common.cpp
     legacy/metadata_provider.cpp
     legacy/tuple_provider.cpp
-    traffic_statistics_provider.cpp
+    legacy/traffic_statistics_provider.cpp
     rawbow_provider.cpp
 )
 add_library(KTAG::traffic_features ALIAS ktag_traffic_features)

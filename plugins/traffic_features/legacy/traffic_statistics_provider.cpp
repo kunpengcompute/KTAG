@@ -2,6 +2,7 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "traffic_statistics_provider.h"
+#include "legacy/statistics.h"
 
 #include <algorithm>
 #include <array>
@@ -135,69 +136,17 @@ ktag_status on_packet(void *provider_state, void *flow_state,
     return KTAG_SUCCESS;
 }
 
-void fill_histograms(const std::vector<uint32_t> &samples, bool logarithmic,
-                     statistics_result *result) {
-    constexpr double EPSILON = 1e-5;
-    const double range = result->maximum - result->minimum;
-    const double absolute_width =
-        result->maximum / KTAG_LEGACY_HISTOGRAM_DIMENSION;
-    for (const uint32_t raw : samples) {
-        const double sample = logarithmic ? std::log2(raw + 1.0) : raw;
-        size_t relative = 0U;
-        if (range >= EPSILON) {
-            relative = static_cast<size_t>(std::clamp(
-                static_cast<int>(std::floor((sample - result->minimum) / range *
-                                            KTAG_LEGACY_HISTOGRAM_DIMENSION)),
-                0, static_cast<int>(KTAG_LEGACY_HISTOGRAM_DIMENSION - 1U)));
-        }
-        ++result->relative[relative];
-        size_t absolute = 0U;
-        if (absolute_width >= EPSILON) {
-            absolute = static_cast<size_t>(std::clamp(
-                static_cast<int>(std::floor(sample / absolute_width)), 0,
-                static_cast<int>(KTAG_LEGACY_HISTOGRAM_DIMENSION - 1U)));
-        }
-        ++result->absolute[absolute];
-        size_t normalized = 0U;
-        if (result->variance >= EPSILON) {
-            normalized = static_cast<size_t>(std::clamp(
-                static_cast<int>(
-                    std::floor((sample - result->mean) / result->variance *
-                               KTAG_LEGACY_HISTOGRAM_DIMENSION)),
-                0, static_cast<int>(KTAG_LEGACY_HISTOGRAM_DIMENSION - 1U)));
-        }
-        ++result->normalized[normalized];
-    }
-}
-
-statistics_result calculate(const std::vector<uint32_t> &samples,
-                            bool logarithmic) {
+statistics_result calculate(const std::vector<uint32_t> &samples, bool logarithmic) {
+    legacy::statistics_info frozen{};
+    legacy::cal_statistics_info(samples, frozen, logarithmic);
     statistics_result result{};
-    if (samples.empty()) {
-        return result;
-    }
-    result.minimum = samples.front();
-    result.maximum = samples.front();
-    double sum = 0.0;
-    double squares = 0.0;
-    for (const uint32_t sample : samples) {
-        result.minimum = std::min(result.minimum, static_cast<double>(sample));
-        result.maximum = std::max(result.maximum, static_cast<double>(sample));
-        sum += sample;
-        squares += static_cast<double>(sample) * sample;
-    }
-    result.mean = sum / samples.size();
-    if (samples.size() > 1U) {
-        result.variance =
-            (squares - sum * sum / samples.size()) / (samples.size() - 1U);
-    }
-    if (logarithmic) {
-        result.minimum = std::log2(result.minimum + 1.0);
-        result.maximum = std::log2(result.maximum + 1.0);
-        result.mean = std::log2(result.mean + 1.0);
-        result.variance = std::log2(result.variance + 1.0);
-    }
-    fill_histograms(samples, logarithmic, &result);
+    result.minimum = frozen.min_value;
+    result.maximum = frozen.max_value;
+    result.mean = frozen.mean_value;
+    result.variance = frozen.var_value;
+    std::copy_n(frozen.hist_array, KTAG_LEGACY_HISTOGRAM_DIMENSION, result.relative.begin());
+    std::copy_n(frozen.hist_array_abs, KTAG_LEGACY_HISTOGRAM_DIMENSION, result.absolute.begin());
+    std::copy_n(frozen.hist_array_nor, KTAG_LEGACY_HISTOGRAM_DIMENSION, result.normalized.begin());
     return result;
 }
 

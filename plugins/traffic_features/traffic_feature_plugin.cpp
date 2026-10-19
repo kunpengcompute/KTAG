@@ -7,7 +7,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "feature/traffic_contract.h"
 #include "legacy/metadata_provider.h"
 #include "rawbow_provider.h"
-#include "traffic_statistics_provider.h"
+#include "legacy/traffic_statistics_provider.h"
 #include "legacy/tuple_provider.h"
 #include <array>
 
