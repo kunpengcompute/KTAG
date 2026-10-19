@@ -1,6 +1,6 @@
 # 用户指南
 
-本文介绍 `kdadk_demo` 的完整使用方法：功能范围、构建产物、配置文件、特征 CSV 生成、模型训练与评估、推理运行模式、支持边界和常见问题。KTAG 源码根目录以 `/opt/KTAG` 为例，命令均使用绝对路径。快速上手见《[快速上手指南](quick_start.md)》。
+本文介绍 `ktag_demo` 的完整使用方法：功能范围、构建产物、配置文件、特征 CSV 生成、模型训练与评估、推理运行模式、支持边界和常见问题。KTAG 源码根目录以 `/opt/KTAG` 为例，命令均使用绝对路径。快速上手见《[快速上手指南](quick_start.md)》。
 
 ## 1. 功能范围
 
@@ -40,18 +40,18 @@ sh /opt/KTAG/build.sh
 与应用/代理分类有关的主要产物如下：
 
 ```text
-/opt/KTAG/output/kdadk_demo
+/opt/KTAG/output/ktag_demo
 /opt/KTAG/output/libktag_capture.so
 /opt/KTAG/output/libktag_feature.so
 /opt/KTAG/output/libktag_inference.so
-/opt/KTAG/output/libKDADK_feature_extract.so
-/opt/KTAG/output/libKDADK_inference.so
+/opt/KTAG/output/libktag_feature_compat.so
+/opt/KTAG/output/libktag_inference_compat.so
 /opt/KTAG/output/plugins/libktag_proxy_features.so
 /opt/KTAG/output/python/training.py
 /opt/KTAG/output/python/evaluation.py
 ```
 
-其中 `libKDADK_feature_extract.so` 和 `libKDADK_inference.so` 是旧固定向量接口的
+其中 `libktag_feature_compat.so` 和 `libktag_inference_compat.so` 是旧固定向量接口的
 兼容库；新 Pipeline 使用 `libktag_capture.so`、`libktag_feature.so`、
 `libktag_inference.so`。代理分类还需要
 `/opt/KTAG/output/plugins/libktag_proxy_features.so`。
@@ -59,12 +59,12 @@ sh /opt/KTAG/build.sh
 确认产物存在：
 
 ```bash
-ls -l /opt/KTAG/output/kdadk_demo /opt/KTAG/output/libktag_capture.so \
+ls -l /opt/KTAG/output/ktag_demo /opt/KTAG/output/libktag_capture.so \
   /opt/KTAG/output/libktag_feature.so /opt/KTAG/output/libktag_inference.so
-/opt/KTAG/output/kdadk_demo -h
+/opt/KTAG/output/ktag_demo -h
 ```
 
-构建树的 `kdadk_demo` 已设置运行时库搜索路径。若将程序、动态库或插件复制到其他目录，请保留其相对布局，或配置 `LD_LIBRARY_PATH`，并确保代理插件可被加载。
+构建树的 `ktag_demo` 已设置运行时库搜索路径。若将程序、动态库或插件复制到其他目录，请保留其相对布局，或配置 `LD_LIBRARY_PATH`，并确保代理插件可被加载。
 
 训练和评估前安装 Python 依赖（仅推理不需要）：
 
@@ -179,7 +179,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 应用分类：
 
 ```bash
-/opt/KTAG/output/kdadk_demo \
+/opt/KTAG/output/ktag_demo \
   -f /path/to/application.pcap \
   --config /opt/KTAG/tools/demo/config.yaml \
   -c /path/to/application.csv
@@ -188,7 +188,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 代理分类：
 
 ```bash
-/opt/KTAG/output/kdadk_demo \
+/opt/KTAG/output/ktag_demo \
   -f /path/to/proxy.pcap \
   --config /opt/KTAG/tools/demo/proxy_config.yaml \
   -c /path/to/proxy.csv
@@ -239,10 +239,10 @@ IPv4-only、IPv6-only 和混合数据都允许训练。缺少某个地址族只�
 
 ```bash
 # 应用模型
-/opt/KTAG/output/kdadk_demo -t /opt/KTAG/tools/demo/config.yaml
+/opt/KTAG/output/ktag_demo -t /opt/KTAG/tools/demo/config.yaml
 
 # 代理模型
-/opt/KTAG/output/kdadk_demo -t /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/ktag_demo -t /opt/KTAG/tools/demo/proxy_config.yaml
 ```
 
 训练使用随机森林和 StandardScaler，并输出 PKL、ONNX、Scaler、
@@ -263,8 +263,8 @@ model_package_path/
 ### 5.3 评估
 
 ```bash
-/opt/KTAG/output/kdadk_demo -e /opt/KTAG/tools/demo/config.yaml
-/opt/KTAG/output/kdadk_demo -e /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/ktag_demo -e /opt/KTAG/tools/demo/config.yaml
+/opt/KTAG/output/ktag_demo -e /opt/KTAG/tools/demo/proxy_config.yaml
 ```
 
 评估使用 `evaluation_data_paths`，生成整体 Classification Report、预测明细、整体
@@ -295,7 +295,7 @@ model_package_path/
 Pipeline：
 
 ```bash
-/opt/KTAG/output/kdadk_demo \
+/opt/KTAG/output/ktag_demo \
   -r /opt/KTAG/tools/demo/config.yaml \
   -p /path/to/application.pcap \
   --pipeline-mode feature_parallel \
@@ -313,7 +313,7 @@ Pipeline：
 `pipeline.model_package_path` 加载代理模型包：
 
 ```bash
-/opt/KTAG/output/kdadk_demo \
+/opt/KTAG/output/ktag_demo \
   -r /opt/KTAG/tools/demo/proxy_config.yaml \
   -p /path/to/proxy.pcap \
   --pipeline-mode feature_parallel \
@@ -332,13 +332,13 @@ Pipeline：
 先列出可用接口：
 
 ```bash
-/opt/KTAG/output/kdadk_demo -l
+/opt/KTAG/output/ktag_demo -l
 ```
 
 实时抓包需要具备相应权限，按现场安全规范使用有抓包权限的账号或授予最小必要能力：
 
 ```bash
-/opt/KTAG/output/kdadk_demo \
+/opt/KTAG/output/ktag_demo \
   -r /opt/KTAG/tools/demo/proxy_config.yaml \
   -i eth0 \
   --pipeline-mode full_parallel \
@@ -364,7 +364,7 @@ Pipeline：
 需要显式设置两类线程数时：
 
 ```bash
-/opt/KTAG/output/kdadk_demo -r /opt/KTAG/tools/demo/proxy_config.yaml \
+/opt/KTAG/output/ktag_demo -r /opt/KTAG/tools/demo/proxy_config.yaml \
   -p /path/to/proxy.pcap \
   --pipeline-mode full_parallel -n 4 --inference-threads 2 \
   -c /path/to/prediction.csv
@@ -420,12 +420,12 @@ Salamander 等混淆后，标准 QUIC Header 可能无法解析；解析失败�
 
 | 目标 | 命令 |
 |---|---|
-| 帮助/网口 | `/opt/KTAG/output/kdadk_demo -h` / `/opt/KTAG/output/kdadk_demo -l` |
-| 旧特征 CSV | `/opt/KTAG/output/kdadk_demo -f input.pcap -c feature.csv` |
-| 旧特征 JSON（含 rawbow） | `/opt/KTAG/output/kdadk_demo -f input.pcap -j feature.json -w` |
-| Schema CSV | `/opt/KTAG/output/kdadk_demo -f input.pcap --config task.yaml -c schema.csv` |
-| 训练/评估 | `/opt/KTAG/output/kdadk_demo -t task.yaml` / `/opt/KTAG/output/kdadk_demo -e task.yaml` |
-| PCAP/网口推理 | `/opt/KTAG/output/kdadk_demo -r task.yaml -p input.pcap -c result.csv` / `/opt/KTAG/output/kdadk_demo -r task.yaml -i eth0 -j result.json` |
+| 帮助/网口 | `/opt/KTAG/output/ktag_demo -h` / `/opt/KTAG/output/ktag_demo -l` |
+| 旧特征 CSV | `/opt/KTAG/output/ktag_demo -f input.pcap -c feature.csv` |
+| 旧特征 JSON（含 rawbow） | `/opt/KTAG/output/ktag_demo -f input.pcap -j feature.json -w` |
+| Schema CSV | `/opt/KTAG/output/ktag_demo -f input.pcap --config task.yaml -c schema.csv` |
+| 训练/评估 | `/opt/KTAG/output/ktag_demo -t task.yaml` / `/opt/KTAG/output/ktag_demo -e task.yaml` |
+| PCAP/网口推理 | `/opt/KTAG/output/ktag_demo -r task.yaml -p input.pcap -c result.csv` / `/opt/KTAG/output/ktag_demo -r task.yaml -i eth0 -j result.json` |
 
 不带 `--config` 的 `-f` 是旧固定向量路径，可输出 JSON 和 rawbow，主要用于人工
 打标核验；不能替代正式 Schema CSV 用于新 Pipeline 训练。

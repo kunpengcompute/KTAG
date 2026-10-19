@@ -1,21 +1,21 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
-#include "kdadk_test.h"
-extern "C" const KDADKLibraryVersion* KDADK_GetLibVersion();
-typedef KDADKResult (*GetProductVersionFn)(KDADKProVersion *packageInfo);
-typedef const KDADKLibraryVersion* (*GetLibVersionFunc)();
+#include "ktag_test.h"
+extern "C" const KTAGLibraryVersion* KTAG_GetLibVersion();
+typedef KTAGResult (*GetProductVersionFn)(KTAGProVersion *packageInfo);
+typedef const KTAGLibraryVersion* (*GetLibVersionFunc)();
 
 TEST(GetProductVersionTest, ReturnProductVersion) {
-    void* handle = dlopen(LIB_KDADK_APPID_NAME, RTLD_LAZY);
+    void* handle = dlopen(LIB_KTAG_APPID_NAME, RTLD_LAZY);
     ASSERT_NE(handle, nullptr) << "Failed to open shared library";
-    GetProductVersionFn GetProductVersion = (GetProductVersionFn) dlsym(handle, "KDADK_GetProductVersion");
+    GetProductVersionFn GetProductVersion = (GetProductVersionFn) dlsym(handle, "KTAG_GetProductVersion");
     ASSERT_NE(GetProductVersion, nullptr) << "Failed to find GetProductVersion function";
 
-    KDADKProVersion packageInfo;
-    KDADKResult result = GetProductVersion(&packageInfo);
+    KTAGProVersion packageInfo;
+    KTAGResult result = GetProductVersion(&packageInfo);
 
-    EXPECT_EQ(result, KDADK_STS_NO_ERR);
+    EXPECT_EQ(result, KTAG_STS_NO_ERR);
 
     printf("GetProductVersion worked correctly.\n");
     printf("Product Name: %s\n", packageInfo.productName);
@@ -23,9 +23,9 @@ TEST(GetProductVersionTest, ReturnProductVersion) {
     printf("ComponentName: %s\n", packageInfo.componentName);
     printf("ComponentVersion: %s\n", packageInfo.componentVersion);
 
-    GetLibVersionFunc getLibVersion = (GetLibVersionFunc)dlsym(handle, "KDADK_GetLibVersion");
+    GetLibVersionFunc getLibVersion = (GetLibVersionFunc)dlsym(handle, "KTAG_GetLibVersion");
     ASSERT_NE(getLibVersion, nullptr) << "Failed to find function: " << dlerror();
-    const KDADKLibraryVersion* libVersion = getLibVersion();
+    const KTAGLibraryVersion* libVersion = getLibVersion();
     ASSERT_NE(libVersion, nullptr);
 
     printf("Library Version:\n");

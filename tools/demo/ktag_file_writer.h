@@ -1,11 +1,11 @@
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
-#ifndef KDADK_FILE_WRITER_H
-#define KDADK_FILE_WRITER_H
+#ifndef KTAG_FILE_WRITER_H
+#define KTAG_FILE_WRITER_H
 
-#include "kdadk_feature_extract.h"
-#include "kdadk_inference.h"
+#include "ktag_feature_extract.h"
+#include "ktag_legacy_inference.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -95,4 +95,4 @@ void writer_destroy(file_writer *writer);
 }
 #endif
 
-#endif /* KDADK_FILE_WRITER_H */
+#endif /* KTAG_FILE_WRITER_H */

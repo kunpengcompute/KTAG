@@ -1,10 +1,10 @@
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
-#ifndef KDADK_TYPE_H
-#define KDADK_TYPE_H
+#ifndef KTAG_TYPE_H
+#define KTAG_TYPE_H
 
-#include "kdadk_feature_extract.h"
+#include "ktag_feature_extract.h"
 #include "report_types.h"
 
 // 过滤后的特征数据（保留原始特征，只过滤行）

@@ -2,7 +2,7 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 #include "online_inference.h"
-#include "kdadk_file_writer.h"
+#include "ktag_file_writer.h"
 #include "capture_adapter.h"
 #include <signal.h>
 

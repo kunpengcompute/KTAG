@@ -32,13 +32,13 @@ std::string Repeat(char c, std::size_t n)
 // ---------------------------------------------------------------------------
 // 静态数据查询接口
 // ---------------------------------------------------------------------------
-TEST(KDADK_RAWBOW_DFA, StopwordCountMatchesConstant)
+TEST(KTAG_RAWBOW_DFA, StopwordCountMatchesConstant)
 {
     EXPECT_EQ(rawbow_dfa::kStopwordCount, rawbow_dfa::stopword_count());
     EXPECT_EQ(69u, rawbow_dfa::stopword_count());
 }
 
-TEST(KDADK_RAWBOW_DFA, StopwordWordsAreValid)
+TEST(KTAG_RAWBOW_DFA, StopwordWordsAreValid)
 {
     // 每个停用词: 非空、纯小写 ASCII、无重复
     const auto &words = rawbow_dfa::stopword_words();
@@ -57,7 +57,7 @@ TEST(KDADK_RAWBOW_DFA, StopwordWordsAreValid)
     }
 }
 
-TEST(KDADK_RAWBOW_DFA, StopwordWordsContainKnownEntries)
+TEST(KTAG_RAWBOW_DFA, StopwordWordsContainKnownEntries)
 {
     const auto &words = rawbow_dfa::stopword_words();
     bool hasHttp = false;
@@ -79,19 +79,19 @@ TEST(KDADK_RAWBOW_DFA, StopwordWordsContainKnownEntries)
     EXPECT_TRUE(hasWww);
 }
 
-TEST(KDADK_RAWBOW_DFA, StopwordTrieNodeCountMatchesConstant)
+TEST(KTAG_RAWBOW_DFA, StopwordTrieNodeCountMatchesConstant)
 {
     EXPECT_EQ(rawbow_dfa::kStopwordTrieNodeCount, rawbow_dfa::stopword_trie_node_count());
     EXPECT_EQ(154u, rawbow_dfa::stopword_trie_node_count());
 }
 
-TEST(KDADK_RAWBOW_DFA, StopwordTrieRootIsNotTerminal)
+TEST(KTAG_RAWBOW_DFA, StopwordTrieRootIsNotTerminal)
 {
     // 空串不是停用词, 根节点不应为终态
     EXPECT_FALSE(rawbow_dfa::stopword_trie()[0].terminal);
 }
 
-TEST(KDADK_RAWBOW_DFA, StopwordTrieRecognizesEveryStopword)
+TEST(KTAG_RAWBOW_DFA, StopwordTrieRecognizesEveryStopword)
 {
     const auto &trie = rawbow_dfa::stopword_trie();
     for (std::string_view word : rawbow_dfa::stopword_words()) {
@@ -109,7 +109,7 @@ TEST(KDADK_RAWBOW_DFA, StopwordTrieRecognizesEveryStopword)
 // ---------------------------------------------------------------------------
 // 字符分类辅助函数
 // ---------------------------------------------------------------------------
-TEST(KDADK_RAWBOW_DFA, IsDelimiter)
+TEST(KTAG_RAWBOW_DFA, IsDelimiter)
 {
     // 7 种分隔符
     for (unsigned char c : {'/', '?', ',', '=', '&', '.', ':'}) {
@@ -124,7 +124,7 @@ TEST(KDADK_RAWBOW_DFA, IsDelimiter)
     }
 }
 
-TEST(KDADK_RAWBOW_DFA, IsAsciiDigit)
+TEST(KTAG_RAWBOW_DFA, IsAsciiDigit)
 {
     EXPECT_TRUE(rawbow_dfa::is_ascii_digit('0'));
     EXPECT_TRUE(rawbow_dfa::is_ascii_digit('9'));
@@ -136,7 +136,7 @@ TEST(KDADK_RAWBOW_DFA, IsAsciiDigit)
     EXPECT_FALSE(rawbow_dfa::is_ascii_digit('\0'));
 }
 
-TEST(KDADK_RAWBOW_DFA, IsAsciiAlpha)
+TEST(KTAG_RAWBOW_DFA, IsAsciiAlpha)
 {
     EXPECT_TRUE(rawbow_dfa::is_ascii_alpha('a'));
     EXPECT_TRUE(rawbow_dfa::is_ascii_alpha('z'));
@@ -150,7 +150,7 @@ TEST(KDADK_RAWBOW_DFA, IsAsciiAlpha)
     EXPECT_FALSE(rawbow_dfa::is_ascii_alpha('_'));
 }
 
-TEST(KDADK_RAWBOW_DFA, ToAsciiLower)
+TEST(KTAG_RAWBOW_DFA, ToAsciiLower)
 {
     EXPECT_EQ('a', rawbow_dfa::to_ascii_lower('A'));
     EXPECT_EQ('z', rawbow_dfa::to_ascii_lower('Z'));
@@ -167,7 +167,7 @@ TEST(KDADK_RAWBOW_DFA, ToAsciiLower)
 // ---------------------------------------------------------------------------
 // TokenState 状态机
 // ---------------------------------------------------------------------------
-TEST(KDADK_RAWBOW_DFA, UpdateTokenStateTracksStartAndLen)
+TEST(KTAG_RAWBOW_DFA, UpdateTokenStateTracksStartAndLen)
 {
     TokenState state;
     rawbow_dfa::update_token_state(state, 5, 'a');
@@ -178,7 +178,7 @@ TEST(KDADK_RAWBOW_DFA, UpdateTokenStateTracksStartAndLen)
     EXPECT_EQ(2u, state.len);
 }
 
-TEST(KDADK_RAWBOW_DFA, UpdateTokenStateOverflowFlag)
+TEST(KTAG_RAWBOW_DFA, UpdateTokenStateOverflowFlag)
 {
     TokenState state;
     for (std::size_t i = 0; i < rawbow_dfa::kMaxTokenLength; ++i) {
@@ -192,7 +192,7 @@ TEST(KDADK_RAWBOW_DFA, UpdateTokenStateOverflowFlag)
     EXPECT_TRUE(state.overflow_len);
 }
 
-TEST(KDADK_RAWBOW_DFA, UpdateTokenStateAllDigits)
+TEST(KTAG_RAWBOW_DFA, UpdateTokenStateAllDigits)
 {
     TokenState state;
     rawbow_dfa::update_token_state(state, 0, '1');
@@ -205,7 +205,7 @@ TEST(KDADK_RAWBOW_DFA, UpdateTokenStateAllDigits)
     EXPECT_FALSE(state.all_digits);
 }
 
-TEST(KDADK_RAWBOW_DFA, UpdateTokenStateAlphaCountSaturates)
+TEST(KTAG_RAWBOW_DFA, UpdateTokenStateAlphaCountSaturates)
 {
     TokenState state;
     EXPECT_EQ(0, state.alpha_count_state);
@@ -217,7 +217,7 @@ TEST(KDADK_RAWBOW_DFA, UpdateTokenStateAlphaCountSaturates)
     EXPECT_EQ(2, state.alpha_count_state);  // 饱和在 2
 }
 
-TEST(KDADK_RAWBOW_DFA, UpdateTokenStateSingleAlphaCandidate)
+TEST(KTAG_RAWBOW_DFA, UpdateTokenStateSingleAlphaCandidate)
 {
     // 纯数字/下划线/连字符: 保持单字母候选
     {
@@ -250,7 +250,7 @@ TEST(KDADK_RAWBOW_DFA, UpdateTokenStateSingleAlphaCandidate)
     }
 }
 
-TEST(KDADK_RAWBOW_DFA, UpdateStopwordStateCaseInsensitive)
+TEST(KTAG_RAWBOW_DFA, UpdateStopwordStateCaseInsensitive)
 {
     TokenState state;
     for (unsigned char c : {'H', 'T', 'T', 'P'}) {
@@ -260,7 +260,7 @@ TEST(KDADK_RAWBOW_DFA, UpdateStopwordStateCaseInsensitive)
     EXPECT_TRUE(rawbow_dfa::is_stopword_terminal(state));  // "HTTP" 匹配 http
 }
 
-TEST(KDADK_RAWBOW_DFA, UpdateStopwordStateDeadOnUnknownTransition)
+TEST(KTAG_RAWBOW_DFA, UpdateStopwordStateDeadOnUnknownTransition)
 {
     TokenState state;
     for (char c : std::string_view("www")) {
@@ -273,7 +273,7 @@ TEST(KDADK_RAWBOW_DFA, UpdateStopwordStateDeadOnUnknownTransition)
     EXPECT_FALSE(rawbow_dfa::is_stopword_terminal(state));
 }
 
-TEST(KDADK_RAWBOW_DFA, UpdateStopwordStateDeadIsSticky)
+TEST(KTAG_RAWBOW_DFA, UpdateStopwordStateDeadIsSticky)
 {
     TokenState state;
     rawbow_dfa::update_stopword_state(state, '\x80');  // 非 ASCII -> dead
@@ -284,14 +284,14 @@ TEST(KDADK_RAWBOW_DFA, UpdateStopwordStateDeadIsSticky)
     EXPECT_EQ(node_before, state.stopword_node);  // dead 后状态不再变化
 }
 
-TEST(KDADK_RAWBOW_DFA, UpdateStopwordStateNonAsciiIsDead)
+TEST(KTAG_RAWBOW_DFA, UpdateStopwordStateNonAsciiIsDead)
 {
     TokenState state;
     rawbow_dfa::update_stopword_state(state, static_cast<unsigned char>(0xFF));
     EXPECT_TRUE(state.stopword_dead);
 }
 
-TEST(KDADK_RAWBOW_DFA, IsStopwordTerminalFalseForNonStopword)
+TEST(KTAG_RAWBOW_DFA, IsStopwordTerminalFalseForNonStopword)
 {
     // "example" 第二个字符即走出停用词 trie 前缀空间, 进入 dead 态
     // dead 表示该 token 不可能是停用词, 因此绝非终态
@@ -303,7 +303,7 @@ TEST(KDADK_RAWBOW_DFA, IsStopwordTerminalFalseForNonStopword)
     EXPECT_FALSE(rawbow_dfa::is_stopword_terminal(state));
 }
 
-TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenRejectsShortTokens)
+TEST(KTAG_RAWBOW_DFA, ShouldAcceptTokenRejectsShortTokens)
 {
     TokenState state;
     rawbow_dfa::update_token_state(state, 0, 'a');
@@ -311,7 +311,7 @@ TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenRejectsShortTokens)
     EXPECT_FALSE(rawbow_dfa::should_accept_token(state));  // len < 2
 }
 
-TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenRejectsOverflowTokens)
+TEST(KTAG_RAWBOW_DFA, ShouldAcceptTokenRejectsOverflowTokens)
 {
     TokenState state;
     for (std::size_t i = 0; i <= rawbow_dfa::kMaxTokenLength; ++i) {
@@ -321,7 +321,7 @@ TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenRejectsOverflowTokens)
     EXPECT_FALSE(rawbow_dfa::should_accept_token(state));
 }
 
-TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenRejectsAllDigitTokens)
+TEST(KTAG_RAWBOW_DFA, ShouldAcceptTokenRejectsAllDigitTokens)
 {
     TokenState state;
     for (std::size_t i = 0; i < 4; ++i) {
@@ -331,7 +331,7 @@ TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenRejectsAllDigitTokens)
     EXPECT_FALSE(rawbow_dfa::should_accept_token(state));
 }
 
-TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenRejectsSingleAlphaTokens)
+TEST(KTAG_RAWBOW_DFA, ShouldAcceptTokenRejectsSingleAlphaTokens)
 {
     // "v1": 一个字母 + 数字, 仍是单字母候选
     {
@@ -350,7 +350,7 @@ TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenRejectsSingleAlphaTokens)
     }
 }
 
-TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenAcceptsMultiAlphaTokens)
+TEST(KTAG_RAWBOW_DFA, ShouldAcceptTokenAcceptsMultiAlphaTokens)
 {
     // "ab": 两个字母
     {
@@ -369,7 +369,7 @@ TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenAcceptsMultiAlphaTokens)
     }
 }
 
-TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenRejectsStopwordsAnyCase)
+TEST(KTAG_RAWBOW_DFA, ShouldAcceptTokenRejectsStopwordsAnyCase)
 {
     // 小写停用词
     {
@@ -389,7 +389,7 @@ TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenRejectsStopwordsAnyCase)
     }
 }
 
-TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenAcceptsStopwordPrefixPlusSuffix)
+TEST(KTAG_RAWBOW_DFA, ShouldAcceptTokenAcceptsStopwordPrefixPlusSuffix)
 {
     // "wwwx": 走出停用词路径(dead), 应接受
     TokenState state;
@@ -400,7 +400,7 @@ TEST(KDADK_RAWBOW_DFA, ShouldAcceptTokenAcceptsStopwordPrefixPlusSuffix)
     EXPECT_TRUE(rawbow_dfa::should_accept_token(state));
 }
 
-TEST(KDADK_RAWBOW_DFA, TokenStateResetRestoresInitialValues)
+TEST(KTAG_RAWBOW_DFA, TokenStateResetRestoresInitialValues)
 {
     TokenState state;
     for (std::size_t i = 0; i < 30; ++i) {
@@ -420,7 +420,7 @@ TEST(KDADK_RAWBOW_DFA, TokenStateResetRestoresInitialValues)
 // ---------------------------------------------------------------------------
 // finalize_token
 // ---------------------------------------------------------------------------
-TEST(KDADK_RAWBOW_DFA, FinalizeTokenAppendsAcceptedSubstring)
+TEST(KTAG_RAWBOW_DFA, FinalizeTokenAppendsAcceptedSubstring)
 {
     TokenState state;
     const std::string_view input = "xx/hello/yy";
@@ -432,7 +432,7 @@ TEST(KDADK_RAWBOW_DFA, FinalizeTokenAppendsAcceptedSubstring)
     ExpectTokensAre(out, {"hello"});
 }
 
-TEST(KDADK_RAWBOW_DFA, FinalizeTokenKeepsOriginalCase)
+TEST(KTAG_RAWBOW_DFA, FinalizeTokenKeepsOriginalCase)
 {
     // DFA 停用词匹配大小写不敏感, 但输出保留原始大小写
     TokenState state;
@@ -445,7 +445,7 @@ TEST(KDADK_RAWBOW_DFA, FinalizeTokenKeepsOriginalCase)
     ExpectTokensAre(out, {"Example"});
 }
 
-TEST(KDADK_RAWBOW_DFA, FinalizeTokenSkipsZeroLength)
+TEST(KTAG_RAWBOW_DFA, FinalizeTokenSkipsZeroLength)
 {
     TokenState state;  // len == 0
     std::vector<std::string> out;
@@ -453,7 +453,7 @@ TEST(KDADK_RAWBOW_DFA, FinalizeTokenSkipsZeroLength)
     EXPECT_TRUE(out.empty());
 }
 
-TEST(KDADK_RAWBOW_DFA, FinalizeTokenSkipsRejected)
+TEST(KTAG_RAWBOW_DFA, FinalizeTokenSkipsRejected)
 {
     // 全数字 token 被拒绝
     TokenState state;
@@ -466,7 +466,7 @@ TEST(KDADK_RAWBOW_DFA, FinalizeTokenSkipsRejected)
     EXPECT_TRUE(out.empty());
 }
 
-TEST(KDADK_RAWBOW_DFA, FinalizeTokenRespectsMaxTokens)
+TEST(KTAG_RAWBOW_DFA, FinalizeTokenRespectsMaxTokens)
 {
     TokenState state;
     for (std::size_t i = 0; i < 4; ++i) {
@@ -484,67 +484,67 @@ TEST(KDADK_RAWBOW_DFA, FinalizeTokenRespectsMaxTokens)
 // ---------------------------------------------------------------------------
 // collect_filtered_tokens 端到端
 // ---------------------------------------------------------------------------
-TEST(KDADK_RAWBOW_DFA, CollectEmptyInput)
+TEST(KTAG_RAWBOW_DFA, CollectEmptyInput)
 {
     EXPECT_TRUE(rawbow_dfa::collect_filtered_tokens("").empty());
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectDelimitersOnly)
+TEST(KTAG_RAWBOW_DFA, CollectDelimitersOnly)
 {
     EXPECT_TRUE(rawbow_dfa::collect_filtered_tokens("////??,,==&&..::").empty());
     EXPECT_TRUE(rawbow_dfa::collect_filtered_tokens("/:.,=&?").empty());
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectPlainText)
+TEST(KTAG_RAWBOW_DFA, CollectPlainText)
 {
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("helloworld"), {"helloworld"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectStandardUrl)
+TEST(KTAG_RAWBOW_DFA, CollectStandardUrl)
 {
     // https/www/com/api 为停用词, v1 为单字母 token, 123 为全数字
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("https://www.example.com/api/v1/users?ID=123"),
                     {"example", "users", "ID"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectContinuousDelimiters)
+TEST(KTAG_RAWBOW_DFA, CollectContinuousDelimiters)
 {
     // name 为停用词被过滤
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("user//name==id??"), {"user", "id"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectLeadingDelimiters)
+TEST(KTAG_RAWBOW_DFA, CollectLeadingDelimiters)
 {
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens(":://example.com/path/file"),
                     {"example", "path", "file"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectTrailingDelimiters)
+TEST(KTAG_RAWBOW_DFA, CollectTrailingDelimiters)
 {
     // query 为停用词被过滤
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("query=param/.,&?"), {"param"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectTokensWithSpecialChars)
+TEST(KTAG_RAWBOW_DFA, CollectTokensWithSpecialChars)
 {
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("user_name123:pass-word,my@data"),
                     {"user_name123", "pass-word", "my@data"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectUppercaseStopwords)
+TEST(KTAG_RAWBOW_DFA, CollectUppercaseStopwords)
 {
     // 停用词匹配大小写不敏感
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("HTTP://WWW.Example.COM/API/Users"),
                     {"Example", "Users"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectSingleAlphaTokens)
+TEST(KTAG_RAWBOW_DFA, CollectSingleAlphaTokens)
 {
     // v1 / a_123 / x-99 均为单字母 token 被过滤, 仅 ab1 保留
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("v1/a_123/x-99/ab1"), {"ab1"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectTokenLengthBoundary)
+TEST(KTAG_RAWBOW_DFA, CollectTokenLengthBoundary)
 {
     // 20 字符恰好保留, 21 字符溢出被过滤
     const std::string input =
@@ -553,25 +553,25 @@ TEST(KDADK_RAWBOW_DFA, CollectTokenLengthBoundary)
                     {"short", Repeat('a', 20), "tail"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectAllDigits)
+TEST(KTAG_RAWBOW_DFA, CollectAllDigits)
 {
     EXPECT_TRUE(rawbow_dfa::collect_filtered_tokens("0/123/456789").empty());
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectStopwordPrefixExtendedIsKept)
+TEST(KTAG_RAWBOW_DFA, CollectStopwordPrefixExtendedIsKept)
 {
     // httpx / httpsapi 不是停用词, 应保留
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("httpx/httpsapi"),
                     {"httpx", "httpsapi"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectUnderscoreOnlyToken)
+TEST(KTAG_RAWBOW_DFA, CollectUnderscoreOnlyToken)
 {
     // "__" 长度 2、非全数字、无字母: 保留
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("__"), {"__"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectMixedRealisticUrl)
+TEST(KTAG_RAWBOW_DFA, CollectMixedRealisticUrl)
 {
     // token 不是停用词, 应保留
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens(
@@ -580,36 +580,36 @@ TEST(KDADK_RAWBOW_DFA, CollectMixedRealisticUrl)
                      "token", "abc123"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectMaxTokensZero)
+TEST(KTAG_RAWBOW_DFA, CollectMaxTokensZero)
 {
     EXPECT_TRUE(rawbow_dfa::collect_filtered_tokens("hello/world", 0).empty());
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectMaxTokensLimitReached)
+TEST(KTAG_RAWBOW_DFA, CollectMaxTokensLimitReached)
 {
     // 上限 2: 收满后提前返回
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("xx/yy/zz", 2), {"xx", "yy"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectMaxTokensEarlyStopSkipsRest)
+TEST(KTAG_RAWBOW_DFA, CollectMaxTokensEarlyStopSkipsRest)
 {
     // 达到上限后, 后续 token(含超长串)不再处理
     const std::string input = "xx/yy/" + Repeat('c', 300) + "/zz";
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens(input, 2), {"xx", "yy"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectMaxTokensLargerThanResult)
+TEST(KTAG_RAWBOW_DFA, CollectMaxTokensLargerThanResult)
 {
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("aa/bb/cc", 100), {"aa", "bb", "cc"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectSkippedTokensDoNotConsumeLimit)
+TEST(KTAG_RAWBOW_DFA, CollectSkippedTokensDoNotConsumeLimit)
 {
     // 被过滤的 token 不占用 max_tokens 名额: www/123 被过滤, 仍有 2 个名额
     ExpectTokensAre(rawbow_dfa::collect_filtered_tokens("www/123/xx/yy/zz", 2), {"xx", "yy"});
 }
 
-TEST(KDADK_RAWBOW_DFA, CollectDefaultMaxIsUnlimited)
+TEST(KTAG_RAWBOW_DFA, CollectDefaultMaxIsUnlimited)
 {
     // 默认参数 = 不限数量
     std::string input;
@@ -629,7 +629,7 @@ TEST(KDADK_RAWBOW_DFA, CollectDefaultMaxIsUnlimited)
 // ---------------------------------------------------------------------------
 // 常量
 // ---------------------------------------------------------------------------
-TEST(KDADK_RAWBOW_DFA, Constants)
+TEST(KTAG_RAWBOW_DFA, Constants)
 {
     EXPECT_EQ(20u, rawbow_dfa::kMaxTokenLength);
     EXPECT_EQ(std::numeric_limits<std::size_t>::max(), rawbow_dfa::kUnlimitedTokens);

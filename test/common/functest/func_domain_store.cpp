@@ -347,45 +347,45 @@ TEST(KTAGDomainLegacyAdapter, SharedStoreIsEventuallyVisibleAndLegacyTtlStaysCom
     ASSERT_NE(nullptr, store);
     domain_name_hash *writer = nullptr;
     domain_name_hash *reader = nullptr;
-    ASSERT_EQ(KDADK_STS_NO_ERR,
+    ASSERT_EQ(KTAG_STS_NO_ERR,
               domain_name_table_create_with_store(&writer, store));
-    ASSERT_EQ(KDADK_STS_NO_ERR,
+    ASSERT_EQ(KTAG_STS_NO_ERR,
               domain_name_table_create_with_store(&reader, store));
     const auto address = ipv4(10U, 1U, 2U, 3U);
     const uint32_t key = legacy_ipv4_key(address);
 
-    ASSERT_EQ(KDADK_STS_NO_ERR, domain_name_table_add_with_expiry(
+    ASSERT_EQ(KTAG_STS_NO_ERR, domain_name_table_add_with_expiry(
         writer, key, "shared.example.", 100U));
     flow_hash_node node{};
     node.tuple.dst_ip = key;
     bool found = false;
-    ASSERT_EQ(KDADK_STS_NO_ERR, get_domain_by_ip_at(
+    ASSERT_EQ(KTAG_STS_NO_ERR, get_domain_by_ip_at(
         &node, reader, 99U, found));
     EXPECT_TRUE(found);
     EXPECT_EQ("shared.example.", node.dst_ip_domain_name);
 
     found = true;
-    ASSERT_EQ(KDADK_STS_NO_ERR, domain_name_table_refresh_flow(
+    ASSERT_EQ(KTAG_STS_NO_ERR, domain_name_table_refresh_flow(
         reader, &node, 100U, found));
     EXPECT_FALSE(found);
     EXPECT_TRUE(node.dst_ip_domain_name.empty());
 
     /* Caches retain the Store even after its public owner is released. */
     ktag_domain_store_destroy(store);
-    EXPECT_EQ(KDADK_STS_NO_ERR, domain_name_table_sync(reader));
-    EXPECT_EQ(KDADK_STS_NO_ERR, domain_name_table_destroy(writer));
-    EXPECT_EQ(KDADK_STS_NO_ERR, domain_name_table_destroy(reader));
+    EXPECT_EQ(KTAG_STS_NO_ERR, domain_name_table_sync(reader));
+    EXPECT_EQ(KTAG_STS_NO_ERR, domain_name_table_destroy(writer));
+    EXPECT_EQ(KTAG_STS_NO_ERR, domain_name_table_destroy(reader));
 
     domain_name_hash *legacy = nullptr;
-    ASSERT_EQ(KDADK_STS_NO_ERR, domain_name_table_create(&legacy));
-    ASSERT_EQ(KDADK_STS_NO_ERR, domain_name_table_add_with_expiry(
+    ASSERT_EQ(KTAG_STS_NO_ERR, domain_name_table_create(&legacy));
+    ASSERT_EQ(KTAG_STS_NO_ERR, domain_name_table_add_with_expiry(
         legacy, key, "legacy.example.", 1U));
     flow_hash_node legacy_node{};
     legacy_node.tuple.dst_ip = key;
     found = false;
-    ASSERT_EQ(KDADK_STS_NO_ERR, get_domain_by_ip_at(
+    ASSERT_EQ(KTAG_STS_NO_ERR, get_domain_by_ip_at(
         &legacy_node, legacy, 100U, found));
     EXPECT_TRUE(found);
     EXPECT_EQ("legacy.example.", legacy_node.dst_ip_domain_name);
-    EXPECT_EQ(KDADK_STS_NO_ERR, domain_name_table_destroy(legacy));
+    EXPECT_EQ(KTAG_STS_NO_ERR, domain_name_table_destroy(legacy));
 }

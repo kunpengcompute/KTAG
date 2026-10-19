@@ -4,12 +4,12 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #ifndef FEATURE_EXTRACT_H
 #define FEATURE_EXTRACT_H
 #include <math.h>
-#include "kdadk.h"
-#include "kdadk_export.h"
+#include "ktag.h"
+#include "ktag_export.h"
 #if defined(KTAG_FEATURE_INTERNAL_BUILD)
 #define KTAG_LEGACY_ALGORITHM_API
 #else
-#define KTAG_LEGACY_ALGORITHM_API KDADK_API
+#define KTAG_LEGACY_ALGORITHM_API KTAG_API
 #endif
 #define RAWBOW_MAX_LEN 4096
 const int HISTOGRAM_NUMS = 16;          // 统计信息-直方图位数
@@ -64,9 +64,9 @@ struct stream_feature {
     double raw_bow_crc_result[RAW_BOW_HISTOGRAM_NUMS];
 };
 
-KTAG_LEGACY_ALGORITHM_API KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
+KTAG_LEGACY_ALGORITHM_API KTAGResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
                                    char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len);
-KDADKResult feature_extract_rawbow_text(flow_hash_node *node, char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len);
+KTAGResult feature_extract_rawbow_text(flow_hash_node *node, char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len);
 double calculate_mean(const std::vector<uint32_t> &nums);
 double calculate_var(const std::vector<uint32_t> &nums, double mean);
 void calculate_hist(const std::vector<uint32_t> &nums, double min_val, double max_val, double *histogram,
@@ -79,9 +79,9 @@ void calculate_hist_nor(const std::vector<uint32_t> &nums, double mean_val, doub
 void cal_diffs(const std::vector<struct timeval> &ts, std::vector<uint32_t> &time_diff);
 void calculate_crc(flow_hash_node *node, double *raw_bow_crc_result, int raw_bow_size);
 void calculate_crc_byte(char &byte, uint16_t &crc);
-KDADKResult cal_statistics_info(std::vector<uint32_t> &array, statistics_info &array_si, bool isTimeInterval = false);
-KDADKResult cal_stream_feature(flow_hash_node *node, stream_feature &node_sf);
-KDADKResult statisticsInfo2Array(const statistics_info &data, double *array, int size, int &begin);
-KDADKResult streamFeatur2Array(const stream_feature &data, double *array, int size);
+KTAGResult cal_statistics_info(std::vector<uint32_t> &array, statistics_info &array_si, bool isTimeInterval = false);
+KTAGResult cal_stream_feature(flow_hash_node *node, stream_feature &node_sf);
+KTAGResult statisticsInfo2Array(const statistics_info &data, double *array, int size, int &begin);
+KTAGResult streamFeatur2Array(const stream_feature &data, double *array, int size);
 
 #endif

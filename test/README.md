@@ -24,7 +24,7 @@ Fuzz 测试和 Python 工具链测试。测试统一入口为 `/opt/KTAG/test/bu
 ## 2. 环境准备
 
 1. 按《[编译指南](../docs/zh/installation_guide.md)》完成依赖安装；
-2. 以测试选项构建产品库（功能测试需要链接 `libkdadk_appidlib.so`）：
+2. 以测试选项构建产品库（功能测试需要链接 `libktag_appidlib.so`）：
 
 ```bash
 sh /opt/KTAG/build.sh -lib
@@ -64,7 +64,7 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 ### 3.2 构建与运行
 
 ```bash
-# 构建功能测试（生成 kdadk_appid_functest）
+# 构建功能测试（生成 ktag_appid_functest）
 cd /opt/KTAG/test/build
 make func
 
@@ -94,7 +94,7 @@ make rfunc func=KTAGFeatureProvider
 性能测试包含 `perf_calculate.cpp`（特征计算）和 `perf_e2e.cpp`（端到端耗时）。
 
 ```bash
-# 构建性能测试（生成 kdadk_appid_perftest）
+# 构建性能测试（生成 ktag_appid_perftest）
 cd /opt/KTAG/test/build
 make perf
 
@@ -102,7 +102,7 @@ make perf
 make rperf
 
 # 运行指定性能测试
-make rperf func=KDADK_PERFTEST_E2E
+make rperf func=KTAG_PERFTEST_E2E
 ```
 
 性能对比测试应固定 CPU 频率、线程数和数据规模，多轮取值。

@@ -84,14 +84,14 @@ sh /opt/KTAG/build.sh
 /opt/KTAG/output/libktag_capture.so
 /opt/KTAG/output/libktag_feature.so
 /opt/KTAG/output/libktag_inference.so
-/opt/KTAG/output/libKDADK_feature_extract.so
-/opt/KTAG/output/libKDADK_inference.so
-/opt/KTAG/output/kdadk_demo
+/opt/KTAG/output/libktag_feature_compat.so
+/opt/KTAG/output/libktag_inference_compat.so
+/opt/KTAG/output/ktag_demo
 /opt/KTAG/output/plugins/libktag_example_feature_plugin.so
 /opt/KTAG/output/plugins/libktag_proxy_features.so
 ```
 
-`libKDADK_feature_extract.so` 和 `libKDADK_inference.so` 用于兼容旧固定向量接口；新接入推荐使用 Capture、Feature、Inference 三层公共库。代理分类需要构建并加载 `libktag_proxy_features.so`。
+`libktag_feature_compat.so` 和 `libktag_inference_compat.so` 用于兼容旧固定向量接口；新接入推荐使用 Capture、Feature、Inference 三层公共库。代理分类需要构建并加载 `libktag_proxy_features.so`。
 
 相关构建选项：
 
@@ -103,8 +103,33 @@ cmake -S /opt/KTAG -B /opt/KTAG/build \
 cmake --build /opt/KTAG/build
 ```
 
-- `KTAG_BUILD_TOOLS`：构建 `kdadk_demo` 和示例插件。
+- `KTAG_BUILD_TOOLS`：构建 `ktag_demo` 和示例插件。
 - `KTAG_BUILD_PROXY_FEATURES`：构建正式代理 Feature Plugin，默认开启。
-- `KTAG_INSTALL_LEGACY_COMPAT`：安装旧兼容库、头文件和依赖旧路径的 demo，默认开启。
+- `KTAG_INSTALL_LEGACY_COMPAT`：安装固定向量兼容库、头文件和依赖兼容层的 demo，默认开启。
+
+## 命名迁移与安装布局
+
+项目中的头文件、接口、构建变量、组件名称和命令行程序已统一使用 KTAG 命名。
+固定向量兼容层保留原有数据布局与处理行为，但不再提供早期名称的别名。
+升级现有项目时，需要更新头文件引用、类型和版本查询函数、链接库、CMake 参数、
+环境变量及运行脚本，并重新编译。Python 训练和评估入口分别为 `KTAG_Train` 和
+`KTAG_Evaluation`。
+
+使用 `sh /opt/KTAG/build.sh install` 安装时，主要路径为：
+
+```text
+/usr/local/bin/ktag_demo
+/usr/local/lib/KTAG_APPID/
+/usr/local/include/KTAG_APPID/
+/usr/local/lib/cmake/KTAG/
+/usr/local/share/KTAG/python/
+```
+
+仓外 CMake 工程继续通过 `find_package(KTAG CONFIG REQUIRED)` 和 `KTAG::capture`、
+`KTAG::feature`、`KTAG::inference` 集成。固定向量兼容库对应
+`KTAG::feature_compat` 和 `KTAG::inference_compat`。
+
+新安装不会自动清理早期版本的安装目录及环境配置。已安装早期版本时，应在切换
+源码前使用对应版本的卸载入口清理原安装，再构建并安装当前版本。
 
 应用与代理分类的配置和运行命令参见《[用户指南](user_guide.md)》。

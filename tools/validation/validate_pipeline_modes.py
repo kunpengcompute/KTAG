@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument(
         "--pcap", required=True, action="append", type=Path,
-        help="Repeat in label order, matching normal kdadk_demo usage")
+        help="Repeat in label order, matching normal ktag_demo usage")
     parser.add_argument("--feature-threads", type=int, default=4)
     parser.add_argument("--inference-threads", type=int, default=2)
     parser.add_argument(

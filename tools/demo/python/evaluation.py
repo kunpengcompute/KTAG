@@ -248,7 +248,7 @@ def predict_new_data(params):
     }
 
 
-def KDADK_Evaluation(config_file):
+def KTAG_Evaluation(config_file):
     logging.info('Loaded config file: %s', config_file)
     config_path = Path(config_file).expanduser().resolve()
     config_dir = config_path.parent
@@ -302,4 +302,4 @@ if __name__ == '__main__':
     if len(sys.argv) != 2:
         logging.info('Usage: python3 evaluation.py <path_to_config>')
         sys.exit(1)
-    sys.exit(0 if KDADK_Evaluation(sys.argv[1]) == 0 else 1)
+    sys.exit(0 if KTAG_Evaluation(sys.argv[1]) == 0 else 1)

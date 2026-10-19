@@ -1,7 +1,7 @@
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
-#include "kdadk_file_writer.h"
+#include "ktag_file_writer.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

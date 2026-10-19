@@ -4,7 +4,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #ifndef DECODE_H
 #define DECODE_H
 #include "domain_name_hash.h"
-#include "kdadk.h"
+#include "ktag.h"
 #include "ktag_types.h"
 #include <stdint.h>
 #include <unordered_map>
@@ -76,45 +76,45 @@ extern const int BYTE_OFFSET_2;
 extern const int SHIFT_16;
 extern const int SHIFT_8;
 
-typedef KDADKResult (*domain_ipv4_update_callback)(
+typedef KTAGResult (*domain_ipv4_update_callback)(
     void *user_data, uint32_t network_order_address, const std::string &domain,
     uint64_t expire_at_us);
 
-typedef KDADKResult (*domain_ip_update_callback)(void *user_data,
+typedef KTAGResult (*domain_ip_update_callback)(void *user_data,
                                                  const ktag_ip_address *address,
                                                  const std::string &domain,
                                                  uint64_t expire_at_us);
 
-KDADKResult decode_link_layer(const u_char *packet, packet_info *info,
+KTAGResult decode_link_layer(const u_char *packet, packet_info *info,
                               int link_type,
                               domain_name_hash *domain_name_table);
-KDADKResult decode_link_layer_with_domain_callback(
+KTAGResult decode_link_layer_with_domain_callback(
     const u_char *packet, packet_info *info, int link_type,
     domain_ipv4_update_callback callback, void *user_data);
-KDADKResult decode_transport_payload_with_domain_callback(
+KTAGResult decode_transport_payload_with_domain_callback(
     const u_char *transport, uint32_t transport_length, uint8_t protocol,
     packet_info *info, domain_ip_update_callback callback, void *user_data);
 bool is_http_payload(const u_char *packet, int length);
-KDADKResult parse_http_payload(const u_char *packet, packet_info *info,
+KTAGResult parse_http_payload(const u_char *packet, packet_info *info,
                                uint32_t length);
-KDADKResult parse_tls_sni(const size_t msg_body_start,
+KTAGResult parse_tls_sni(const size_t msg_body_start,
                           const size_t extensions_len, packet_info *info,
                           const std::string_view &sv);
 size_t parse_tls_cipher_suits(size_t msg_start, packet_info *info,
                               const std::string_view &sv);
-KDADKResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end,
+KTAGResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end,
                                    packet_info *info,
                                    const std::string_view &sv);
-KDADKResult parse_tls(const u_char *data, packet_info *info, uint32_t len);
-KDADKResult decode_tcp(const u_char *packet, packet_info *info);
+KTAGResult parse_tls(const u_char *data, packet_info *info, uint32_t len);
+KTAGResult decode_tcp(const u_char *packet, packet_info *info);
 std::string parse_domain(const u_char *data, size_t &pos, size_t data_len);
-KDADKResult decode_udp(const u_char *packet, packet_info *info,
+KTAGResult decode_udp(const u_char *packet, packet_info *info,
                        domain_name_hash *domain_name_table);
-KDADKResult decode_ipv4(const u_char *packet, packet_info *info,
+KTAGResult decode_ipv4(const u_char *packet, packet_info *info,
                         domain_name_hash *domain_name_table);
-KDADKResult decode_ethernet(const u_char *packet, packet_info *info,
+KTAGResult decode_ethernet(const u_char *packet, packet_info *info,
                             domain_name_hash *domain_name_table);
-KDADKResult decode_sll(const u_char *packet, packet_info *info,
+KTAGResult decode_sll(const u_char *packet, packet_info *info,
                        domain_name_hash *domain_name_table);
 
 #endif

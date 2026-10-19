@@ -1,8 +1,8 @@
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
-#include "kdadk_feature_extract.h"
-#include "kdadk_export.h"
+#include "ktag_feature_extract.h"
+#include "ktag_export.h"
 #include "ktag_feature_plugin.h"
 #include "ktag_traffic_features.h"
 
@@ -39,14 +39,14 @@ bool default_plugin_path(std::string *path) {
     Dl_info library_info{};
     if (dladdr(&legacy_plugin_path_anchor, &library_info) == 0 ||
         library_info.dli_fname == nullptr) {
-        set_last_error("cannot locate libKDADK_feature_extract to resolve "
+        set_last_error("cannot locate libktag_feature_compat to resolve "
                        "the default Feature Plugin path");
         return false;
     }
     const std::string library_path(library_info.dli_fname);
     const size_t separator = library_path.find_last_of('/');
     if (separator == std::string::npos) {
-        set_last_error("libKDADK_feature_extract has no absolute directory; "
+        set_last_error("libktag_feature_compat has no absolute directory; "
                        "set " KTAG_LEGACY_FEATURE_PLUGIN_ENV);
         return false;
     }
@@ -381,12 +381,12 @@ int finalize_internal(feature_extractor *extractor,
 
 extern "C" {
 
-KDADK_API feature_extractor *extractor_init(int link_type) {
+KTAG_API feature_extractor *extractor_init(int link_type) {
     return extractor_init_internal(link_type, nullptr, nullptr);
 }
 
-KDADK_API feature_extractor *
-extractor_init_with_config(const kdadk_feature_extractor_config *config) {
+KTAG_API feature_extractor *
+extractor_init_with_config(const ktag_feature_extractor_config *config) {
     if (config == nullptr || config->struct_size < sizeof(*config) ||
         config->api_version != KTAG_API_VERSION) {
         set_last_error("invalid legacy Feature Extractor configuration");
@@ -397,7 +397,7 @@ extractor_init_with_config(const kdadk_feature_extractor_config *config) {
                                    config->feature_plugin_path);
 }
 
-KDADK_API feature_extractor *
+KTAG_API feature_extractor *
 extractor_init_with_domain_store(int link_type,
                                  ktag_domain_store *domain_store) {
     if (domain_store == nullptr) {
@@ -407,11 +407,11 @@ extractor_init_with_domain_store(int link_type,
     return extractor_init_internal(link_type, domain_store, nullptr);
 }
 
-KDADK_API const char *extractor_get_last_error(void) {
+KTAG_API const char *extractor_get_last_error(void) {
     return extractor_last_error.c_str();
 }
 
-KDADK_API int process_packet(feature_extractor *extractor,
+KTAG_API int process_packet(feature_extractor *extractor,
                              const unsigned char *packet, uint32_t packet_len,
                              const timeval *timestamp, feature_vector *features,
                              int *has_feature) {
@@ -419,7 +419,7 @@ KDADK_API int process_packet(feature_extractor *extractor,
                                    features, nullptr, has_feature, false);
 }
 
-KDADK_API int process_packet_with_rawbow(feature_extractor *extractor,
+KTAG_API int process_packet_with_rawbow(feature_extractor *extractor,
                                          const unsigned char *packet,
                                          uint32_t packet_len,
                                          const timeval *timestamp,
@@ -429,18 +429,18 @@ KDADK_API int process_packet_with_rawbow(feature_extractor *extractor,
                                    features, rawbows, has_feature, true);
 }
 
-KDADK_API int extractor_finalize(feature_extractor *extractor,
+KTAG_API int extractor_finalize(feature_extractor *extractor,
                                  feature_vector_list *features) {
     return finalize_internal(extractor, features, nullptr, false);
 }
 
-KDADK_API int extractor_finalize_with_rawbow(feature_extractor *extractor,
+KTAG_API int extractor_finalize_with_rawbow(feature_extractor *extractor,
                                              feature_vector_list *features,
                                              rawbow_list *rawbows) {
     return finalize_internal(extractor, features, rawbows, true);
 }
 
-KDADK_API int extractor_get_statistics(feature_extractor *extractor,
+KTAG_API int extractor_get_statistics(feature_extractor *extractor,
                                        statistics *stats) {
     if (!valid_extractor(extractor) || stats == nullptr ||
         refresh_public_statistics(extractor) != EXTRACTOR_SUCCESS) {
@@ -450,7 +450,7 @@ KDADK_API int extractor_get_statistics(feature_extractor *extractor,
     return EXTRACTOR_SUCCESS;
 }
 
-KDADK_API void extractor_reset_statistics(feature_extractor *extractor) {
+KTAG_API void extractor_reset_statistics(feature_extractor *extractor) {
     if (!valid_extractor(extractor)) {
         return;
     }
@@ -465,7 +465,7 @@ KDADK_API void extractor_reset_statistics(feature_extractor *extractor) {
     }
 }
 
-KDADK_API void extractor_destroy(feature_extractor *extractor) {
+KTAG_API void extractor_destroy(feature_extractor *extractor) {
     if (extractor == nullptr) {
         return;
     }

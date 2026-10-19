@@ -1,31 +1,31 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
-#include "kdadk_test.h"
+#include "ktag_test.h"
 
 const int MAX_TOKEN_LENGTH = 20;
 
-TEST(KDADK_FLOW_HASH, HashTableCreateNullPacket)
+TEST(KTAG_FLOW_HASH, HashTableCreateNullPacket)
 {
-    EXPECT_EQ(hash_table_create(nullptr, 1), KDADK_STS_PARAMETER_ERR);
+    EXPECT_EQ(hash_table_create(nullptr, 1), KTAG_STS_PARAMETER_ERR);
 }
 
-TEST(KDADK_FLOW_HASH, HashTableAddNullptr)
+TEST(KTAG_FLOW_HASH, HashTableAddNullptr)
 {
     EXPECT_EQ(nullptr, hash_table_add(nullptr, nullptr));
 }
 
-TEST(KDADK_FLOW_HASH, HashTableDestroyNullptr)
+TEST(KTAG_FLOW_HASH, HashTableDestroyNullptr)
 {
-    EXPECT_EQ(hash_table_destroy(nullptr), KDADK_STS_NULL_PTR_ERR);
+    EXPECT_EQ(hash_table_destroy(nullptr), KTAG_STS_NULL_PTR_ERR);
 }
 
-TEST(KDADK_FLOW_HASH, ChangeNodeStatusNullptr)
+TEST(KTAG_FLOW_HASH, ChangeNodeStatusNullptr)
 {
     EXPECT_EQ(change_node_status(nullptr, nullptr, 1), nullptr);
 }
 
-TEST(KDADK_FLOW_HASH, AddPacketToFlowNode_WrongIpAddr)
+TEST(KTAG_FLOW_HASH, AddPacketToFlowNode_WrongIpAddr)
 {
     flow_hash_node *node = new flow_hash_node;
     *node = {};
@@ -40,12 +40,12 @@ TEST(KDADK_FLOW_HASH, AddPacketToFlowNode_WrongIpAddr)
     delete node;
 }
 
-TEST(KDADK_FLOW_HASH, RemoveNodeFromHashBucketNullptr)
+TEST(KTAG_FLOW_HASH, RemoveNodeFromHashBucketNullptr)
 {
-    EXPECT_EQ(remove_node_from_hash_bucket(nullptr, nullptr), KDADK_STS_NULL_PTR_ERR);
+    EXPECT_EQ(remove_node_from_hash_bucket(nullptr, nullptr), KTAG_STS_NULL_PTR_ERR);
 }
 
-TEST(KDADK_FLOW_HASH, AddPacketToFlowNode_SrcIpVersionNot0)
+TEST(KTAG_FLOW_HASH, AddPacketToFlowNode_SrcIpVersionNot0)
 {
     flow_hash_node *node = new flow_hash_node;
     node->flow_src_ip = 0x030011AC;
@@ -56,7 +56,7 @@ TEST(KDADK_FLOW_HASH, AddPacketToFlowNode_SrcIpVersionNot0)
     EXPECT_EQ(node->raw_data.tls_infos.size(), (uint32_t)1);
 }
 
-TEST(KDADK_FLOW_HASH, AddPacketToFlowNode_DstIpVersionNot0)
+TEST(KTAG_FLOW_HASH, AddPacketToFlowNode_DstIpVersionNot0)
 {
     flow_hash_node *node = new flow_hash_node;
     node->flow_src_ip = 0x030011AC;

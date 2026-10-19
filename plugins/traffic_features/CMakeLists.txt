@@ -30,8 +30,8 @@ target_link_libraries(ktag_traffic_features PRIVATE
 # The compatibility library discovers this plugin at runtime through the
 # public Plugin ABI. Keep a build-order dependency without creating a link-time
 # dependency or a DT_NEEDED entry.
-if(TARGET KDADK_feature_extract)
-    add_dependencies(KDADK_feature_extract ktag_traffic_features)
+if(TARGET ktag_feature_compat)
+    add_dependencies(ktag_feature_compat ktag_traffic_features)
 endif()
 
 set_target_properties(ktag_traffic_features PROPERTIES

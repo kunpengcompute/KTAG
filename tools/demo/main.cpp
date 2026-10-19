@@ -3,9 +3,9 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 
 #include "capture_adapter.h"
-#include "kdadk_file_writer.h"
-#include "kdadk_inference.h"
-#include "kdadk_type.h"
+#include "ktag_file_writer.h"
+#include "ktag_legacy_inference.h"
+#include "ktag_type.h"
 #include "online_inference.h"
 #include "pipeline/pipeline_config.h"
 #include "pipeline/pipeline_runner.h"
@@ -791,9 +791,9 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
                       "参数指定JSON格式输出\n");
       fprintf(stderr, "示例:\n");
       fprintf(stderr, "  %s -f input.pcap -c output.csv\n",
-              (argc > 0) ? argv[0] : "kdadk_demo");
+              (argc > 0) ? argv[0] : "ktag_demo");
       fprintf(stderr, "  %s -f input.pcap -j output.json\n",
-              (argc > 0) ? argv[0] : "kdadk_demo");
+              (argc > 0) ? argv[0] : "ktag_demo");
       return -1;
     }
     if (args->feature_config_file != nullptr) {
@@ -867,11 +867,11 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       fprintf(stderr, "示例:\n");
       fprintf(stderr,
               "  %s -r config.yaml -p file1.pcap -p file2.pcap -c result.csv\n",
-              (argc > 0) ? argv[0] : "kdadk_demo");
+              (argc > 0) ? argv[0] : "ktag_demo");
       fprintf(
           stderr,
           "  %s -r config.yaml -p file1.pcap -p file2.pcap -j result.json\n",
-          (argc > 0) ? argv[0] : "kdadk_demo");
+          (argc > 0) ? argv[0] : "ktag_demo");
       return -1;
     }
 

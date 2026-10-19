@@ -15,8 +15,8 @@
 | `ktag_feature.h` | 组流、Schema、Provider、Domain Store、Feature Batch | 推荐 |
 | `ktag_feature_plugin.h` | 动态 Feature Provider 插件 ABI | 按需 |
 | `ktag_inference.h` | 模型包校验和 Schema-aware 批量推理 | 推荐 |
-| `kdadk_feature_extract.h`、`kdadk_inference.h` | 历史固定向量接口 | 仅兼容 |
-| `kdadk_core.h`、`kdadk_type.h` | 历史产品版本查询及其返回类型 | 仅兼容 |
+| `ktag_feature_extract.h`、`ktag_legacy_inference.h` | 历史固定向量接口 | 仅兼容 |
+| `ktag_core.h`、`ktag_type.h` | 历史产品版本查询及其返回类型 | 仅兼容 |
 
 运行时对应三个共享库：`libktag_capture.so`、`libktag_feature.so`、`libktag_inference.so`。构建产物位于仓库 `output/` 目录，构建方式见《[快速上手](quick_start.md)》。
 
@@ -2273,9 +2273,9 @@ Capture open → Registry/Schema freeze → Feature Context/Batch
 
 ### 8.1 兼容性开关
 
-`kdadk_feature_extract.h`、`kdadk_inference.h` 保留重构前的旧 ABI，编译开关 `KTAG_LEGACY_FEATURE_COMPAT_AVAILABLE` 与 `KTAG_LEGACY_INFERENCE_COMPAT_AVAILABLE` 当前均为 `1`，在项目所有者明确授权移除前保持源/二进制兼容。全部接口标记 `KDADK_DEPRECATED`，新代码必须使用现代接口。
+`ktag_feature_extract.h`、`ktag_legacy_inference.h` 保留历史固定向量接口的数据布局与处理行为，编译开关 `KTAG_LEGACY_FEATURE_COMPAT_AVAILABLE` 与 `KTAG_LEGACY_INFERENCE_COMPAT_AVAILABLE` 当前均为 `1`。命名统一后不再提供早期名称的头文件、库名、类型和版本查询符号；调用方需要同步更新名称、构建参数和安装路径，并重新编译。全部接口标记 `KTAG_DEPRECATED`，新代码必须使用现代接口。
 
-### 8.2 旧特征提取 API（kdadk_feature_extract.h）
+### 8.2 旧特征提取 API（ktag_feature_extract.h）
 
 返回值约定：`EXTRACTOR_SUCCESS`（`0`）/ `EXTRACTOR_ERROR`（`-1`）。
 
@@ -2312,7 +2312,7 @@ void extractor_reset_statistics(feature_extractor *extractor);
 
 数据布局约定：`feature_vector.features[0]` 是 Flow ID，`features[1..354]` 是特征值，`FEATURES_NUM` 为 355。新 Schema 模型包不应继续依赖这一布局。
 
-### 8.3 旧推理 API（kdadk_inference.h）
+### 8.3 旧推理 API（ktag_legacy_inference.h）
 
 返回值约定：`INFERENCE_SUCCESS`（`0`）/ `INFERENCE_ERROR`（`-1`）。
 
@@ -2330,24 +2330,24 @@ int inference_predict(inference_engine *engine,
 | `inference_destroy` | 销毁引擎。 |
 | `inference_predict` | 对旧向量列表批量推理。`inference_result.predictions` 数组由调用方预先分配，容量必须覆盖结果数量；`count` 返回实际数量。 |
 
-### 8.4 `KDADK_GetProductVersion`（kdadk_core.h）
+### 8.4 `KTAG_GetProductVersion`（ktag_core.h）
 
 查询历史产品元数据。
 
 ```c
-KDADKResult KDADK_GetProductVersion(KDADKProVersion *packageInfo);
+KTAGResult KTAG_GetProductVersion(KTAGProVersion *packageInfo);
 ```
 
 | 参数 | 说明 |
 |---|---|
-| `packageInfo` | 输出参数。调用方提供的 `KDADKProVersion` 存储，包含产品、组件与软件的名称、版本和附加信息字段，均为固定长度 `KDADK_VERSION_INFO_LEN` 字符数组。 |
+| `packageInfo` | 输出参数。调用方提供的 `KTAGProVersion` 存储，包含产品、组件与软件的名称、版本和附加信息字段，均为固定长度 `KTAG_VERSION_INFO_LEN` 字符数组。 |
 
 返回值：
 
 | 返回值 | 说明 |
 |---|---|
-| `KDADK_STS_NO_ERR` | 查询成功。 |
-| `KDADK_STS_NULL_PTR_ERR` | 指针为空。 |
+| `KTAG_STS_NO_ERR` | 查询成功。 |
+| `KTAG_STS_NULL_PTR_ERR` | 指针为空。 |
 
 ### 8.5 迁移对照表
 
@@ -2360,7 +2360,7 @@ KDADKResult KDADK_GetProductVersion(KDADKProVersion *packageInfo);
 | `extractor_get_statistics` | `ktag_feature_get_statistics` |
 | `extractor_reset_statistics` | 重建 Feature Context |
 | `inference_init` / `inference_predict` / `inference_destroy` | `ktag_inference_create` / `ktag_inference_predict` / `ktag_inference_destroy` + 模型包 |
-| `KDADK_GetProductVersion` | 无对应现代运行时接口 |
+| `KTAG_GetProductVersion` | 无对应现代运行时接口 |
 
 ## 9 协议边界与限制
 

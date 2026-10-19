@@ -55,7 +55,7 @@ static uint32_t hash_func_djb2_hash32(const uint8_t *key)
     return hash;
 }
 
-KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
+KTAGResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
 {
     flow_hash *table = nullptr;
     int malloc_result;
@@ -63,12 +63,12 @@ KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
     uint8_t *malloc_ptr = nullptr;
 
     if (hash_table == nullptr || buckets == 0) {
-        return KDADK_STS_PARAMETER_ERR;
+        return KTAG_STS_PARAMETER_ERR;
     }
 
     malloc_result = posix_memalign(reinterpret_cast<void **>(&(table)), ALIGN_SIZE, sizeof(flow_hash));
     if (malloc_result || table == nullptr) {
-        return KDADK_STS_MALLOC_FAILED;
+        return KTAG_STS_MALLOC_FAILED;
     }
 
     memset(table, 0, sizeof(flow_hash));
@@ -79,7 +79,7 @@ KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
     malloc_result = posix_memalign(reinterpret_cast<void **>(&malloc_ptr), ALIGN_SIZE, malloc_size);
     if (malloc_result || malloc_ptr == nullptr) {
         free(table);
-        return KDADK_STS_MALLOC_FAILED;
+        return KTAG_STS_MALLOC_FAILED;
     }
     memset(malloc_ptr, 0, malloc_size);
     table->buckets = (flow_hash_bucket *)malloc_ptr;
@@ -88,7 +88,7 @@ KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets)
     table->build_ok = 1;
     *hash_table = table;
 
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
 static flow_hash_node *hash_table_match_node(flow_hash_node *node, const uint8_t *key)
@@ -183,10 +183,10 @@ flow_hash_node *hash_table_add(flow_hash *hash_table, const packet_info *info)
     return node;
 }
 
-KDADKResult hash_table_destroy(flow_hash *hash_table)
+KTAGResult hash_table_destroy(flow_hash *hash_table)
 {
     if (hash_table == nullptr)
-        return KDADK_STS_NULL_PTR_ERR;
+        return KTAG_STS_NULL_PTR_ERR;
 
     if (hash_table->buckets != nullptr) {
         for (uint32_t index = 0; index < hash_table->bucket_num; ++index) {
@@ -204,7 +204,7 @@ KDADKResult hash_table_destroy(flow_hash *hash_table)
     }
 
     free(hash_table);
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
 const std::unordered_set<char> DELIMITERS = {'/', '?', ',', '=', '&', '.', ':'};
@@ -301,13 +301,13 @@ void add_rawbow_to_node(flow_hash *hash_table, flow_hash_node *node, std::string
     }
 }
 
-KDADKResult remove_node_from_hash_bucket(flow_hash *hash_table, flow_hash_node *node)
+KTAGResult remove_node_from_hash_bucket(flow_hash *hash_table, flow_hash_node *node)
 {
     if (hash_table == nullptr || node == nullptr) {
-        return KDADK_STS_NULL_PTR_ERR;
+        return KTAG_STS_NULL_PTR_ERR;
     }
     if (hash_table->buckets == nullptr || node->bucket_index >= hash_table->bucket_num) {
-        return KDADK_STS_PARAMETER_ERR;
+        return KTAG_STS_PARAMETER_ERR;
     }
     if (node->link_pre)
         node->link_pre->link_next = node->link_next;
@@ -321,7 +321,7 @@ KDADKResult remove_node_from_hash_bucket(flow_hash *hash_table, flow_hash_node *
     }
     node->link_pre = nullptr;
     node->link_next = nullptr;
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
 flow_hash_node *change_node_status(flow_hash *hash_table, const Tuple *tuple, int force_close)

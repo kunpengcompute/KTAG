@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-#include "kdadk_inference.h"
+#include "ktag_legacy_inference.h"
 #include "ktag_feature.h"
 #include "ktag_inference.h"
 

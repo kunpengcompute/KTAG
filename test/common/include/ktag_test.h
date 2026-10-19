@@ -1,8 +1,8 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
-#ifndef KDADK_TEST_H
-#define KDADK_TEST_H
+#ifndef KTAG_TEST_H
+#define KTAG_TEST_H
 
 #include <iostream>
 #include <stdio.h>
@@ -24,7 +24,7 @@
 #include <netinet/udp.h>
 #include <netinet/ip.h>
 #include <net/ethernet.h>
-#include "kdadk.h"
+#include "ktag.h"
 #include <random>
 #include <ctime>
 #include <dirent.h>
@@ -118,25 +118,25 @@ typedef struct {
     pcap_t *pcap;
 } pcap_info;
 
-static void process_error_test(KDADKResult type)
+static void process_error_test(KTAGResult type)
 {
     switch (type) {
-        case KDADK_STS_PARAMETER_ERR:
+        case KTAG_STS_PARAMETER_ERR:
             fprintf(stderr, "Invalid parameter. Please check for nullptr or value 0.\n");
             break;
-        case KDADK_STS_MALLOC_FAILED:
+        case KTAG_STS_MALLOC_FAILED:
             fprintf(stderr, "Malloc fail. Please check if there is enough memory.\n");
             break;
-        case KDADK_STS_INIT_RWLOCK_FAIL:
+        case KTAG_STS_INIT_RWLOCK_FAIL:
             fprintf(stderr, "Rwlock init fail.\n");
             break;
-        case KDADK_STS_INVALID_PCAP_PACKET:
+        case KTAG_STS_INVALID_PCAP_PACKET:
             fprintf(stderr, "The packet in the pcap file is invalid.\n");
             break;
-        case KDADK_STS_DECODE_HTTP_ERROR:
+        case KTAG_STS_DECODE_HTTP_ERROR:
             fprintf(stderr, "Error occurs while decoding HTTP packet.\n");
             break;
-        case KDADK_STS_DECODE_TLS_ERROR:
+        case KTAG_STS_DECODE_TLS_ERROR:
             fprintf(stderr, "Error occurs while decoding TLS packet.\n");
             break;
         default:
@@ -164,7 +164,7 @@ static inline pcap_info get_packet()
     flow_hash *hash_table = nullptr;
     domain_name_hash *domain_name_table = nullptr;
     pcap_handler_parameters parameters{};
-    KDADKResult ret;
+    KTAGResult ret;
 
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *pcap = pcap_open_offline(TEST_TRACE, errbuf);

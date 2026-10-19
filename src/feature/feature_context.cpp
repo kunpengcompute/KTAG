@@ -257,48 +257,48 @@ ktag_status prepare_output(ktag_feature_context *context,
     return KTAG_SUCCESS;
 }
 
-ktag_status translate_decode_status(KDADKResult status) {
+ktag_status translate_decode_status(KTAGResult status) {
     switch (status) {
-    case KDADK_STS_NO_ERR:
+    case KTAG_STS_NO_ERR:
         return KTAG_SUCCESS;
-    case KDADK_STS_NOT_SUPPORT:
+    case KTAG_STS_NOT_SUPPORT:
         return KTAG_ERROR_NOT_SUPPORTED;
-    case KDADK_STS_MALLOC_FAILED:
+    case KTAG_STS_MALLOC_FAILED:
         return KTAG_ERROR_OUT_OF_MEMORY;
-    case KDADK_STS_VECTOR_INDEX_OVERFLOW:
+    case KTAG_STS_VECTOR_INDEX_OVERFLOW:
         return KTAG_ERROR_CAPACITY;
-    case KDADK_STS_NULL_PTR_ERR:
-    case KDADK_STS_PARAMETER_ERR:
-    case KDADK_STS_INVALID_PCAP_PACKET:
+    case KTAG_STS_NULL_PTR_ERR:
+    case KTAG_STS_PARAMETER_ERR:
+    case KTAG_STS_INVALID_PCAP_PACKET:
         return KTAG_ERROR_INVALID_ARGUMENT;
     default:
         return KTAG_ERROR_INTERNAL;
     }
 }
 
-KDADKResult translate_domain_status(ktag_status status) {
+KTAGResult translate_domain_status(ktag_status status) {
     switch (status) {
     case KTAG_SUCCESS:
-        return KDADK_STS_NO_ERR;
+        return KTAG_STS_NO_ERR;
     case KTAG_ERROR_INVALID_ARGUMENT:
-        return KDADK_STS_PARAMETER_ERR;
+        return KTAG_STS_PARAMETER_ERR;
     case KTAG_ERROR_OUT_OF_MEMORY:
-        return KDADK_STS_MALLOC_FAILED;
+        return KTAG_STS_MALLOC_FAILED;
     case KTAG_ERROR_CAPACITY:
-        return KDADK_STS_VECTOR_INDEX_OVERFLOW;
+        return KTAG_STS_VECTOR_INDEX_OVERFLOW;
     default:
-        return KDADK_STS_UNKNOWN_ERR;
+        return KTAG_STS_UNKNOWN_ERR;
     }
 }
 
-KDADKResult context_domain_update(void *user_data,
+KTAGResult context_domain_update(void *user_data,
                                   const ktag_ip_address *address,
                                   const std::string &domain,
                                   uint64_t expire_at_us) {
     auto *context = static_cast<ktag_feature_context *>(user_data);
     if (context == nullptr || context->domain_store == nullptr ||
         context->domain_cache == nullptr || address == nullptr) {
-        return KDADK_STS_NULL_PTR_ERR;
+        return KTAG_STS_NULL_PTR_ERR;
     }
     ktag_status status = ktag_domain_store_put(
         context->domain_store, address, domain.c_str(), expire_at_us, nullptr);

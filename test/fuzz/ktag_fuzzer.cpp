@@ -1,5 +1,5 @@
-#include "kdadk_feature_extract.h"
-#include "kdadk_inference.h"
+#include "ktag_feature_extract.h"
+#include "ktag_legacy_inference.h"
 
 #include <stddef.h>
 #include <stdint.h>

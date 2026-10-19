@@ -1,10 +1,10 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
-#include "kdadk_test.h"
+#include "ktag_test.h"
 #include "feature_extract.h"
 
-TEST(KDADK_PERFTEST_E2E, TimeTest)
+TEST(KTAG_PERFTEST_E2E, TimeTest)
 {
     struct timespec start_sys, end_sys;
     std::vector<uint32_t> test_data = {1, 2, 3, 4, 5};

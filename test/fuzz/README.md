@@ -5,7 +5,7 @@
 Fuzz 测试提供一个 LibFuzzer 目标：
 
 ```text
-kdadk_fuzzer
+ktag_fuzzer
 ```
 
 它覆盖旧兼容接口边界：
@@ -22,8 +22,8 @@ kdadk_fuzzer
 
 - Clang/Clang++，并包含 LibFuzzer；
 - CMake 3.16.3 或更高版本；
-- 已构建 `/opt/KTAG/output/libKDADK_feature_extract.so` 和
-  `/opt/KTAG/output/libKDADK_inference.so`；
+- 已构建 `/opt/KTAG/output/libktag_feature_compat.so` 和
+  `/opt/KTAG/output/libktag_inference_compat.so`；
 - yaml-cpp 0.8.0；
 - ONNX Runtime 1.22.0。
 
@@ -37,7 +37,7 @@ make fuzz
 ```
 
 该命令先以 ASan 选项构建产品库，再使用 Clang 配置并编译
-`/opt/KTAG/test/fuzz/build/kdadk_fuzzer`。
+`/opt/KTAG/test/fuzz/build/ktag_fuzzer`。
 
 ## 4. 运行
 
@@ -52,7 +52,7 @@ Scaler 路径必须有效；不需要覆盖旧推理时，可直接运行二进�
 `KTAG_LEGACY_CONFIG`：
 
 ```bash
-/opt/KTAG/test/fuzz/build/kdadk_fuzzer -runs=10000 -max_total_time=60
+/opt/KTAG/test/fuzz/build/ktag_fuzzer -runs=10000 -max_total_time=60
 ```
 
 常用 LibFuzzer 参数：
@@ -72,11 +72,11 @@ Fuzz 目标使用 Clang 的 profile/coverage 选项。运行后生成覆盖率�
 
 ```bash
 cd /opt/KTAG/test/fuzz/build
-llvm-profdata merge -sparse default.profraw -o kdadk.profdata
+llvm-profdata merge -sparse default.profraw -o ktag.profdata
 llvm-cov export \
   -format=lcov \
-  ./kdadk_fuzzer \
-  --instr-profile=kdadk.profdata \
+  ./ktag_fuzzer \
+  --instr-profile=ktag.profdata \
   > clang_coverage.info
 ```
 

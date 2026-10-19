@@ -1,7 +1,7 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
-#include "kdadk_test.h"
+#include "ktag_test.h"
 #include "feature_extract.h"
 
 size_t getFileSize(const char *fileName) {
@@ -15,7 +15,7 @@ size_t getFileSize(const char *fileName) {
 	return filesize;
 }
 
-TEST(KDADK_PERFTEST_E2E, CALCULATE_MEAN)
+TEST(KTAG_PERFTEST_E2E, CALCULATE_MEAN)
 {
     struct timespec start_sys, end_sys;
     std::vector<uint32_t> test_data(50);
@@ -37,14 +37,14 @@ TEST(KDADK_PERFTEST_E2E, CALCULATE_MEAN)
     printf("Performance of calculate_mean : %.6f ms\n", time_sys);
 }
 
-TEST(KDADK_PERFTEST_E2E, CALCULATE_STATIC_INFO)
+TEST(KTAG_PERFTEST_E2E, CALCULATE_STATIC_INFO)
 {
     struct timespec start_sys, end_sys;
     std::vector<uint32_t> test_data(50);
 
     std::mt19937 gen(std::random_device{}());
     std::uniform_int_distribution<uint32_t> dist(0, UINT32_MAX);
-    KDADKResult ret;
+    KTAGResult ret;
     for (size_t i = 0; i < test_data.size(); ++i) {
         test_data[i] = dist(gen);
     }
@@ -55,7 +55,7 @@ TEST(KDADK_PERFTEST_E2E, CALCULATE_STATIC_INFO)
         ret = cal_statistics_info(test_data, result);
     }
     clock_gettime(CLOCK_REALTIME, &end_sys);
-    EXPECT_EQ(ret, KDADK_STS_NO_ERR);
+    EXPECT_EQ(ret, KTAG_STS_NO_ERR);
     double time_sys = calculate_time_ms(start_sys, end_sys);
     printf("Performance of cal_statistics_info : %.6f ms\n", time_sys);
 }

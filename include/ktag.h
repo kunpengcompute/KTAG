@@ -1,14 +1,14 @@
 /*
 	Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
-#ifndef KDADK_H
-#define KDADK_H
+#ifndef KTAG_H
+#define KTAG_H
 #include <stdint.h>
 #include <stdbool.h>
 #include <string>
 #include <vector>
 
-#include "kdadk_type.h"
+#include "ktag_type.h"
 
 typedef struct {
 uint32_t src_ip;

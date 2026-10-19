@@ -1,9 +1,9 @@
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
-#include "kdadk_file_writer.h"
-#include "kdadk_inference.h"
-#include "kdadk_type.h"
+#include "ktag_file_writer.h"
+#include "ktag_legacy_inference.h"
+#include "ktag_type.h"
 #include "utils.h"
 
 int expand_features_capacity(feature_vector_list *list);

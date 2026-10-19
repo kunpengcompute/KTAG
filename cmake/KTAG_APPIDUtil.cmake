@@ -1,12 +1,12 @@
 # clears all passed variables
-macro(KDADK_APPID_clear_vars)
+macro(KTAG_APPID_clear_vars)
   foreach(_var ${ARGN})
     unset(${_var} CACHE)
   endforeach()
 endmacro()
 
 # stable & safe duplicates removal macro
-macro(KDADK_APPID_list_unique __lst)
+macro(KTAG_APPID_list_unique __lst)
   if(${__lst})
     list(REMOVE_DUPLICATES ${__lst})
   endif()
@@ -20,7 +20,7 @@ macro(ocv_list_sort __lst)
 endmacro()
 
 # get absolute path with symlinks resolved
-macro(KDADK_APPID_get_real_path VAR PATHSTR)
+macro(KTAG_APPID_get_real_path VAR PATHSTR)
   if(CMAKE_VERSION VERSION_LESS 2.8)
     get_filename_component(${VAR} "${PATHSTR}" ABSOLUTE)
   else()
@@ -29,7 +29,7 @@ macro(KDADK_APPID_get_real_path VAR PATHSTR)
 endmacro()
 
 # gets and removes the first element from list
-macro(KDADK_APPID_list_pop_front LST VAR)
+macro(KTAG_APPID_list_pop_front LST VAR)
   if(${LST})
     list(GET ${LST} 0 ${VAR})
     list(REMOVE_AT ${LST} 0)
@@ -39,7 +39,7 @@ macro(KDADK_APPID_list_pop_front LST VAR)
 endmacro()
 
 # remove all matching elements from the list
-macro(KDADK_APPID_list_filterout lst regex)
+macro(KTAG_APPID_list_filterout lst regex)
   foreach(item ${${lst}})
     if(item MATCHES "${regex}")
       list(REMOVE_ITEM ${lst} "${item}")
@@ -47,13 +47,13 @@ macro(KDADK_APPID_list_filterout lst regex)
   endforeach()
 endmacro()
 
-# adds include directories in such way that directories from the KDADK_APPID source tree go first
-function(KDADK_APPID_include_directories)
+# adds include directories in such way that directories from the KTAG_APPID source tree go first
+function(KTAG_APPID_include_directories)
     set(__add_before "")
     foreach(dir ${ARGN})
         get_filename_component(__abs_dir "${dir}" ABSOLUTE)
 
-        if("${__abs_dir}" MATCHES "^${KDADK_APPID_SOURCE_DIR}" OR "${__abs_dir}" MATCHES "^${KDADK_APPID_BINARY_DIR}")
+        if("${__abs_dir}" MATCHES "^${KTAG_APPID_SOURCE_DIR}" OR "${__abs_dir}" MATCHES "^${KTAG_APPID_BINARY_DIR}")
             list(APPEND __add_before "${dir}")
         else()
             INCLUDE_DIRECTORIES(AFTER SYSTEM "${dir}")
@@ -63,7 +63,7 @@ function(KDADK_APPID_include_directories)
 endfunction()
 
 # convert list of paths to full paths
-macro(KDADK_APPID_convert_to_full_paths VAR)
+macro(KTAG_APPID_convert_to_full_paths VAR)
     if(${VAR})
         set(__tmp "")
         foreach(path ${${VAR}})
@@ -80,7 +80,7 @@ endmacro()
 # Can accept condition to control when option is available for user.
 # Usage:
 #   option(<option_variable> "help string describing the option" <initial value or boolean expression> [IF <condition>])
-macro(KDADK_APPID_OPTION variable description value)
+macro(KTAG_APPID_OPTION variable description value)
     set(__value ${value})
     set(__condition "")
     set(__varname "__value")

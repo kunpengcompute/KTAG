@@ -9,15 +9,15 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include <unordered_set>
 #include <cstring>
 #include "feature_extract.h"
-#include "kdadk_export.h"
-KDADKResult statisticsInfo2Array(const statistics_info &data, double *array, int size, int &begin)
+#include "ktag_export.h"
+KTAGResult statisticsInfo2Array(const statistics_info &data, double *array, int size, int &begin)
 {
     if (array == nullptr) {
-        return KDADK_STS_NULL_PTR_ERR;
+        return KTAG_STS_NULL_PTR_ERR;
     }
 
     if ((begin + 4 + HISTOGRAM_NUMS * 3) >= size) {
-        return KDADK_STS_VECTOR_INDEX_OVERFLOW;
+        return KTAG_STS_VECTOR_INDEX_OVERFLOW;
     }
 
     array[begin++] = data.min_value;
@@ -35,17 +35,17 @@ KDADKResult statisticsInfo2Array(const statistics_info &data, double *array, int
     for (int i = 0; i < HISTOGRAM_NUMS; ++i) {
         array[begin++] = data.hist_array_nor[i];
     }
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
-KDADKResult streamFeatur2Array(const stream_feature &data, double *array, int size)
+KTAGResult streamFeatur2Array(const stream_feature &data, double *array, int size)
 {
     if (array == nullptr) {
-        return KDADK_STS_NULL_PTR_ERR;
+        return KTAG_STS_NULL_PTR_ERR;
     }
 
     if (size < FEATURE_MAX_SIZE) {
-        return KDADK_STS_VECTOR_INDEX_OVERFLOW;
+        return KTAG_STS_VECTOR_INDEX_OVERFLOW;
     }
 
     int index = 0;
@@ -71,7 +71,7 @@ KDADKResult streamFeatur2Array(const stream_feature &data, double *array, int si
     for (int i = 0; i < RAW_BOW_HISTOGRAM_NUMS; ++i) {
         array[index++] = data.raw_bow_crc_result[i];
     }
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
 double calculate_mean(const std::vector<uint32_t> &nums)
@@ -252,10 +252,10 @@ void calculate_crc(flow_hash_node *node, double *raw_bow_crc_result, int raw_bow
     return;
 }
 
-KDADKResult cal_statistics_info(std::vector<uint32_t> &array, statistics_info &array_si, bool isTimeInterval)
+KTAGResult cal_statistics_info(std::vector<uint32_t> &array, statistics_info &array_si, bool isTimeInterval)
 {
     if (array.size() == 0) {
-        return KDADK_STS_PARAMETER_ERR;
+        return KTAG_STS_PARAMETER_ERR;
     }
 
     // 计算最大值，最小值，均值和方差
@@ -294,13 +294,13 @@ KDADKResult cal_statistics_info(std::vector<uint32_t> &array, statistics_info &a
     calculate_hist_abs(array, array_si.max_value, array_si.hist_array_abs, HISTOGRAM_NUMS, isTimeInterval);
     calculate_hist_nor(array, array_si.mean_value, array_si.var_value, array_si.hist_array_nor, HISTOGRAM_NUMS,
                        isTimeInterval);
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
-KDADKResult cal_stream_feature(flow_hash_node *node, stream_feature &node_sf)
+KTAGResult cal_stream_feature(flow_hash_node *node, stream_feature &node_sf)
 {
     if (node == nullptr) {
-        return KDADK_STS_PARAMETER_ERR;
+        return KTAG_STS_PARAMETER_ERR;
     }
 
     memset(&node_sf, 0, sizeof(stream_feature));
@@ -334,23 +334,23 @@ KDADKResult cal_stream_feature(flow_hash_node *node, stream_feature &node_sf)
     }
 
     calculate_crc(node, node_sf.raw_bow_crc_result, RAW_BOW_HISTOGRAM_NUMS);
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
-KDADKResult feature_extract_rawbow_text(
+KTAGResult feature_extract_rawbow_text(
     flow_hash_node *node,
     char rawbow[RAWBOW_MAX_LEN],
     uint32_t *rawbow_len)
 {
     if (!node || !rawbow || !rawbow_len) {
-        return KDADK_STS_NULL_PTR_ERR;
+        return KTAG_STS_NULL_PTR_ERR;
     }
     memset(rawbow, 0, RAWBOW_MAX_LEN);
     *rawbow_len = 0;
     const uint32_t rawbow_count = std::min(
         node->rawbow_cnt, static_cast<uint32_t>(MAX_RAWBOW_CNT));
     if (rawbow_count == 0) {
-        return KDADK_STS_NO_ERR;
+        return KTAG_STS_NO_ERR;
     }
 
     size_t offset = 0;
@@ -375,14 +375,14 @@ KDADKResult feature_extract_rawbow_text(
     }
     rawbow[offset] = '\0';
     *rawbow_len = static_cast<uint32_t>(offset);
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
-KTAG_LEGACY_ALGORITHM_API KDADKResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
+KTAG_LEGACY_ALGORITHM_API KTAGResult feature_extract_online(flow_hash_node *node, float feature_vector[FEATURE_MAX_SIZE],
                                      char rawbow[RAWBOW_MAX_LEN], uint32_t *rawbow_len)
 {
     if (!node || !feature_vector || !rawbow || !rawbow_len) {
-        return KDADK_STS_NULL_PTR_ERR;
+        return KTAG_STS_NULL_PTR_ERR;
     }
 
     memset(feature_vector, 0, sizeof(float) * FEATURE_MAX_SIZE);
@@ -391,8 +391,8 @@ KTAG_LEGACY_ALGORITHM_API KDADKResult feature_extract_online(flow_hash_node *nod
 
     try {
         stream_feature node_sf;
-        KDADKResult ret = cal_stream_feature(node, node_sf);  // 改这里
-        if (ret != KDADK_STS_NO_ERR) {
+        KTAGResult ret = cal_stream_feature(node, node_sf);  // 改这里
+        if (ret != KTAG_STS_NO_ERR) {
             return ret;
         }
         
@@ -409,6 +409,6 @@ KTAG_LEGACY_ALGORITHM_API KDADKResult feature_extract_online(flow_hash_node *nod
         memset(feature_vector, 0, sizeof(float) * FEATURE_MAX_SIZE);
         memset(rawbow, 0, RAWBOW_MAX_LEN);
         *rawbow_len = 0;
-        return KDADK_STS_UNKNOWN_ERR;
+        return KTAG_STS_UNKNOWN_ERR;
     }
 }

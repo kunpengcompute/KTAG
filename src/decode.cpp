@@ -57,10 +57,10 @@ bool is_http_payload(const u_char *packet, int length) {
     return false;
 }
 
-KDADKResult parse_http_payload(const u_char *packet, packet_info *info,
+KTAGResult parse_http_payload(const u_char *packet, packet_info *info,
                                uint32_t length) {
     if (!packet) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     std::string uri;
     std::string host;
@@ -73,31 +73,31 @@ KDADKResult parse_http_payload(const u_char *packet, packet_info *info,
     // Parse the request line
     size_t line_end = sv.find("\r\n");
     if (line_end == std::string_view::npos) {
-        return KDADK_STS_DECODE_HTTP_ERROR;
+        return KTAG_STS_DECODE_HTTP_ERROR;
     }
     // Extract URL in the request line
     size_t first_space = sv.find(' ');
     if (first_space == std::string_view::npos) {
-        return KDADK_STS_DECODE_HTTP_ERROR;
+        return KTAG_STS_DECODE_HTTP_ERROR;
     }
     url_start = first_space + 1;
     url_end = sv.find(' ', url_start);
     if (url_end == std::string_view::npos) {
-        return KDADK_STS_DECODE_HTTP_ERROR;
+        return KTAG_STS_DECODE_HTTP_ERROR;
     }
 
     uri = sv.substr(url_start, url_end - url_start);
     info->http_uri = uri;
     if (uri.compare(0, HTTP_PREFIX_LENGTH, HTTP_PREFIX) == 0) {
         info->http_url = uri;
-        return KDADK_STS_NO_ERR;
+        return KTAG_STS_NO_ERR;
     }
 
     // Concatenate host and uri
     host_start = sv.find(HTTP_PROPERTY_HOST, url_end);
     if (host_start == std::string_view::npos) {
         info->http_url = uri;
-        return KDADK_STS_NO_ERR;
+        return KTAG_STS_NO_ERR;
     }
     host_start += HTTP_PROPERTY_HOST_LENGTH; // "Host:"
     while (host_start < sv.size() && sv[host_start] == ' ') {
@@ -106,30 +106,30 @@ KDADKResult parse_http_payload(const u_char *packet, packet_info *info,
     host_end = sv.find("\r\n", host_start);
     if (host_end == std::string_view::npos) {
         info->http_url = info->http_uri;
-        return KDADK_STS_DECODE_HTTP_ERROR;
+        return KTAG_STS_DECODE_HTTP_ERROR;
     }
     host = sv.substr(host_start, host_end - host_start);
     info->http_host = host;
     info->http_url = HTTP_PREFIX + host + uri;
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
-KDADKResult parse_tls_sni(const size_t msg_body_start,
+KTAGResult parse_tls_sni(const size_t msg_body_start,
                           const size_t extensions_len, packet_info *info,
                           const std::string_view &sv) {
     if (sv.empty() || info == nullptr) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     if (msg_body_start > sv.size() ||
         extensions_len > sv.size() - msg_body_start) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     size_t extensions_cur = msg_body_start;
     size_t extensions_end = extensions_cur + extensions_len;
 
     if (extensions_end - extensions_cur <=
         static_cast<size_t>(TLS_EXTENSION_TYPE_AND_LENGTH)) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     uint16_t ext_type = static_cast<uint16_t>(
         (static_cast<uint16_t>(static_cast<uint8_t>(sv[extensions_cur]))
@@ -141,7 +141,7 @@ KDADKResult parse_tls_sni(const size_t msg_body_start,
         static_cast<uint8_t>(sv[extensions_cur + 3U]));
     extensions_cur += TLS_EXTENSION_TYPE_AND_LENGTH;
     if (ext_len >= extensions_end - extensions_cur) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     if (ext_type == TLS_EXTENSION_TYPE) {
         if (extensions_cur + TLS_EXTENSION_SERVER_NAME_LIST_LENGTH +
@@ -150,11 +150,11 @@ KDADKResult parse_tls_sni(const size_t msg_body_start,
             extensions_cur += TLS_EXTENSION_SERVER_NAME_LIST_LENGTH;
             size_t sni_start = extensions_cur;
             if (sni_start >= sv.size()) {
-                return KDADK_STS_DECODE_TLS_ERROR;
+                return KTAG_STS_DECODE_TLS_ERROR;
             }
             uint8_t name_type = sv[sni_start];
             if (sni_start + 1 + sizeof(uint16_t) >= sv.size()) {
-                return KDADK_STS_DECODE_TLS_ERROR;
+                return KTAG_STS_DECODE_TLS_ERROR;
             }
             uint16_t name_len = static_cast<uint16_t>(
                 (static_cast<uint16_t>(static_cast<uint8_t>(sv[sni_start + 1U]))
@@ -164,7 +164,7 @@ KDADKResult parse_tls_sni(const size_t msg_body_start,
 
             if (name_type == TLS_SNI_NAME_TYPE && name_len > 0) {
                 if (name_len > extensions_end - sni_start) {
-                    return KDADK_STS_DECODE_TLS_ERROR;
+                    return KTAG_STS_DECODE_TLS_ERROR;
                 }
                 std::string sni_str(sv.data() + sni_start, name_len);
                 info->tls_info.sni = sni_str;
@@ -172,7 +172,7 @@ KDADKResult parse_tls_sni(const size_t msg_body_start,
         }
     }
 
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
 size_t parse_tls_cipher_suits(size_t msg_start, packet_info *info,
@@ -214,15 +214,15 @@ size_t parse_tls_cipher_suits(size_t msg_start, packet_info *info,
     return msg_body_start;
 }
 
-KDADKResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end,
+KTAGResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end,
                                    packet_info *info,
                                    const std::string_view &sv) {
     if (sv.empty() || info == nullptr) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     if (handshake_start >= sv.size() || handshake_end > sv.size() ||
         handshake_end <= handshake_start) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
 
     size_t msg_body_start = handshake_start + 1;
@@ -230,7 +230,7 @@ KDADKResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end,
     // client length 占3byte
     if (static_cast<size_t>(TLS_CLIENT_LENGTH) >=
         handshake_end - msg_body_start) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     size_t handshake_len_byte0 =
         static_cast<uint8_t>(sv[msg_body_start + BYTE_OFFSET_0]) << SHIFT_16;
@@ -244,16 +244,16 @@ KDADKResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end,
     // session_id_len(1))
     if (handshake_len <
         (TLS_CLIENT_VERSION_RANDOM_LENGTH + TLS_CLIENT_LENGTH + 1)) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     msg_body_start += TLS_CLIENT_LENGTH;
     if (handshake_len > handshake_end - msg_body_start) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     const size_t client_hello_end = msg_body_start + handshake_len;
     if (static_cast<size_t>(TLS_CLIENT_VERSION_RANDOM_LENGTH + 1) >
         client_hello_end - msg_body_start) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     uint16_t client_version = static_cast<uint16_t>(
         (static_cast<uint16_t>(static_cast<uint8_t>(sv[msg_body_start]))
@@ -266,13 +266,13 @@ KDADKResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end,
     uint8_t session_id_len = sv[msg_body_start];
     ++msg_body_start;
     if (session_id_len > client_hello_end - msg_body_start) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     msg_body_start += session_id_len;
 
     if (client_hello_end - msg_body_start <=
         static_cast<size_t>(TLS_CIPHER_SUITS_LENGTH)) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     const uint16_t cipher_suites_len = static_cast<uint16_t>(
         (static_cast<uint16_t>(static_cast<uint8_t>(sv[msg_body_start]))
@@ -280,25 +280,25 @@ KDADKResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end,
         static_cast<uint8_t>(sv[msg_body_start + 1U]));
     if (cipher_suites_len >
         client_hello_end - msg_body_start - TLS_CIPHER_SUITS_LENGTH) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
 
     msg_body_start = parse_tls_cipher_suits(msg_body_start, info, sv);
     // 跳过 compression_methods
     if (msg_body_start >= client_hello_end) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     uint8_t compression_methods_len = sv[msg_body_start];
     ++msg_body_start;
     if (compression_methods_len > client_hello_end - msg_body_start) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     msg_body_start += compression_methods_len;
 
     // 解析 extensions
     if (client_hello_end - msg_body_start <
         static_cast<size_t>(TLS_EXTENSIONS_LENGTH)) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     uint16_t extensions_len = static_cast<uint16_t>(
         (static_cast<uint16_t>(static_cast<uint8_t>(sv[msg_body_start]))
@@ -307,27 +307,27 @@ KDADKResult parse_tls_client_hello(size_t handshake_start, size_t handshake_end,
     info->tls_info.extensions_length = extensions_len;
     msg_body_start += TLS_EXTENSIONS_LENGTH;
     if (extensions_len > client_hello_end - msg_body_start) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
 
     return parse_tls_sni(msg_body_start, extensions_len, info, sv);
 }
 
-KDADKResult parse_tls(const u_char *data, packet_info *info, uint32_t len) {
+KTAGResult parse_tls(const u_char *data, packet_info *info, uint32_t len) {
     if (!data || info == nullptr) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
 
     std::string_view sv((char *)data, len);
     if (sv.size() < TLS_RECODE_MIN_LENGTH + sizeof(uint16_t)) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     size_t handshake_start = TLS_RECODE_MIN_LENGTH;
     uint16_t record_len = static_cast<uint16_t>(
         (static_cast<uint16_t>(static_cast<uint8_t>(sv[3U])) << 8U) |
         static_cast<uint8_t>(sv[4U]));
     if (record_len > sv.size() - handshake_start) {
-        return KDADK_STS_DECODE_TLS_ERROR;
+        return KTAG_STS_DECODE_TLS_ERROR;
     }
     size_t handshake_end = handshake_start + record_len;
     if (handshake_end <= sv.size() && handshake_end > handshake_start) {
@@ -338,7 +338,7 @@ KDADKResult parse_tls(const u_char *data, packet_info *info, uint32_t len) {
         }
     }
 
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
 bool is_tls_payload(const u_char *packet, int length) {
@@ -355,9 +355,9 @@ bool is_tls_payload(const u_char *packet, int length) {
     return false;
 }
 
-KDADKResult decode_tcp(const u_char *packet, packet_info *info) {
+KTAGResult decode_tcp(const u_char *packet, packet_info *info) {
     if (!packet) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     const struct tcphdr *tcp_header =
         reinterpret_cast<const struct tcphdr *>(packet);
@@ -377,7 +377,7 @@ KDADKResult decode_tcp(const u_char *packet, packet_info *info) {
             }
         }
     }
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
 std::string parse_domain(const u_char *data, size_t &pos, size_t data_len) {
@@ -506,7 +506,7 @@ static bool dns_read_name_bounded(const uint8_t *data, size_t length,
     return false;
 }
 
-static KDADKResult parse_dns_updates_bounded(const uint8_t *dns,
+static KTAGResult parse_dns_updates_bounded(const uint8_t *dns,
                                              uint32_t dns_length,
                                              const packet_info &info,
                                              domain_ip_update_callback callback,
@@ -514,7 +514,7 @@ static KDADKResult parse_dns_updates_bounded(const uint8_t *dns,
     constexpr uint32_t DNS_HEADER_LENGTH = 12U;
     if (dns == nullptr || dns_length < DNS_HEADER_LENGTH ||
         callback == nullptr) {
-        return KDADK_STS_NO_ERR;
+        return KTAG_STS_NO_ERR;
     }
     const uint16_t question_count = dns_read_u16(dns + 4U);
     const uint16_t answer_count =
@@ -526,7 +526,7 @@ static KDADKResult parse_dns_updates_bounded(const uint8_t *dns,
         if (!dns_read_name_bounded(dns, dns_length, &position,
                                    &current_domain) ||
             position + 4U > dns_length) {
-            return KDADK_STS_NO_ERR;
+            return KTAG_STS_NO_ERR;
         }
         if (question_domain.empty()) {
             question_domain = std::move(current_domain);
@@ -534,7 +534,7 @@ static KDADKResult parse_dns_updates_bounded(const uint8_t *dns,
         position += 4U;
     }
     if (question_domain.empty()) {
-        return KDADK_STS_NO_ERR;
+        return KTAG_STS_NO_ERR;
     }
     question_domain.push_back('.');
 
@@ -564,34 +564,34 @@ static KDADKResult parse_dns_updates_bounded(const uint8_t *dns,
             std::memcpy(address.bytes, dns + position, KTAG_IPV6_ADDRESS_SIZE);
         }
         if (address.version != 0U) {
-            const KDADKResult status =
+            const KTAGResult status =
                 callback(user_data, &address, question_domain,
                          dns_expire_at_us(info.ts, ttl));
-            if (status != KDADK_STS_NO_ERR) {
+            if (status != KTAG_STS_NO_ERR) {
                 return status;
             }
         }
         position += record_length;
     }
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
-static KDADKResult best_effort_application_status(KDADKResult status) {
-    if (status == KDADK_STS_DECODE_HTTP_ERROR ||
-        status == KDADK_STS_DECODE_TLS_ERROR ||
-        status == KDADK_STS_INVALID_PCAP_PACKET) {
-        return KDADK_STS_NO_ERR;
+static KTAGResult best_effort_application_status(KTAGResult status) {
+    if (status == KTAG_STS_DECODE_HTTP_ERROR ||
+        status == KTAG_STS_DECODE_TLS_ERROR ||
+        status == KTAG_STS_INVALID_PCAP_PACKET) {
+        return KTAG_STS_NO_ERR;
     }
     return status;
 }
 
-static KDADKResult decode_tcp_transport_bounded(const u_char *transport,
+static KTAGResult decode_tcp_transport_bounded(const u_char *transport,
                                                 uint32_t transport_length,
                                                 packet_info *info) {
     constexpr uint32_t TCP_MINIMUM_HEADER_LENGTH = 20U;
     if (transport == nullptr || info == nullptr ||
         transport_length < TCP_MINIMUM_HEADER_LENGTH) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     const uint32_t tcp_header_length =
         static_cast<uint32_t>(transport[12U] >> 4U) * 4U;
@@ -599,7 +599,7 @@ static KDADKResult decode_tcp_transport_bounded(const u_char *transport,
         tcp_header_length > transport_length ||
         info->header_len > info->packet_size ||
         tcp_header_length > info->packet_size - info->header_len) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
 
     std::memcpy(&info->tuple.src_port, transport, sizeof(info->tuple.src_port));
@@ -612,7 +612,7 @@ static KDADKResult decode_tcp_transport_bounded(const u_char *transport,
     const uint32_t bounded_payload_length =
         transport_length - tcp_header_length;
     if (bounded_payload_length == 0U) {
-        return KDADK_STS_NO_ERR;
+        return KTAG_STS_NO_ERR;
     }
     const u_char *payload = transport + tcp_header_length;
     if (is_http_payload(payload, bounded_payload_length)) {
@@ -620,7 +620,7 @@ static KDADKResult decode_tcp_transport_bounded(const u_char *transport,
             parse_http_payload(payload, info, bounded_payload_length));
     }
     if (!is_tls_payload(payload, bounded_payload_length)) {
-        return KDADK_STS_NO_ERR;
+        return KTAG_STS_NO_ERR;
     }
 
     const uint16_t record_length = static_cast<uint16_t>(
@@ -630,25 +630,25 @@ static KDADKResult decode_tcp_transport_bounded(const u_char *transport,
          * A TLS record may span TCP segments. The modern Provider owns
          * prefix assembly, so an incomplete record is not a packet error.
          */
-        return KDADK_STS_NO_ERR;
+        return KTAG_STS_NO_ERR;
     }
     return best_effort_application_status(
         parse_tls(payload, info, bounded_payload_length));
 }
 
-static KDADKResult decode_udp_transport_bounded(
+static KTAGResult decode_udp_transport_bounded(
     const u_char *transport, uint32_t transport_length, packet_info *info,
     domain_ip_update_callback callback, void *user_data) {
     if (transport == nullptr || info == nullptr ||
         transport_length < static_cast<uint32_t>(UDP_HEADER_LEN)) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     const auto *udp_header = reinterpret_cast<const struct udphdr *>(transport);
     info->tuple.src_port = udp_header->uh_sport;
     info->tuple.dst_port = udp_header->uh_dport;
     info->header_len += UDP_HEADER_LEN;
     if (info->packet_size < info->header_len) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     /*
      * Keep the Legacy Built-in byte/payload statistics based on captured
@@ -662,14 +662,14 @@ static KDADKResult decode_udp_transport_bounded(
                                          info->payload_len, *info, callback,
                                          user_data);
     }
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
-KDADKResult decode_transport_payload_with_domain_callback(
+KTAGResult decode_transport_payload_with_domain_callback(
     const u_char *transport, uint32_t transport_length, uint8_t protocol,
     packet_info *info, domain_ip_update_callback callback, void *user_data) {
     if (transport == nullptr || info == nullptr) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     if (protocol == IPPROTO_TCP) {
         return decode_tcp_transport_bounded(transport, transport_length, info);
@@ -678,15 +678,15 @@ KDADKResult decode_transport_payload_with_domain_callback(
         return decode_udp_transport_bounded(transport, transport_length, info,
                                             callback, user_data);
     }
-    return KDADK_STS_NOT_SUPPORT;
+    return KTAG_STS_NOT_SUPPORT;
 }
 
-static KDADKResult
+static KTAGResult
 decode_udp_with_domain_callback(const u_char *packet, packet_info *info,
                                 domain_ipv4_update_callback callback,
                                 void *user_data) {
     if (!packet) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
 
     const struct udphdr *udp_header =
@@ -700,7 +700,7 @@ decode_udp_with_domain_callback(const u_char *packet, packet_info *info,
         udp_header->uh_dport == htons(DNS_PROTOCOL_PORT)) {
         size_t dns_pos = sizeof(struct udphdr);
         if (dns_pos + sizeof(dns_header) > info->packet_size) {
-            return KDADK_STS_INVALID_PCAP_PACKET;
+            return KTAG_STS_INVALID_PCAP_PACKET;
         }
         dns_header *dns = (dns_header *)(packet + dns_pos);
 
@@ -734,10 +734,10 @@ decode_udp_with_domain_callback(const u_char *packet, packet_info *info,
                     memcpy(&ipv4_addr, rr->data, sizeof(struct in_addr));
 
                     if (callback != nullptr && !domain.empty()) {
-                        const KDADKResult update_result = callback(
+                        const KTAGResult update_result = callback(
                             user_data, ipv4_addr.s_addr, domain,
                             dns_expire_at_us(info->ts, ntohl(rr->ttl)));
-                        if (update_result != KDADK_STS_NO_ERR) {
+                        if (update_result != KTAG_STS_NO_ERR) {
                             return update_result;
                         }
                     }
@@ -753,41 +753,41 @@ decode_udp_with_domain_callback(const u_char *packet, packet_info *info,
         }
     }
 
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
-static KDADKResult legacy_domain_update(void *user_data,
+static KTAGResult legacy_domain_update(void *user_data,
                                         uint32_t network_order_address,
                                         const std::string &domain,
                                         uint64_t expire_at_us) {
     auto *table = static_cast<domain_name_hash *>(user_data);
     if (table == nullptr) {
-        return KDADK_STS_NULL_PTR_ERR;
+        return KTAG_STS_NULL_PTR_ERR;
     }
     /* Preserve the legacy decoder's best-effort DomainTable update behavior. */
     (void)domain_name_table_add_with_expiry(table, network_order_address,
                                             domain, expire_at_us);
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
-KDADKResult decode_udp(const u_char *packet, packet_info *info,
+KTAGResult decode_udp(const u_char *packet, packet_info *info,
                        domain_name_hash *domain_name_table) {
     if (!packet) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     if (domain_name_table == nullptr) {
-        return KDADK_STS_NULL_PTR_ERR;
+        return KTAG_STS_NULL_PTR_ERR;
     }
     return decode_udp_with_domain_callback(packet, info, legacy_domain_update,
                                            domain_name_table);
 }
 
-static KDADKResult
+static KTAGResult
 decode_ipv4_with_domain_callback(const u_char *packet, packet_info *info,
                                  domain_ipv4_update_callback callback,
                                  void *user_data) {
     if (!packet) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     const struct ip *ip_header = reinterpret_cast<const struct ip *>(packet);
     info->tuple.src_ip = ip_header->ip_src.s_addr;
@@ -801,69 +801,69 @@ decode_ipv4_with_domain_callback(const u_char *packet, packet_info *info,
             packet + (ip_header->ip_hl * UNIT_BYTES_FOUR), info, callback,
             user_data);
     } else {
-        return KDADK_STS_NOT_SUPPORT;
+        return KTAG_STS_NOT_SUPPORT;
     }
-    return KDADK_STS_NO_ERR;
+    return KTAG_STS_NO_ERR;
 }
 
-KDADKResult decode_ipv4(const u_char *packet, packet_info *info,
+KTAGResult decode_ipv4(const u_char *packet, packet_info *info,
                         domain_name_hash *domain_name_table) {
     return decode_ipv4_with_domain_callback(packet, info, legacy_domain_update,
                                             domain_name_table);
 }
 
-static KDADKResult
+static KTAGResult
 decode_ethernet_with_domain_callback(const u_char *packet, packet_info *info,
                                      domain_ipv4_update_callback callback,
                                      void *user_data) {
     if (!packet) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     const struct ether_header *eth =
         reinterpret_cast<const struct ether_header *>(packet);
     if (ntohs(eth->ether_type) != ETHERTYPE_IP) {
-        return KDADK_STS_NOT_SUPPORT;
+        return KTAG_STS_NOT_SUPPORT;
     }
     info->header_len += ETHERNET_HEADER_LEN;
     return decode_ipv4_with_domain_callback(packet + ETHERNET_HEADER_LEN, info,
                                             callback, user_data);
 }
 
-KDADKResult decode_ethernet(const u_char *packet, packet_info *info,
+KTAGResult decode_ethernet(const u_char *packet, packet_info *info,
                             domain_name_hash *domain_name_table) {
     return decode_ethernet_with_domain_callback(
         packet, info, legacy_domain_update, domain_name_table);
 }
 
-static KDADKResult
+static KTAGResult
 decode_sll_with_domain_callback(const u_char *packet, packet_info *info,
                                 domain_ipv4_update_callback callback,
                                 void *user_data) {
     if (!packet) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
     sll_header *sll_hdr = (sll_header *)packet;
     if (ntohs(sll_hdr->sll_protocol) != ETHERTYPE_IP) {
-        return KDADK_STS_NOT_SUPPORT;
+        return KTAG_STS_NOT_SUPPORT;
     }
     info->header_len += SLL_HEADER_LEN;
     return decode_ipv4_with_domain_callback(packet + SLL_HEADER_LEN, info,
                                             callback, user_data);
 }
 
-KDADKResult decode_sll(const u_char *packet, packet_info *info,
+KTAGResult decode_sll(const u_char *packet, packet_info *info,
                        domain_name_hash *domain_name_table) {
     return decode_sll_with_domain_callback(packet, info, legacy_domain_update,
                                            domain_name_table);
 }
 
-KDADKResult decode_link_layer_with_domain_callback(
+KTAGResult decode_link_layer_with_domain_callback(
     const u_char *packet, packet_info *info, int link_type,
     domain_ipv4_update_callback callback, void *user_data) {
     if (!packet) {
-        return KDADK_STS_INVALID_PCAP_PACKET;
+        return KTAG_STS_INVALID_PCAP_PACKET;
     }
-    KDADKResult ret;
+    KTAGResult ret;
     switch (link_type) {
     case DLT_EN10MB:
         ret = decode_ethernet_with_domain_callback(packet, info, callback,
@@ -875,13 +875,13 @@ KDADKResult decode_link_layer_with_domain_callback(
         break;
     default:
         printf("The link type not in DLT_EN10MB or DLT_LINUX_SLL\n");
-        ret = KDADK_STS_NOT_SUPPORT;
+        ret = KTAG_STS_NOT_SUPPORT;
         break;
     }
     return ret;
 }
 
-KDADKResult decode_link_layer(const u_char *packet, packet_info *info,
+KTAGResult decode_link_layer(const u_char *packet, packet_info *info,
                               int link_type,
                               domain_name_hash *domain_name_table) {
     return decode_link_layer_with_domain_callback(

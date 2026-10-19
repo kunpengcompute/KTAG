@@ -13,7 +13,7 @@
 ```bash
 cd /home/s00951452/KTAG-chonggou7-13
 python3 tools/validation/validate_pipeline_modes.py \
-  --demo output/kdadk_demo \
+  --demo output/ktag_demo \
   --config tools/demo/config.yaml \
   --pcap /data2/ktag_data/bilibili/bilibili_20250721_141827_21600_android_20.pcap \
   --pcap /data2/ktag_data/wenxiaoyan/wenxiaoyan_20250804_205038_144000_android_20.pcap \

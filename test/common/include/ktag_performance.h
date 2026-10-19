@@ -1,10 +1,10 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
-#ifndef KDADK_PERFORMANCE_H
-#define KDADK_PERFORMANCE_H
+#ifndef KTAG_PERFORMANCE_H
+#define KTAG_PERFORMANCE_H
 
-#include "kdadk_test.h"
+#include "ktag_test.h"
 
 // 性能指标结构
 struct PerformanceMetrics {

@@ -6,7 +6,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include <stdint.h>
 #include <unordered_map>
 #include <pthread.h>
-#include "kdadk.h"
+#include "ktag.h"
 #include "ktag_feature.h"
 
 struct domain_name_hash {
@@ -23,28 +23,28 @@ struct domain_name_hash {
 const int ALIGN_SIZE = 64;
 const int DOMAIN_NAME_TABLE_MAX_SIZE = 10000;
 
-KDADKResult domain_name_table_create(domain_name_hash **domain_name_table);
-KDADKResult domain_name_table_create_with_store(
+KTAGResult domain_name_table_create(domain_name_hash **domain_name_table);
+KTAGResult domain_name_table_create_with_store(
     domain_name_hash **domain_name_table,
     ktag_domain_store *store);
-KDADKResult domain_name_table_add(domain_name_hash *domain_name_table, uint32_t key, std::string &value);
-KDADKResult domain_name_table_add_with_expiry(
+KTAGResult domain_name_table_add(domain_name_hash *domain_name_table, uint32_t key, std::string &value);
+KTAGResult domain_name_table_add_with_expiry(
     domain_name_hash *domain_name_table,
     uint32_t key,
     const std::string &value,
     uint64_t expire_at_us);
-KDADKResult domain_name_table_destroy(domain_name_hash *domain_name_table);
-KDADKResult get_domain_by_ip(flow_hash_node *node, domain_name_hash *domain_name_table, bool &is_exist_domain);
-KDADKResult get_domain_by_ip_at(
+KTAGResult domain_name_table_destroy(domain_name_hash *domain_name_table);
+KTAGResult get_domain_by_ip(flow_hash_node *node, domain_name_hash *domain_name_table, bool &is_exist_domain);
+KTAGResult get_domain_by_ip_at(
     flow_hash_node *node,
     domain_name_hash *domain_name_table,
     uint64_t now_us,
     bool &is_exist_domain);
-KDADKResult domain_name_table_refresh_flow(
+KTAGResult domain_name_table_refresh_flow(
     domain_name_hash *domain_name_table,
     flow_hash_node *node,
     uint64_t now_us,
     bool &is_exist_domain);
-KDADKResult domain_name_table_sync(domain_name_hash *domain_name_table);
+KTAGResult domain_name_table_sync(domain_name_hash *domain_name_table);
 
 #endif

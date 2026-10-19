@@ -1,12 +1,12 @@
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
-#ifndef KDADK_INFERENCE_H
-#define KDADK_INFERENCE_H
+#ifndef KTAG_LEGACY_INFERENCE_H
+#define KTAG_LEGACY_INFERENCE_H
 
 #include <stdint.h>
-#include "kdadk_feature_extract.h"
-#include "kdadk_export.h"
+#include "ktag_feature_extract.h"
+#include "ktag_export.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -56,14 +56,14 @@ typedef struct {
  * @param config 推理配置（包含配置文件路径）
  * @return 推理引擎句柄，失败返回NULL
  */
-KDADK_API KDADK_DEPRECATED("Use ktag_inference_create")
+KTAG_API KTAG_DEPRECATED("Use ktag_inference_create")
 inference_engine *inference_init(const inference_config *config);
 
 /**
  * @brief 销毁推理引擎
  * @param engine 推理引擎句柄
  */
-KDADK_API KDADK_DEPRECATED("Use ktag_inference_destroy")
+KTAG_API KTAG_DEPRECATED("Use ktag_inference_destroy")
 void inference_destroy(inference_engine *engine);
 
 /**
@@ -73,11 +73,11 @@ void inference_destroy(inference_engine *engine);
  * @param result 输出推理结果（调用者需要预先分配predictions数组）
  * @return INFERENCE_SUCCESS表示成功，INFERENCE_ERROR表示失败
  */
-KDADK_API KDADK_DEPRECATED("Use ktag_inference_predict")
+KTAG_API KTAG_DEPRECATED("Use ktag_inference_predict")
 int inference_predict(inference_engine *engine, const feature_vector_list *features, inference_result *result);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* KDADK_INFERENCE_H */
+#endif /* KTAG_LEGACY_INFERENCE_H */

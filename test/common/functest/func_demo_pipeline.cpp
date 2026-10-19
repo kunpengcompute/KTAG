@@ -806,7 +806,7 @@ TEST(KTAGDemoPipelineConfig, ParsesSharedTopologyForDistributedFrontend)
         "        fe-01: [0, 3]\n"
         "        fe-02: [1, 4]\n"
         "        fe-03: [2]\n"
-        "      eal_arguments: [kdadk_demo, --no-huge, -l, \"0\"]\n"
+        "      eal_arguments: [ktag_demo, --no-huge, -l, \"0\"]\n"
         "  schema:\n"
         "    name: ktag_legacy_v1\n"
         "    version: 1\n");

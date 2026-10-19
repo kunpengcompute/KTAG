@@ -22,7 +22,7 @@ KTAG UB 适配按以下版本验证：
 - DPDK/UB：`DPDK_ub-24.11/DPDK_ub`；
 - 运行时库：`librte_ub_ring.so`（24.11 对应版本）；
 - UB 依赖库：`libubsm_sdk.so`；
-- KTAG 可执行文件：`output/kdadk_demo`，必须使用启用 DPDK/UB 的构建版本。
+- KTAG 可执行文件：`output/ktag_demo`，必须使用启用 DPDK/UB 的构建版本。
 
 >![](public_sys-resources/icon-note.gif) **说明：** 
 >
@@ -93,8 +93,8 @@ export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:/path/to/KTAG/output:${
 
 ```bash
 # 使用以下命令检查 KTAG 可执行文件
-ldd output/kdadk_demo | grep -E 'rte_ub_ring|ubsm_sdk|not found'
-output/kdadk_demo -h | grep -E 'distributed-role|node-id'
+ldd output/ktag_demo | grep -E 'rte_ub_ring|ubsm_sdk|not found'
+output/ktag_demo -h | grep -E 'distributed-role|node-id'
 ```
 
 应能看到 `librte_ub_ring`、`libubsm_sdk`，且不能有 `not found`。帮助信息中应包含 `--distributed-role` 和 `--node-id`。
@@ -155,7 +155,7 @@ pipeline:
       data_element_size: 4096
       credits_per_provider: 256
       poll_us: 50
-      eal_arguments: [kdadk_demo, --no-huge, -l, "0"]
+      eal_arguments: [ktag_demo, --no-huge, -l, "0"]
 
   schema:
     name: ktag_legacy_v1
@@ -203,10 +203,10 @@ ground_truth_labels:
 
 ### 5.1 测试前准备
 
-1. 四台机器部署相同版本的 `output/kdadk_demo`、配置文件和必要运行库。
+1. 四台机器部署相同版本的 `output/ktag_demo`、配置文件和必要运行库。
 2. 三台 Frontend 各自准备 PCAP；PCAP 不要求内容相同，建议先使用已经通过单机基线验证的数据。
 3. Backend 准备与 YAML Schema 匹配的模型包。
-4. 停止上一轮遗留的 `kdadk_demo` 进程。不要在进程仍运行时重复启动同一套 `region`/`shm_prefix`。
+4. 停止上一轮遗留的 `ktag_demo` 进程。不要在进程仍运行时重复启动同一套 `region`/`shm_prefix`。
 5. 四台机器均设置 `LD_LIBRARY_PATH`，并确认 `ldd` 无 `not found`。
 
 ### 5.2 启动三个 Frontend
@@ -220,7 +220,7 @@ ground_truth_labels:
 cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 
-output/kdadk_demo \
+output/ktag_demo \
   -r tools/demo/config.yaml \
   -p /data/computer01/class0.pcap \
   -p /data/computer01/class1.pcap \
@@ -235,7 +235,7 @@ output/kdadk_demo \
 cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 
-output/kdadk_demo \
+output/ktag_demo \
   -r tools/demo/config.yaml \
   -p /data/computer02/class0.pcap \
   -p /data/computer02/class1.pcap \
@@ -250,7 +250,7 @@ output/kdadk_demo \
 cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 
-output/kdadk_demo \
+output/ktag_demo \
   -r tools/demo/config.yaml \
   -p /data/computer03/class0.pcap \
   -p /data/computer03/class1.pcap \
@@ -272,7 +272,7 @@ cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 mkdir -p /data/result
 
-output/kdadk_demo \
+output/ktag_demo \
   -r tools/demo/config.yaml \
   --distributed-role backend \
   --node-id "$(hostname)" \

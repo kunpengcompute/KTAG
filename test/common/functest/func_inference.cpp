@@ -1,8 +1,8 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
-#include "kdadk_test.h"
-#include "kdadk_inference.h"
+#include "ktag_test.h"
+#include "ktag_legacy_inference.h"
 
 #include <vector>
 #include <yaml-cpp/yaml.h>

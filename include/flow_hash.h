@@ -4,7 +4,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #ifndef FLOW_HASH_H
 #define FLOW_HASH_H
 #include <stdint.h>
-#include "kdadk.h"
+#include "ktag.h"
 typedef uint32_t (*hash_calc_func)(const uint8_t *key);
 
 typedef struct {
@@ -19,11 +19,11 @@ typedef struct {
     int build_ok;
 } flow_hash;
 
-KDADKResult hash_table_create(flow_hash **hash_table, uint32_t buckets);
+KTAGResult hash_table_create(flow_hash **hash_table, uint32_t buckets);
 flow_hash_node *hash_table_add(flow_hash *hash_table, const packet_info *info);
-KDADKResult hash_table_destroy(flow_hash *hash_table);
+KTAGResult hash_table_destroy(flow_hash *hash_table);
 void add_rawbow_to_node(flow_hash *hash_table, flow_hash_node *node, std::string message);
-KDADKResult remove_node_from_hash_bucket(flow_hash *hash_table, flow_hash_node *node);
+KTAGResult remove_node_from_hash_bucket(flow_hash *hash_table, flow_hash_node *node);
 flow_hash_node *change_node_status(flow_hash *hash_table, const Tuple *tuple, int force_close);
 void add_packet_to_flow_node(flow_hash_node *node, const packet_info *info);
 bool is_all_digits(const std::string &s);

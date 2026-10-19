@@ -1,12 +1,12 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
-#include "kdadk_test.h"
-#include "kdadk_feature_extract.h"
+#include "ktag_test.h"
+#include "ktag_feature_extract.h"
 
 #include <cstring>
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_MEAN_Basic)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_MEAN_Basic)
 {
     std::vector<uint32_t> test_data = {1, 2, 3, 4, 5};
     double mean_result = calculate_mean(test_data);
@@ -14,13 +14,13 @@ TEST(KDADK_FEATURE_EXTRACT, CALCULATE_MEAN_Basic)
     ASSERT_DOUBLE_EQ(mean_result, 3);
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_MEAN_SingleElement)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_MEAN_SingleElement)
 {
     std::vector<uint32_t> nums = {42};
     EXPECT_DOUBLE_EQ(42.0, calculate_mean(nums));
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_MEAN_LargeNumbers)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_MEAN_LargeNumbers)
 {
     std::vector<uint32_t> nums = {
         100'000'000, 
@@ -30,14 +30,14 @@ TEST(KDADK_FEATURE_EXTRACT, CALCULATE_MEAN_LargeNumbers)
     EXPECT_DOUBLE_EQ(200'000'000.0, calculate_mean(nums));
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_MEAN_MaxUint32)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_MEAN_MaxUint32)
 {
     uint32_t max_val = std::numeric_limits<uint32_t>::max();
     std::vector<uint32_t> nums = {max_val, max_val, max_val};
     EXPECT_DOUBLE_EQ(static_cast<double>(max_val), calculate_mean(nums));
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_VAR)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_VAR)
 {
     std::vector<uint32_t> nums = {1, 2, 3, 4, 5};
     double mean = 3.0;
@@ -45,14 +45,14 @@ TEST(KDADK_FEATURE_EXTRACT, CALCULATE_VAR)
     EXPECT_DOUBLE_EQ(expected, calculate_var(nums, mean));
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_HIST_NullPointer)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_HIST_NullPointer)
 {
     std::vector<uint32_t> nums = {1, 2, 3};
     calculate_hist(nums, 1, 3, nullptr, HISTOGRAM_NUMS);
     SUCCEED(); // 不崩溃即通过
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_HIST_InvalidRange)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_HIST_InvalidRange)
 {
     std::vector<uint32_t> nums = {5, 10, 15};
     double *hist = new double[HISTOGRAM_NUMS]();
@@ -64,7 +64,7 @@ TEST(KDADK_FEATURE_EXTRACT, CALCULATE_HIST_InvalidRange)
     }
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_HIST_Basic)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_HIST_Basic)
 {
     std::vector<uint32_t> nums = {
         0, 
@@ -83,7 +83,7 @@ TEST(KDADK_FEATURE_EXTRACT, CALCULATE_HIST_Basic)
     }
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CAL_DIFFS_EmptyTS)
+TEST(KTAG_FEATURE_EXTRACT, CAL_DIFFS_EmptyTS)
 {
     std::vector<struct timeval> ts;
     std::vector<uint32_t> time_diff(1, 555);
@@ -94,7 +94,7 @@ TEST(KDADK_FEATURE_EXTRACT, CAL_DIFFS_EmptyTS)
     EXPECT_EQ((uint32_t)555, time_diff[0]);
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CAL_DIFFS_SizeMismatch)
+TEST(KTAG_FEATURE_EXTRACT, CAL_DIFFS_SizeMismatch)
 {
     std::vector<struct timeval> ts = {
         {100, 0},
@@ -109,7 +109,7 @@ TEST(KDADK_FEATURE_EXTRACT, CAL_DIFFS_SizeMismatch)
     EXPECT_EQ((uint32_t)555, time_diff[0]);
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CAL_DIFFS_Basic)
+TEST(KTAG_FEATURE_EXTRACT, CAL_DIFFS_Basic)
 {
     std::vector<struct timeval> ts = {
         {100, 123456},
@@ -127,7 +127,7 @@ TEST(KDADK_FEATURE_EXTRACT, CAL_DIFFS_Basic)
     EXPECT_EQ(1, time_diff[2]); 
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALULATE_CRC_BYTE_ZeroByte)
+TEST(KTAG_FEATURE_EXTRACT, CALULATE_CRC_BYTE_ZeroByte)
 {
     char byte = 0x00;
     uint16_t crc = 0xFFFF;
@@ -137,7 +137,7 @@ TEST(KDADK_FEATURE_EXTRACT, CALULATE_CRC_BYTE_ZeroByte)
     EXPECT_EQ(0x5FB1, crc);
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_CRC_NullNode)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_CRC_NullNode)
 {
     flow_hash_node* node = nullptr;
     double result[RAW_BOW_HISTOGRAM_NUMS] = {0.0};
@@ -148,7 +148,7 @@ TEST(KDADK_FEATURE_EXTRACT, CALCULATE_CRC_NullNode)
     }
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_CRC_ZeroRawbowCount)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_CRC_ZeroRawbowCount)
 {
     double result[RAW_BOW_HISTOGRAM_NUMS] = {0.0};
     flow_hash_node *node = new flow_hash_node;
@@ -160,7 +160,7 @@ TEST(KDADK_FEATURE_EXTRACT, CALCULATE_CRC_ZeroRawbowCount)
     }
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_CRC_SingleZeroByte)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_CRC_SingleZeroByte)
 {
     double result[RAW_BOW_HISTOGRAM_NUMS] = {0.0};
     flow_hash_node *node = new flow_hash_node;
@@ -176,7 +176,7 @@ TEST(KDADK_FEATURE_EXTRACT, CALCULATE_CRC_SingleZeroByte)
     }
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CALCULATE_CRC_SingleFullByte)
+TEST(KTAG_FEATURE_EXTRACT, CALCULATE_CRC_SingleFullByte)
 {
     double result[RAW_BOW_HISTOGRAM_NUMS] = {0.0};
     flow_hash_node *node = new flow_hash_node;
@@ -192,23 +192,23 @@ TEST(KDADK_FEATURE_EXTRACT, CALCULATE_CRC_SingleFullByte)
     }
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CAL_STATISTICS_INFO_EmptyArrary)
+TEST(KTAG_FEATURE_EXTRACT, CAL_STATISTICS_INFO_EmptyArrary)
 {
     std::vector<uint32_t> empty;
     statistics_info si;
 
-    KDADKResult res = cal_statistics_info(empty, si);
-    EXPECT_EQ(res, KDADK_STS_PARAMETER_ERR);
+    KTAGResult res = cal_statistics_info(empty, si);
+    EXPECT_EQ(res, KTAG_STS_PARAMETER_ERR);
 }
 
-TEST(KDADK_FEATURE_EXTRACT, CAL_STATISTICS_INFO_Basic)
+TEST(KTAG_FEATURE_EXTRACT, CAL_STATISTICS_INFO_Basic)
 {
     std::vector<uint32_t> array = {1, 2, 3, 4 , 5};
     statistics_info si;
 
-    KDADKResult res = cal_statistics_info(array, si);
+    KTAGResult res = cal_statistics_info(array, si);
 
-    EXPECT_EQ(res, KDADK_STS_NO_ERR);
+    EXPECT_EQ(res, KTAG_STS_NO_ERR);
 }
 
 class StreamFeatureTest : public::testing::Test
@@ -264,8 +264,8 @@ protected:
 
 TEST_F(StreamFeatureTest, NullNode)
 {
-    KDADKResult result = cal_stream_feature(nullptr, sf);
-    EXPECT_EQ(result, KDADK_STS_PARAMETER_ERR);
+    KTAGResult result = cal_stream_feature(nullptr, sf);
+    EXPECT_EQ(result, KTAG_STS_PARAMETER_ERR);
 }
 
 TEST_F(StreamFeatureTest, BasicFunctionality)
@@ -283,8 +283,8 @@ TEST_F(StreamFeatureTest, BasicFunctionality)
     add_rawbow("Packet1");
     add_rawbow("Packet2");
     
-    KDADKResult result = cal_stream_feature(node, sf);
-    ASSERT_EQ(result, KDADK_STS_NO_ERR);
+    KTAGResult result = cal_stream_feature(node, sf);
+    ASSERT_EQ(result, KTAG_STS_NO_ERR);
     
     // ========== 验证五元组 ==========
     EXPECT_DOUBLE_EQ(sf.src_ip, static_cast<double>(0x030011AC));
@@ -353,8 +353,8 @@ TEST_F(StreamFeatureTest, SendOnly) {
     add_send_packet(20, 100, 1000, 0);
     add_send_packet(22, 150, 1000, 500000);
     
-    KDADKResult result = cal_stream_feature(node, sf);
-    ASSERT_EQ(result, KDADK_STS_NO_ERR);
+    KTAGResult result = cal_stream_feature(node, sf);
+    ASSERT_EQ(result, KTAG_STS_NO_ERR);
     
     // 发送方向验证
     EXPECT_DOUBLE_EQ(sf.send_packet_nums, 2.0);
@@ -374,8 +374,8 @@ TEST_F(StreamFeatureTest, ReceiveOnly) {
     add_receive_packet(18, 80, 1001, 0);
     add_receive_packet(20, 120, 1001, 200000);
     
-    KDADKResult result = cal_stream_feature(node, sf);
-    ASSERT_EQ(result, KDADK_STS_NO_ERR);
+    KTAGResult result = cal_stream_feature(node, sf);
+    ASSERT_EQ(result, KTAG_STS_NO_ERR);
     
     // 发送方向应为0
     EXPECT_DOUBLE_EQ(sf.send_packet_nums, 0.0);
@@ -387,8 +387,8 @@ TEST_F(StreamFeatureTest, ReceiveOnly) {
 }
 
 TEST_F(StreamFeatureTest, NoPackets) {
-    KDADKResult result = cal_stream_feature(node, sf);
-    ASSERT_EQ(result, KDADK_STS_NO_ERR);
+    KTAGResult result = cal_stream_feature(node, sf);
+    ASSERT_EQ(result, KTAG_STS_NO_ERR);
     
     // 所有计数应为0
     EXPECT_DOUBLE_EQ(sf.send_packet_nums, 0.0);
@@ -401,41 +401,41 @@ TEST_F(StreamFeatureTest, NoPackets) {
     EXPECT_DOUBLE_EQ(sf.receive_interval.min_value, 0.0);
 }
 
-TEST(KDADK_FEATURE_EXTRACT, SI2A_NullArray){
+TEST(KTAG_FEATURE_EXTRACT, SI2A_NullArray){
     statistics_info si;
     int b= 0;
     int& a = b;
-    KDADKResult res = statisticsInfo2Array(si, nullptr, 0, a);
-    EXPECT_EQ(res, KDADK_STS_NULL_PTR_ERR);
+    KTAGResult res = statisticsInfo2Array(si, nullptr, 0, a);
+    EXPECT_EQ(res, KTAG_STS_NULL_PTR_ERR);
 }
 
-TEST(KDADK_FEATURE_EXTRACT, SI2A_IndexOverflow)
+TEST(KTAG_FEATURE_EXTRACT, SI2A_IndexOverflow)
 {
     int a = 0;
     int& begin = a;
     int size = 0;
     statistics_info si;
     double *array = new double;
-    KDADKResult res = statisticsInfo2Array(si, array, size, begin);
-    EXPECT_EQ(res, KDADK_STS_VECTOR_INDEX_OVERFLOW);
+    KTAGResult res = statisticsInfo2Array(si, array, size, begin);
+    EXPECT_EQ(res, KTAG_STS_VECTOR_INDEX_OVERFLOW);
 }
 
-TEST(KDADK_FEATURE_EXTRACT, SF2A_NullArrary)
+TEST(KTAG_FEATURE_EXTRACT, SF2A_NullArrary)
 {
     stream_feature sf;
     double* array = nullptr;
     int size = 0;
-    KDADKResult res = streamFeatur2Array(sf, array, size);
-    EXPECT_EQ(res, KDADK_STS_NULL_PTR_ERR);
+    KTAGResult res = streamFeatur2Array(sf, array, size);
+    EXPECT_EQ(res, KTAG_STS_NULL_PTR_ERR);
 }
 
-TEST(KDADK_FEATURE_EXTRACT, SF2A_Overflow)
+TEST(KTAG_FEATURE_EXTRACT, SF2A_Overflow)
 {
     stream_feature sf;
     double* array = new double;
     int size = 0;
-    KDADKResult res = streamFeatur2Array(sf, array, size);
-    EXPECT_EQ(res,KDADK_STS_VECTOR_INDEX_OVERFLOW);
+    KTAGResult res = streamFeatur2Array(sf, array, size);
+    EXPECT_EQ(res,KTAG_STS_VECTOR_INDEX_OVERFLOW);
 }
 
 class FeatureExtractorTest : public ::testing::Test {
@@ -471,7 +471,7 @@ TEST_F(FeatureExtractorTest, InitAndDestroy) {
 
 TEST_F(FeatureExtractorTest, ExplicitDynamicPlugin)
 {
-    kdadk_feature_extractor_config config{};
+    ktag_feature_extractor_config config{};
     config.struct_size = sizeof(config);
     config.api_version = KTAG_API_VERSION;
     config.link_type = DLT_EN10MB;
@@ -484,7 +484,7 @@ TEST_F(FeatureExtractorTest, ExplicitDynamicPlugin)
 
 TEST_F(FeatureExtractorTest, MissingDynamicPluginReportsError)
 {
-    kdadk_feature_extractor_config config{};
+    ktag_feature_extractor_config config{};
     config.struct_size = sizeof(config);
     config.api_version = KTAG_API_VERSION;
     config.link_type = DLT_EN10MB;
