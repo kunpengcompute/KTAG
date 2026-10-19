@@ -80,11 +80,6 @@ endif()
 if(KTAG_BUILD_TOOLS AND NOT KTAG_BUILD_FEATURE_PLUGINS)
     message(FATAL_ERROR "KTAG_BUILD_TOOLS requires KTAG_BUILD_FEATURE_PLUGINS")
 endif()
-if(KTAG_BUILD_TOOLS AND NOT KTAG_BUILD_LEGACY_COMPAT)
-    message(FATAL_ERROR
-        "KTAG_BUILD_TOOLS currently requires KTAG_BUILD_LEGACY_COMPAT because "
-        "ktag_demo retains the fixed-vector inference command paths")
-endif()
 
 # Install under the unified KTAG_APPID layout and expose modern CMake imported
 # targets to customers.

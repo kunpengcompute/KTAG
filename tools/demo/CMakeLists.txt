@@ -1,5 +1,4 @@
-if(NOT TARGET ktag_capture OR NOT TARGET ktag_feature OR
-   NOT TARGET ktag_inference OR NOT TARGET ktag_inference_compat)
+if(NOT TARGET ktag_capture OR NOT TARGET ktag_feature OR NOT TARGET ktag_inference)
     message(FATAL_ERROR "ktag_demo must be built as part of the KTAG source tree")
 endif()
 
@@ -48,7 +47,6 @@ target_link_libraries(ktag_demo PRIVATE
     ktag_capture
     ktag_feature
     ktag_inference
-    ktag_inference_compat
     ${YAML_CPP_LIB}
     Threads::Threads
     ${CMAKE_DL_LIBS}
@@ -77,12 +75,6 @@ if(KTAG_ENABLE_DPDK)
     target_compile_definitions(ktag_demo PRIVATE KTAG_DEMO_HAVE_DPDK=1)
     target_link_libraries(ktag_demo PRIVATE ktag_capture_dpdk)
 endif()
-
-# The demo intentionally exercises both the new three-layer API and the
-# retained legacy command path; customer builds still see deprecation warnings.
-target_compile_definitions(ktag_demo PRIVATE
-    KTAG_SUPPRESS_DEPRECATED_WARNINGS
-)
 
 # The loader consumes this example exactly like a customer-provided .so. It is
 # deliberately not linked into ktag_demo.
@@ -158,14 +150,10 @@ set_target_properties(ktag_demo PROPERTIES
 
 install(TARGETS ktag_example_feature_plugin
         LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}/plugins")
-if(KTAG_INSTALL_LEGACY_COMPAT)
-    # The demo intentionally retains --pipeline-mode legacy, so installing it
-    # also requires the compatibility libraries.
-    install(TARGETS ktag_demo
-            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/KTAG/python")
-    install(FILES
-            "${PROJECT_SOURCE_DIR}/tools/model_package/create_legacy_package.py"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/KTAG/python")
-endif()
+install(TARGETS ktag_demo
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/KTAG/python")
+install(FILES
+        "${PROJECT_SOURCE_DIR}/tools/model_package/create_legacy_package.py"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/KTAG/python")

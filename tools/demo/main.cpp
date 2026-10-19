@@ -5,7 +5,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 #include "capture_adapter.h"
 #include "ktag_file_writer.h"
-#include "ktag_legacy_inference.h"
 #include "ktag_type.h"
 #include "online_inference.h"
 #include "pipeline/pipeline_config.h"

@@ -5,7 +5,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #define KTAG_FILE_WRITER_H
 
 #include "ktag_legacy_types.h"
-#include "ktag_legacy_inference.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
