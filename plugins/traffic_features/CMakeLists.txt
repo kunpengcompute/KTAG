@@ -10,6 +10,10 @@ add_library(ktag_traffic_features SHARED
     legacy/tuple_provider.cpp
     legacy/traffic_statistics_provider.cpp
     legacy/rawbow_provider.cpp
+    legacy/statistics.cpp
+    legacy/rawbow_token_dfa.cpp
+    legacy/http.cpp
+    legacy/token_histogram.cpp
 )
 add_library(KTAG::traffic_features ALIAS ktag_traffic_features)
 
@@ -26,13 +30,6 @@ target_compile_definitions(ktag_traffic_features PRIVATE
 target_link_libraries(ktag_traffic_features PRIVATE
     ktag_feature
 )
-
-# The compatibility library discovers this plugin at runtime through the
-# public Plugin ABI. Keep a build-order dependency without creating a link-time
-# dependency or a DT_NEEDED entry.
-if(TARGET ktag_feature_compat)
-    add_dependencies(ktag_feature_compat ktag_traffic_features)
-endif()
 
 set_target_properties(ktag_traffic_features PROPERTIES
     EXPORT_NAME traffic_features

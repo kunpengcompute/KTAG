@@ -1,3 +1,4 @@
+#include "feature_session.h"
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
@@ -82,7 +83,7 @@ void free_filtered_features(filtered_features *filtered)
     }
 }
 
-int inference_mode_single_flow(feature_extractor *extractor, inference_engine *engine, ktag_capture_context *capture,
+int inference_mode_single_flow(ktag_demo_feature_session *extractor, inference_engine *engine, ktag_capture_context *capture,
                                int ground_truth_label, filtered_features *all_filtered_out, int **all_predictions,
                                int **all_labels, int *total_count, PerformanceStats *stats)
 {
@@ -142,12 +143,11 @@ int inference_mode_single_flow(feature_extractor *extractor, inference_engine *e
         int has_feature = 0;
 
         const timeval timestamp = packet_timeval(packet);
-        const int extract_status = process_packet(
-            extractor, packet.data, packet.captured_length, &timestamp,
+        const int extract_status = extractor->process(packet.data, packet.captured_length, &timestamp,
             &features, &has_feature);
         ktag_packet_release(&packet);
         if (extract_status ==
-            EXTRACTOR_SUCCESS) {
+            KTAG_SUCCESS) {
             double t2 = get_time_in_seconds();
             extract_time += (t2 - t1);
 
@@ -223,7 +223,7 @@ int inference_mode_single_flow(feature_extractor *extractor, inference_engine *e
     }
 
     double t1_r = get_time_in_seconds();
-    if (extractor_finalize(extractor, &remaining) == EXTRACTOR_SUCCESS) {
+    if (extractor->flush(&remaining) == KTAG_SUCCESS) {
         double t2 = get_time_in_seconds();
         extract_time += (t2 - t1_r);
 
@@ -289,7 +289,7 @@ int inference_mode_single_flow(feature_extractor *extractor, inference_engine *e
     return 0;
 }
 
-int inference_mode_batch(feature_extractor *extractor, inference_engine *engine, ktag_capture_context *capture,
+int inference_mode_batch(ktag_demo_feature_session *extractor, inference_engine *engine, ktag_capture_context *capture,
                          int ground_truth_label,
                          filtered_features *all_filtered_out, int **all_predictions, int **all_labels, int *total_count,
                          PerformanceStats *stats)
@@ -329,12 +329,11 @@ int inference_mode_batch(feature_extractor *extractor, inference_engine *engine,
         int has_feature = 0;
 
         const timeval timestamp = packet_timeval(packet);
-        const int extract_status = process_packet(
-            extractor, packet.data, packet.captured_length, &timestamp,
+        const int extract_status = extractor->process(packet.data, packet.captured_length, &timestamp,
             &features, &has_feature);
         ktag_packet_release(&packet);
         if (extract_status ==
-            EXTRACTOR_SUCCESS) {
+            KTAG_SUCCESS) {
             double t2 = get_time_in_seconds();
             extract_time += (t2 - t1);
 
@@ -361,7 +360,7 @@ int inference_mode_batch(feature_extractor *extractor, inference_engine *engine,
     }
 
     double t1_r = get_time_in_seconds();
-    if (extractor_finalize(extractor, &remaining) == EXTRACTOR_SUCCESS) {
+    if (extractor->flush(&remaining) == KTAG_SUCCESS) {
         double t2 = get_time_in_seconds();
         extract_time += (t2 - t1_r);
 
@@ -492,7 +491,7 @@ int read_features_from_file(const char *file_path, feature_vector_list *features
     return 0;
 }
 
-int inference_mode_file(feature_extractor *extractor, inference_engine *engine, ktag_capture_context *capture,
+int inference_mode_file(ktag_demo_feature_session *extractor, inference_engine *engine, ktag_capture_context *capture,
                         int ground_truth_label,
                         filtered_features *all_filtered_out, int **all_predictions, int **all_labels, int *total_count,
                         PerformanceStats *stats, const char *output_file)
@@ -545,12 +544,11 @@ int inference_mode_file(feature_extractor *extractor, inference_engine *engine, 
         int has_feature = 0;
 
         const timeval timestamp = packet_timeval(packet);
-        const int extract_status = process_packet(
-            extractor, packet.data, packet.captured_length, &timestamp,
+        const int extract_status = extractor->process(packet.data, packet.captured_length, &timestamp,
             &features, &has_feature);
         ktag_packet_release(&packet);
         if (extract_status ==
-            EXTRACTOR_SUCCESS) {
+            KTAG_SUCCESS) {
             double t2 = get_time_in_seconds();
             extract_time += (t2 - t1);
 
@@ -578,7 +576,7 @@ int inference_mode_file(feature_extractor *extractor, inference_engine *engine, 
     }
 
     double t1_r = get_time_in_seconds();
-    if (extractor_finalize(extractor, &remaining) == EXTRACTOR_SUCCESS) {
+    if (extractor->flush(&remaining) == KTAG_SUCCESS) {
         double t2 = get_time_in_seconds();
         extract_time += (t2 - t1_r);
 
@@ -695,7 +693,7 @@ int online_inference_from_interface(inference_engine *engine, const char *interf
         fprintf(stderr, "错误: 无法打开网口: %s\n", errbuf);
         return -1;
     }
-    feature_extractor *extractor = extractor_init(
+    ktag_demo_feature_session *extractor = ktag_demo_feature_session::create(
         static_cast<int>(ktag_capture_get_link_type(capture)));
     if (!extractor) {
         fprintf(stderr, "错误: 无法初始化特征提取器\n");
@@ -715,7 +713,7 @@ int online_inference_from_interface(inference_engine *engine, const char *interf
     all_filtered.vectors = (feature_vector *)malloc(all_filtered.capacity * sizeof(feature_vector));
     if (!all_filtered.vectors) {
         fprintf(stderr, "错误: 无法分配过滤特征内存\n");
-        extractor_destroy(extractor);
+        delete extractor;
         ktag_capture_close(capture);
         return -1;
     }
@@ -729,7 +727,7 @@ int online_inference_from_interface(inference_engine *engine, const char *interf
     if (!all_predictions) {
         fprintf(stderr, "错误: 无法分配预测结果内存\n");
         free(all_filtered.vectors);
-        extractor_destroy(extractor);
+        delete extractor;
         ktag_capture_close(capture);
         return -1;
     }
@@ -764,12 +762,11 @@ int online_inference_from_interface(inference_engine *engine, const char *interf
         int has_feature = 0;
 
         const timeval timestamp = packet_timeval(packet);
-        const int extract_status = process_packet(
-            extractor, packet.data, packet.captured_length, &timestamp,
+        const int extract_status = extractor->process(packet.data, packet.captured_length, &timestamp,
             &features, &has_feature);
         ktag_packet_release(&packet);
         if (extract_status ==
-            EXTRACTOR_SUCCESS) {
+            KTAG_SUCCESS) {
             double t2 = get_time_in_seconds();
             stats.feature_extraction_time += (t2 - t1);
 
@@ -845,7 +842,7 @@ int online_inference_from_interface(inference_engine *engine, const char *interf
     }
 
     t1_final = get_time_in_seconds();
-    if (extractor_finalize(extractor, &remaining) == EXTRACTOR_SUCCESS) {
+    if (extractor->flush(&remaining) == KTAG_SUCCESS) {
         double t2 = get_time_in_seconds();
         stats.feature_extraction_time += (t2 - t1_final);
 
@@ -978,7 +975,7 @@ cleanup:
     g_active_capture = nullptr;
     ktag_packet_release(&packet);
     ktag_capture_close(capture);
-    extractor_destroy(extractor);
+    delete extractor;
 
     return 0;
 }
@@ -1023,7 +1020,7 @@ int online_inference_from_pcap(inference_engine *engine, const char **pcap_files
             continue;
         }
 
-        feature_extractor *extractor = extractor_init(
+        ktag_demo_feature_session *extractor = ktag_demo_feature_session::create(
             static_cast<int>(ktag_capture_get_link_type(capture)));
         if (!extractor) {
             fprintf(stderr, "错误: 无法初始化特征提取器\n");
@@ -1091,7 +1088,7 @@ int online_inference_from_pcap(inference_engine *engine, const char **pcap_files
         }
 
         ktag_capture_close(capture);
-        extractor_destroy(extractor);
+        delete extractor;
     }
 
     double total_end = get_time_in_seconds();

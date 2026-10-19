@@ -1,3 +1,4 @@
+#include <pcap/pcap.h>
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
@@ -11,7 +12,7 @@
 
 #include <netinet/tcp.h>
 
-#include "ktag_feature_extract.h"
+#include "feature_session.h"
 #include "ktag_feature.h"
 #include "ktag_traffic_features.h"
 
@@ -1201,7 +1202,7 @@ TEST(KTAGFeatureContext, FixedVectorApiMatchesSlottedTrafficSchema)
         schema, registry, 8U, 100U, 1000U, 1000U, nullptr,
         KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT);
     ktag_feature_batch *batch = ktag_feature_batch_create(schema, 1U);
-    feature_extractor *legacy = extractor_init(DLT_EN10MB);
+    ktag_demo_feature_session *legacy = ktag_demo_feature_session::create(DLT_EN10MB);
     ASSERT_NE(nullptr, context);
     ASSERT_NE(nullptr, batch);
     ASSERT_NE(nullptr, legacy);
@@ -1231,10 +1232,8 @@ TEST(KTAGFeatureContext, FixedVectorApiMatchesSlottedTrafficSchema)
         timestamp.tv_sec = 7;
         timestamp.tv_usec = microseconds[index];
         ASSERT_EQ(
-            EXTRACTOR_SUCCESS,
-            process_packet(
-                legacy,
-                frames[index].data(),
+            KTAG_SUCCESS,
+            legacy->process(frames[index].data(),
                 static_cast<uint32_t>(frames[index].size()),
                 &timestamp,
                 &packet_output,
@@ -1247,7 +1246,7 @@ TEST(KTAGFeatureContext, FixedVectorApiMatchesSlottedTrafficSchema)
     feature_vector_list legacy_list{};
     legacy_list.vectors = &legacy_output;
     legacy_list.capacity = 1U;
-    ASSERT_EQ(EXTRACTOR_SUCCESS, extractor_finalize(legacy, &legacy_list));
+    ASSERT_EQ(KTAG_SUCCESS, legacy->flush(&legacy_list));
     ASSERT_EQ(1U, legacy_list.count);
 
     ktag_feature_record record{};
@@ -1255,10 +1254,10 @@ TEST(KTAGFeatureContext, FixedVectorApiMatchesSlottedTrafficSchema)
     ASSERT_EQ(KTAG_LEGACY_V1_VALUE_COUNT, record.value_count);
     for (uint32_t index = 0U; index < record.value_count; ++index) {
         EXPECT_FLOAT_EQ(legacy_output.features[index], record.values[index])
-            << "legacy value mismatch at index " << index;
+            << "demo bridge value mismatch at index " << index;
     }
 
-    extractor_destroy(legacy);
+    delete legacy;
     ktag_feature_batch_destroy(batch);
     ktag_feature_destroy(context);
     ktag_feature_schema_destroy(schema);
@@ -1411,7 +1410,7 @@ TEST(KTAGFeatureContext, LegacyLifecycleStopsAccumulatingPastUdpLimit)
         schema, registry, 8U, 100U, 10U, 10U, nullptr,
         KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT);
     ktag_feature_batch *batch = ktag_feature_batch_create(schema, 1U);
-    feature_extractor *legacy = extractor_init(DLT_EN10MB);
+    ktag_demo_feature_session *legacy = ktag_demo_feature_session::create(DLT_EN10MB);
     ASSERT_NE(nullptr, context);
     ASSERT_NE(nullptr, batch);
     ASSERT_NE(nullptr, legacy);
@@ -1432,10 +1431,8 @@ TEST(KTAGFeatureContext, LegacyLifecycleStopsAccumulatingPastUdpLimit)
         timeval timestamp{};
         timestamp.tv_sec = static_cast<time_t>(sequence * 100U);
         ASSERT_EQ(
-            EXTRACTOR_SUCCESS,
-            process_packet(
-                legacy,
-                frame.data(),
+            KTAG_SUCCESS,
+            legacy->process(frame.data(),
                 static_cast<uint32_t>(frame.size()),
                 &timestamp,
                 &packet_output,
@@ -1453,7 +1450,7 @@ TEST(KTAGFeatureContext, LegacyLifecycleStopsAccumulatingPastUdpLimit)
     feature_vector_list legacy_list{};
     legacy_list.vectors = &legacy_output;
     legacy_list.capacity = 1U;
-    ASSERT_EQ(EXTRACTOR_SUCCESS, extractor_finalize(legacy, &legacy_list));
+    ASSERT_EQ(KTAG_SUCCESS, legacy->flush(&legacy_list));
     ASSERT_EQ(1U, legacy_list.count);
 
     ktag_feature_record record{};
@@ -1462,7 +1459,7 @@ TEST(KTAGFeatureContext, LegacyLifecycleStopsAccumulatingPastUdpLimit)
     ASSERT_EQ(KTAG_LEGACY_V1_VALUE_COUNT, record.value_count);
     for (uint32_t index = 0U; index < record.value_count; ++index) {
         EXPECT_FLOAT_EQ(legacy_output.features[index], record.values[index])
-            << "legacy UDP-limit value mismatch at index " << index;
+            << "demo bridge UDP-limit value mismatch at index " << index;
     }
     ktag_feature_descriptor descriptor{};
     uint32_t offset = 0U;
@@ -1472,7 +1469,7 @@ TEST(KTAGFeatureContext, LegacyLifecycleStopsAccumulatingPastUdpLimit)
             schema, "traffic.send.packet_count", &descriptor, &offset));
     EXPECT_FLOAT_EQ(100.0F, record.values[offset]);
 
-    extractor_destroy(legacy);
+    delete legacy;
     ktag_feature_batch_destroy(batch);
     ktag_feature_destroy(context);
     ktag_feature_schema_destroy(schema);

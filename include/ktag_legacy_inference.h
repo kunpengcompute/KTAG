@@ -5,7 +5,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #define KTAG_LEGACY_INFERENCE_H
 
 #include <stdint.h>
-#include "ktag_feature_extract.h"
+#include "ktag_legacy_types.h"
 #include "ktag_export.h"
 #ifdef __cplusplus
 extern "C" {

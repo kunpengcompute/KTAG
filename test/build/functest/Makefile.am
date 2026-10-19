@@ -25,6 +25,7 @@ CXXFLAGS += -DLIB_KTAG_APPID_NAME=\"libktag_appidlib.so\"
 
 # Options for preprocessing stage, here are mainly header files.
 KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/plugins/traffic_features/
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/demo/
 CPPFLAGS += $(KTAG_APPID_DIR)
 
 # Flags passed to the C++ compiler.
@@ -46,7 +47,6 @@ LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
 				-lktag_appidlib \
 				-lktag_capture \
 				-lktag_feature \
-				-lktag_feature_compat \
 				-lktag_inference \
 				-lktag_inference_compat \
 				-L$(KTAG_APPID_OUTPUT_DIR)/plugins \
@@ -114,6 +114,7 @@ SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/statistics.
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/rawbow_token_dfa.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/http.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/token_histogram.cpp
+SOURCES += $(KTAG_APPID_modules_DIR)/tools/demo/feature_session.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.cpp
 
 OBJS    = $(foreach x,$(SRCEXTS), \
@@ -148,6 +149,7 @@ rrun:
 clean :
 	@-$(RM) $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.o $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.o.d
 	@-$(RM) $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o.d
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/feature_session.o $(KTAG_APPID_modules_DIR)/tools/demo/feature_session.o.d
 	@-$(RM) *.d *.a *.so
 	@-$(RM)	./$(PROGRAM) $(SRC_DEPS)
 	@find $(TEST_modules_DIR)/common/functest/ -name '*.o' -exec $(RM) {} \;

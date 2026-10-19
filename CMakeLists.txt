@@ -62,7 +62,7 @@ option(KTAG_BUILD_PROXY_FEATURES
        "Build the official proxy protocol Feature Provider plugin"
        ON)
 option(KTAG_BUILD_LEGACY_COMPAT
-       "Build the deprecated fixed-vector compatibility libraries"
+       "Build the retained fixed-vector inference and version libraries"
        ON)
 option(KTAG_ENABLE_DPDK_UB
        "Enable the optional DPDK UB transport in ktag_demo"
@@ -70,23 +70,20 @@ option(KTAG_ENABLE_DPDK_UB
 option(KTAG_ENABLE_DPDK
        "Build the optional DPDK poll-mode live capture backend" OFF)
 option(KTAG_INSTALL_LEGACY_COMPAT
-       "Install the deprecated fixed-vector compatibility libraries and headers"
+       "Install the retained fixed-vector inference and version libraries and headers"
        ON)
 
 if(KTAG_INSTALL_LEGACY_COMPAT AND NOT KTAG_BUILD_LEGACY_COMPAT)
     message(FATAL_ERROR
         "KTAG_INSTALL_LEGACY_COMPAT requires KTAG_BUILD_LEGACY_COMPAT")
 endif()
-if(KTAG_BUILD_LEGACY_COMPAT AND NOT KTAG_BUILD_FEATURE_PLUGINS)
-    message(FATAL_ERROR
-        "KTAG_BUILD_LEGACY_COMPAT requires KTAG_BUILD_FEATURE_PLUGINS because "
-        "the default compatibility constructor dynamically loads the official "
-        "Traffic Feature Plugin")
+if(KTAG_BUILD_TOOLS AND NOT KTAG_BUILD_FEATURE_PLUGINS)
+    message(FATAL_ERROR "KTAG_BUILD_TOOLS requires KTAG_BUILD_FEATURE_PLUGINS")
 endif()
 if(KTAG_BUILD_TOOLS AND NOT KTAG_BUILD_LEGACY_COMPAT)
     message(FATAL_ERROR
         "KTAG_BUILD_TOOLS currently requires KTAG_BUILD_LEGACY_COMPAT because "
-        "ktag_demo retains the legacy command paths")
+        "ktag_demo retains the fixed-vector inference command paths")
 endif()
 
 # Install under the unified KTAG_APPID layout and expose modern CMake imported
@@ -119,13 +116,11 @@ set(KTAG_PUBLIC_HEADERS
 install(FILES ${KTAG_PUBLIC_HEADERS}
         DESTINATION "${KTAG_INSTALL_INCLUDEDIR}")
 
-# The compatibility headers expose historical implementation types and have a
-# wider include dependency closure. Preserve that closure while the adapter is
-# retained; new integrations should use only the public ktag_*.h headers above.
+# The retained inference adapter exposes data-only types, never old extraction internals.
 if(KTAG_INSTALL_LEGACY_COMPAT)
-    install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/"
-            DESTINATION "${KTAG_INSTALL_INCLUDEDIR}"
-            FILES_MATCHING PATTERN "*.h")
+    install(FILES include/ktag_legacy_inference.h include/ktag_legacy_types.h
+                  include/ktag_core.h include/ktag_type.h
+            DESTINATION "${KTAG_INSTALL_INCLUDEDIR}")
 endif()
 
 configure_package_config_file(

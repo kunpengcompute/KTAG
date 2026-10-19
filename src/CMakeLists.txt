@@ -145,8 +145,7 @@ message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 # ============= 生成特征提取动态链接库 =============
 add_library(ktag_feature SHARED
     ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
-    ${PROJECT_SOURCE_DIR}/src/decode.cpp
-    ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/dns_observer.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_schema.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_batch.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/traffic_schema.cpp
@@ -156,7 +155,6 @@ add_library(ktag_feature SHARED
     ${PROJECT_SOURCE_DIR}/src/feature/feature_plugin_loader.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/domain_store.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_context.cpp
-    ${PROJECT_SOURCE_DIR}/src/rawbow_token_dfa.cpp
 )
 add_library(KTAG::feature ALIAS ktag_feature)
 
@@ -185,43 +183,6 @@ set_target_properties(ktag_feature PROPERTIES
     BUILD_RPATH "$ORIGIN"
     INSTALL_RPATH "$ORIGIN"
 )
-
-# Established fixed-vector public API. Its extraction entry points execute the
-# same Traffic Providers as the Schema API. Keep the old low-level algorithms
-# available until their behavior has been compared independently.
-set(KTAG_FIXED_VECTOR_FEATURE_SOURCES
-    ${PROJECT_SOURCE_DIR}/src/ktag_feature_extract.cpp
-    ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
-    ${PROJECT_SOURCE_DIR}/src/rawbow_token_dfa.cpp
-    ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
-)
-if(KTAG_BUILD_LEGACY_COMPAT)
-    add_library(ktag_feature_compat SHARED
-        ${KTAG_FIXED_VECTOR_FEATURE_SOURCES}
-    )
-
-    target_compile_definitions(ktag_feature_compat PRIVATE KTAG_BUILDING_DLL)
-
-    target_link_libraries(ktag_feature_compat PRIVATE
-        ktag_feature
-        pcap
-        Threads::Threads
-        ${CMAKE_DL_LIBS}
-    )
-
-    target_include_directories(ktag_feature_compat
-        PUBLIC
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
-        PRIVATE ${PROJECT_SOURCE_DIR}/
-    )
-    target_link_options(ktag_feature_compat PRIVATE "LINKER:-z,defs")
-    set_target_properties(ktag_feature_compat PROPERTIES
-        EXPORT_NAME feature_compat
-        BUILD_RPATH "$ORIGIN"
-        INSTALL_RPATH "$ORIGIN"
-    )
-endif()
 
 # ============= Schema-aware inference layer =============
 add_library(ktag_inference SHARED
@@ -303,20 +264,13 @@ if(ENABLE_BUILD_LIB AND KTAG_BUILD_LEGACY_COMPAT)
 
     target_compile_definitions(ktag_appidlib PRIVATE KTAG_BUILDING_DLL)
 
-    target_link_libraries(ktag_appidlib PRIVATE
-        pcap
-        ktag_feature
-        ktag_feature_compat
-        ktag_inference_compat
-        ${ONNXRUNTIME_LIB} 
-    )
 
     target_include_directories(ktag_appidlib PRIVATE
         ${PROJECT_SOURCE_DIR}/
         ${PROJECT_SOURCE_DIR}/include
         ${ONNXRUNTIME_INCLUDE_DIR}
     )
-    
+
     set_target_properties(ktag_appidlib PROPERTIES
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED ON
@@ -338,7 +292,7 @@ install(TARGETS ktag_capture ktag_feature ktag_inference
         RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
 
 if(KTAG_INSTALL_LEGACY_COMPAT AND KTAG_BUILD_LEGACY_COMPAT)
-    install(TARGETS ktag_feature_compat ktag_inference_compat
+    install(TARGETS ktag_inference_compat
             EXPORT KTAGTargets
             LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
             ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"

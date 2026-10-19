@@ -4,10 +4,10 @@ project(ktag_fuzz_test LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Fuzzing deliberately exercises the retained compatibility boundary. The
+# Fuzzing exercises the public Feature API and the dynamically loaded Traffic plugin. The
 # target is not meaningful without the product libraries, so fail during
 # configuration instead of creating an executable that later fails to link.
-find_library(KTAG_FEATURE_LIBRARY NAMES ktag_feature_compat PATHS
+find_library(KTAG_FEATURE_LIBRARY NAMES ktag_feature PATHS
     ${CMAKE_SOURCE_DIR}/../../output
     NO_DEFAULT_PATH
     REQUIRED
@@ -19,7 +19,7 @@ find_library(KTAG_INFERENCE_LIBRARY NAMES ktag_inference_compat PATHS
     REQUIRED
 )
 
-message(STATUS "Found ktag_feature_compat: ${KTAG_FEATURE_LIBRARY}")
+message(STATUS "Found ktag_feature: ${KTAG_FEATURE_LIBRARY}")
 message(STATUS "Found ktag_inference_compat: ${KTAG_INFERENCE_LIBRARY}")
 
 # 查找ONNX Runtime库
@@ -46,6 +46,8 @@ message(STATUS "Found ONNX Runtime: ${ONNX_RUNTIME_LIBRARY}")
 
 # 构建LibFuzzer目标
 add_executable(ktag_fuzzer ktag_fuzzer.cpp)
+target_compile_definitions(ktag_fuzzer PRIVATE
+    KTAG_FUZZ_FEATURE_PLUGIN="${CMAKE_SOURCE_DIR}/../../output/plugins/libktag_traffic_features.so")
 target_include_directories(ktag_fuzzer PRIVATE
     ${CMAKE_SOURCE_DIR}/../../include
 )

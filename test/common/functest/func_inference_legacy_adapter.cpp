@@ -1,3 +1,5 @@
+#include <pcap/pcap.h>
+#include "feature_session.h"
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
@@ -129,7 +131,7 @@ bool load_legacy_feature_csv(
 bool create_synthetic_legacy_features(
     std::vector<feature_vector> *features)
 {
-    feature_extractor *extractor = extractor_init(DLT_EN10MB);
+    ktag_demo_feature_session *extractor = ktag_demo_feature_session::create(DLT_EN10MB);
     if (extractor == nullptr) {
         return false;
     }
@@ -139,15 +141,13 @@ bool create_synthetic_legacy_features(
         timestamp.tv_sec = index;
         feature_vector ignored{};
         int has_feature = 0;
-        if (process_packet(
-                extractor,
-                frame.data(),
+        if (extractor->process(frame.data(),
                 static_cast<uint32_t>(frame.size()),
                 &timestamp,
                 &ignored,
-                &has_feature) != EXTRACTOR_SUCCESS ||
+                &has_feature) != KTAG_SUCCESS ||
             has_feature != 0) {
-            extractor_destroy(extractor);
+            delete extractor;
             return false;
         }
     }
@@ -157,9 +157,9 @@ bool create_synthetic_legacy_features(
     list.vectors = &result;
     list.capacity = 1U;
     const bool success =
-        extractor_finalize(extractor, &list) == EXTRACTOR_SUCCESS &&
+        extractor->flush(&list) == KTAG_SUCCESS &&
         list.count == 1U;
-    extractor_destroy(extractor);
+    delete extractor;
     if (success) {
         features->push_back(result);
     }
@@ -168,7 +168,7 @@ bool create_synthetic_legacy_features(
 
 } // namespace
 
-TEST(KTAGInferenceLegacyAdapter, ConvertedPackageMatchesLegacyPrediction)
+TEST(KTAGInferenceLegacyAdapter, ConvertedPackageMatchesDemoBridgePrediction)
 {
     const char *legacy_config_path = std::getenv("KTAG_LEGACY_CONFIG");
     const char *model_package_path =

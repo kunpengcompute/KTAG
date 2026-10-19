@@ -40,10 +40,6 @@ function ktag_appid_build()
 
     cmake --build "${OBJ_DIR}" --parallel "${BUILD_JOBS:-16}"
 
-    if [ ! -f "${OUTPUT_DIR}/libktag_feature_compat.so" ]; then
-        echo "build failed: ${OUTPUT_DIR}/libktag_feature_compat.so was not generated"
-        exit 1
-    fi
     if [ ! -f "${OUTPUT_DIR}/libktag_capture.so" ]; then
         echo "build failed: ${OUTPUT_DIR}/libktag_capture.so was not generated"
         exit 1
@@ -115,13 +111,8 @@ function ktag_appid_build()
     fi
 
     if command -v readelf >/dev/null 2>&1; then
-        if readelf -d "${OUTPUT_DIR}/libktag_feature.so" 2>/dev/null | \
-           grep -q "libktag_feature_compat"; then
-            echo "build failed: new Feature layer depends on its legacy adapter"
-            exit 1
-        fi
         if readelf -d "${OUTPUT_DIR}/libktag_inference.so" 2>/dev/null | \
-           grep -qE "libktag_feature_compat|libktag_inference_compat"; then
+           grep -q "libktag_inference_compat"; then
             echo "build failed: new Inference layer depends on a legacy adapter"
             exit 1
         fi
@@ -130,7 +121,6 @@ function ktag_appid_build()
     echo "build success"
     echo "  library: ${OUTPUT_DIR}/libktag_capture.so"
     echo "  library: ${OUTPUT_DIR}/libktag_feature.so"
-    echo "  library: ${OUTPUT_DIR}/libktag_feature_compat.so"
     echo "  library: ${OUTPUT_DIR}/libktag_inference.so"
     echo "  library: ${OUTPUT_DIR}/libktag_inference_compat.so"
     echo "  demo:    ${OUTPUT_DIR}/ktag_demo"

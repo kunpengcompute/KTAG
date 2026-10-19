@@ -1,5 +1,4 @@
 if(NOT TARGET ktag_capture OR NOT TARGET ktag_feature OR
-   NOT TARGET ktag_feature_compat OR
    NOT TARGET ktag_inference OR NOT TARGET ktag_inference_compat)
     message(FATAL_ERROR "ktag_demo must be built as part of the KTAG source tree")
 endif()
@@ -22,6 +21,7 @@ get_filename_component(
 add_executable(
     ktag_demo
     main.cpp
+    feature_session.cpp
     ktag_file_writer.cpp
     online_inference.cpp
     utils.cpp
@@ -46,7 +46,6 @@ target_include_directories(ktag_demo PRIVATE
 target_link_libraries(ktag_demo PRIVATE
     ktag_capture
     ktag_feature
-    ktag_feature_compat
     ktag_inference
     ktag_inference_compat
     ${YAML_CPP_LIB}
@@ -103,6 +102,7 @@ set_target_properties(ktag_example_feature_plugin PROPERTIES
     INSTALL_RPATH "$ORIGIN/.."
 )
 add_dependencies(ktag_demo ktag_example_feature_plugin)
+add_dependencies(ktag_demo ktag_traffic_features)
 if(TARGET ktag_proxy_features)
     add_dependencies(ktag_demo ktag_proxy_features)
 endif()
