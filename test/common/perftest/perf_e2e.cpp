@@ -2,7 +2,8 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include "ktag_test.h"
-#include "feature_extract.h"
+#include "legacy/statistics.h"
+using namespace ktag_traffic_features::legacy;
 
 TEST(KTAG_PERFTEST_E2E, TimeTest)
 {

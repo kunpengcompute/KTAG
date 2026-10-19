@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-#include "rawbow_token_dfa.h"
+#include "legacy/rawbow_token_dfa.h"
 
 namespace {
 

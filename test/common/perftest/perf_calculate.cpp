@@ -2,7 +2,8 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include "ktag_test.h"
-#include "feature_extract.h"
+#include "legacy/statistics.h"
+using namespace ktag_traffic_features::legacy;
 
 size_t getFileSize(const char *fileName) {
 
@@ -44,18 +45,18 @@ TEST(KTAG_PERFTEST_E2E, CALCULATE_STATIC_INFO)
 
     std::mt19937 gen(std::random_device{}());
     std::uniform_int_distribution<uint32_t> dist(0, UINT32_MAX);
-    KTAGResult ret;
+    bool ret;
     for (size_t i = 0; i < test_data.size(); ++i) {
         test_data[i] = dist(gen);
     }
-    
+
     statistics_info result;
     clock_gettime(CLOCK_REALTIME, &start_sys);
     for (int i = 0; i < 1000; ++i) {
         ret = cal_statistics_info(test_data, result);
     }
     clock_gettime(CLOCK_REALTIME, &end_sys);
-    EXPECT_EQ(ret, KTAG_STS_NO_ERR);
+    EXPECT_TRUE(ret);
     double time_sys = calculate_time_ms(start_sys, end_sys);
     printf("Performance of cal_statistics_info : %.6f ms\n", time_sys);
 }

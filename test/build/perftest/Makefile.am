@@ -21,6 +21,8 @@ CXXFLAGS += -DLIB_KTAG_APPID_NAME=\"libktag_appidlib.so\"
 
 
 # Options for preprocessing stage, here are mainly header files.
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/plugins/traffic_features/
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/demo/
 CPPFLAGS += $(KTAG_APPID_DIR)
 
 # Flags passed to the C++ compiler.
@@ -35,7 +37,6 @@ LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
                 -L$(KTAG_APPID_OUTPUT_DIR) \
                 -lktag_appidlib \
 				-lktag_feature \
-                -lktag_feature_compat \
 				-lktag_inference_compat \
 				-L$(ONNXRUNTIME_LIB_DIR) \
 				-lonnxruntime
@@ -57,6 +58,8 @@ SRCEXTS   := .c .cc .cpp
 SOURCES_MUD = $(foreach d,$(SRC_FILES_DIRS),$(wildcard $(addprefix $(d)/*,$(SRCEXTS))))
 SOURCES = $(shell echo $(SOURCES_MUD) | \
 			awk -F ' ' '{for(i=1;i<=NF;i++)a[i]=$$i}END{for(i=1;i<=asort(a);i++)printf a[i]" "}')
+
+SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/statistics.cpp
 
 OBJS    = $(foreach x,$(SRCEXTS), \
       $(patsubst %$(x), %.o, $(filter %$(x),$(SOURCES))))
@@ -88,6 +91,7 @@ rrun:
 	env LD_LIBRARY_PATH=/usr/local/ksl/lib/:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./ktag_appid_perftest --gtest_filter=$(FILTER)
 
 clean :
+	@-$(RM) $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o.d
 	@-$(RM) *.d *.a *.so
 	@-$(RM)	./$(PROGRAM) $(SRC_DEPS)
 	@find $(TEST_modules_DIR)/common/perftest/ -name '*.o' -exec $(RM) {} \;
