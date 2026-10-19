@@ -115,6 +115,7 @@ SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/rawbow_toke
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/http.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/token_histogram.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/tools/demo/feature_session.cpp
+SOURCES += $(KTAG_APPID_modules_DIR)/tools/demo/inference_session.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.cpp
 
 OBJS    = $(foreach x,$(SRCEXTS), \
@@ -150,6 +151,7 @@ clean :
 	@-$(RM) $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.o $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.o.d
 	@-$(RM) $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o.d
 	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/feature_session.o $(KTAG_APPID_modules_DIR)/tools/demo/feature_session.o.d
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/inference_session.o $(KTAG_APPID_modules_DIR)/tools/demo/inference_session.o.d
 	@-$(RM) *.d *.a *.so
 	@-$(RM)	./$(PROGRAM) $(SRC_DEPS)
 	@find $(TEST_modules_DIR)/common/functest/ -name '*.o' -exec $(RM) {} \;
