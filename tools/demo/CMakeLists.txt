@@ -22,6 +22,7 @@ add_executable(
     ktag_demo
     main.cpp
     feature_session.cpp
+    inference_session.cpp
     ktag_file_writer.cpp
     online_inference.cpp
     utils.cpp
