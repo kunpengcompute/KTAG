@@ -6,8 +6,8 @@ endif()
 add_library(ktag_traffic_features SHARED
     traffic_feature_plugin.cpp
     traffic_provider_common.cpp
-    metadata_provider.cpp
-    tuple_provider.cpp
+    legacy/metadata_provider.cpp
+    legacy/tuple_provider.cpp
     traffic_statistics_provider.cpp
     rawbow_provider.cpp
 )

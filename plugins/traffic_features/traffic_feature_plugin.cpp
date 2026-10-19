@@ -5,10 +5,10 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "ktag_traffic_features.h"
 
 #include "feature/traffic_contract.h"
-#include "metadata_provider.h"
+#include "legacy/metadata_provider.h"
 #include "rawbow_provider.h"
 #include "traffic_statistics_provider.h"
-#include "tuple_provider.h"
+#include "legacy/tuple_provider.h"
 #include <array>
 
 namespace {
