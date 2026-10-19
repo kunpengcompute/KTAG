@@ -45,14 +45,11 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 | 测试源文件 | 覆盖内容 |
 |---|---|
 | `func_capture.cpp` | Capture 层：规范化 Flow Key、正反流量归入同一流、IPv6 扩展头与分片边界、包缓冲和设备接口 |
-| `func_decode.cpp` | 旧解码器：TCP/UDP/DNS/TLS SNI/ClientHello/CipherSuite 解析 |
 | `func_domain_store.cpp` | Domain Store/Cache：并发写入、TTL、增量同步和版本失效 |
-| `func_domain_name_hash.cpp` | 旧域名哈希表接口 |
 | `func_feature_context.cpp` | Feature Context：流生命周期、UDP 报文上限、DNS AAAA 域名关联、线程所有权、与旧固定向量输出一致性 |
-| `func_feature_extract.cpp` | 旧特征计算函数 |
+| `func_feature_extract.cpp` | 插件冻结统计算法 |
 | `func_feature_provider.cpp` | Provider 回调和 Fill Zero 策略（需 `internal=y`，使用内部头文件） |
 | `func_feature_schema.cpp` | Schema 组合与维度展开 |
-| `func_flow_hash.cpp` | Flow Key 哈希 |
 | `func_inference.cpp` | Inference Context 基本流程 |
 | `func_inference_contract.cpp` | 模型包与 Schema 契约校验 |
 | `func_inference_legacy_adapter.cpp` | 旧推理接口适配 |

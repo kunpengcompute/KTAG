@@ -15,7 +15,7 @@
 | `ktag_feature.h` | 组流、Schema、Provider、Domain Store、Feature Batch | 推荐 |
 | `ktag_feature_plugin.h` | 动态 Feature Provider 插件 ABI | 按需 |
 | `ktag_inference.h` | 模型包校验和 Schema-aware 批量推理 | 推荐 |
-| `ktag_feature_extract.h`、`ktag_legacy_inference.h` | 历史固定向量接口 | 仅兼容 |
+| `ktag_legacy_inference.h`、`ktag_legacy_types.h` | 暂时保留的固定向量推理接口及数据类型 | 仅兼容 |
 | `ktag_core.h`、`ktag_type.h` | 历史产品版本查询及其返回类型 | 仅兼容 |
 
 运行时对应三个共享库：`libktag_capture.so`、`libktag_feature.so`、`libktag_inference.so`。构建产物位于仓库 `output/` 目录，构建方式见《[快速上手](quick_start.md)》。
@@ -2269,48 +2269,26 @@ Capture open → Registry/Schema freeze → Feature Context/Batch
 
 处理 EOF 时，先 `ktag_feature_flush()`，再按依赖反向销毁：Prediction Batch → Inference Context → Capture → Feature Context → Feature Batch → Schema → Registry。生产系统还应定期调用 `ktag_feature_expire()`、处理 `KTAG_STATUS_TIMEOUT`、检查状态码并落实队列背压与资源监控。
 
-## 8 历史兼容 API（已弃用）
+## 8 冻结特征契约与暂时保留的兼容 API
 
-### 8.1 兼容性开关
+### 8.1 冻结特征提取
 
-`ktag_feature_extract.h`、`ktag_legacy_inference.h` 保留历史固定向量接口的数据布局与处理行为，编译开关 `KTAG_LEGACY_FEATURE_COMPAT_AVAILABLE` 与 `KTAG_LEGACY_INFERENCE_COMPAT_AVAILABLE` 当前均为 `1`。命名统一后不再提供早期名称的头文件、库名、类型和版本查询符号；调用方需要同步更新名称、构建参数和安装路径，并重新编译。全部接口标记 `KTAG_DEPRECATED`，新代码必须使用现代接口。
+旧特征提取接口和独立特征兼容库已经移除。特征提取统一使用公共 Feature API，
+由 `libktag_traffic_features.so` 的 Provider 执行。`plugins/traffic_features/legacy/`
+保存冻结的统计算法、HTTP 处理、RawBoW 和 DFA 分词规则。
 
-### 8.2 旧特征提取 API（ktag_feature_extract.h）
+调用顺序为：创建 Registry → 加载 Traffic Feature Plugin → 构造 Schema → 创建
+Feature Context/Batch → `ktag_feature_process_packet` → `ktag_feature_flush`。
+需要历史流生命周期时，设置 `KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT`。
+RawBoW 文本通过开启 `collect_annotations` 后读取 Batch 注解获得；不进入模型输入。
+冻结 Schema 继续使用 `ktag_legacy_v1`，每条记录包含 354 个值。
 
-返回值约定：`EXTRACTOR_SUCCESS`（`0`）/ `EXTRACTOR_ERROR`（`-1`）。
+### 8.2 固定向量数据桥接
 
-```c
-feature_extractor *extractor_init(int link_type);
-feature_extractor *extractor_init_with_domain_store(
-    int link_type, ktag_domain_store *domain_store);
-void extractor_destroy(feature_extractor *extractor);
-int process_packet(feature_extractor *extractor, const unsigned char *packet,
-                   uint32_t packet_len, const struct timeval *ts,
-                   feature_vector *features, int *has_feature);
-int process_packet_with_rawbow(feature_extractor *extractor,
-                   const unsigned char *packet, uint32_t packet_len,
-                   const struct timeval *ts, feature_vector *features,
-                   rawbow *rawbows, int *has_feature);
-int extractor_finalize(feature_extractor *extractor,
-                       feature_vector_list *features);
-int extractor_finalize_with_rawbow(feature_extractor *extractor,
-                       feature_vector_list *features, rawbow_list *rawbows);
-int extractor_get_statistics(feature_extractor *extractor, statistics *stats);
-void extractor_reset_statistics(feature_extractor *extractor);
-```
-
-| API | 说明 |
-|---|---|
-| `extractor_init` | 按链路层类型创建旧提取器。 |
-| `extractor_init_with_domain_store` | 创建共享 Domain Store 的旧提取器。 |
-| `extractor_destroy` | 销毁提取器。 |
-| `process_packet` | 处理一个原始报文；仅当流结束时通过 `has_feature` 输出单条向量。 |
-| `process_packet_with_rawbow` | 同上，并额外输出 RawBoW。 |
-| `extractor_finalize` / `_with_rawbow` | 输出全部剩余流。 |
-| `extractor_get_statistics` | 查询旧统计（`total_packets`/`total_bytes`/`decoded_packets`/`extracted_flows`）。 |
-| `extractor_reset_statistics` | 重置统计。 |
-
-数据布局约定：`feature_vector.features[0]` 是 Flow ID，`features[1..354]` 是特征值，`FEATURES_NUM` 为 355。新 Schema 模型包不应继续依赖这一布局。
+`ktag_legacy_types.h` 仅保留旧推理和文件格式使用的数据类型，不包含提取算法或
+提取器接口。`feature_vector` 仍有 355 个浮点槽位：Feature Batch 的 354 个值按原顺序
+写入前 354 个槽位，最后一个保留槽位为零。Flow ID 位于第 0 个槽位。
+Demo 的私有 C++ Session 负责上述转换，不构成 SDK 公共接口或独立动态库。
 
 ### 8.3 旧推理 API（ktag_legacy_inference.h）
 
@@ -2349,18 +2327,17 @@ KTAGResult KTAG_GetProductVersion(KTAGProVersion *packageInfo);
 | `KTAG_STS_NO_ERR` | 查询成功。 |
 | `KTAG_STS_NULL_PTR_ERR` | 指针为空。 |
 
-### 8.5 迁移对照表
+### 8.5 接入方式
 
-| 历史接口 | 现代替代 |
+| 能力 | 接口 |
 |---|---|
-| `extractor_init` / `extractor_init_with_domain_store` | `ktag_feature_create`（含 `shared_domain_store` 配置） |
-| `process_packet` | `ktag_feature_process_packet` |
-| `process_packet_with_rawbow` | Provider 回调 + `ktag_flow_view_get_rawbow_*` |
-| `extractor_finalize` / `_with_rawbow` | `ktag_feature_flush` |
-| `extractor_get_statistics` | `ktag_feature_get_statistics` |
-| `extractor_reset_statistics` | 重建 Feature Context |
-| `inference_init` / `inference_predict` / `inference_destroy` | `ktag_inference_create` / `ktag_inference_predict` / `ktag_inference_destroy` + 模型包 |
-| `KTAG_GetProductVersion` | 无对应现代运行时接口 |
+| 创建特征运行上下文 | `ktag_feature_create` |
+| 处理报文、读取结果 | `ktag_feature_process_packet` 与 Feature Batch API |
+| 输出剩余流 | `ktag_feature_flush` |
+| 查询特征运行统计 | `ktag_feature_get_statistics` |
+| 新模型推理 | `ktag_inference_create` / `ktag_inference_predict` / `ktag_inference_destroy` |
+| 暂时保留的旧模型推理 | `ktag_legacy_inference.h`，由 `KTAG_BUILD_LEGACY_COMPAT` 控制 |
+| 历史产品元数据 | `KTAG_GetProductVersion` |
 
 ## 9 协议边界与限制
 

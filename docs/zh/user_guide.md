@@ -44,15 +44,15 @@ sh /opt/KTAG/build.sh
 /opt/KTAG/output/libktag_capture.so
 /opt/KTAG/output/libktag_feature.so
 /opt/KTAG/output/libktag_inference.so
-/opt/KTAG/output/libktag_feature_compat.so
 /opt/KTAG/output/libktag_inference_compat.so
+/opt/KTAG/output/plugins/libktag_traffic_features.so
 /opt/KTAG/output/plugins/libktag_proxy_features.so
 /opt/KTAG/output/python/training.py
 /opt/KTAG/output/python/evaluation.py
 ```
 
-其中 `libktag_feature_compat.so` 和 `libktag_inference_compat.so` 是旧固定向量接口的
-兼容库；新 Pipeline 使用 `libktag_capture.so`、`libktag_feature.so`、
+`libktag_inference_compat.so` 暂时保留旧模型推理；特征提取统一使用
+Traffic Feature Plugin。新 Pipeline 使用 `libktag_capture.so`、`libktag_feature.so`、
 `libktag_inference.so`。代理分类还需要
 `/opt/KTAG/output/plugins/libktag_proxy_features.so`。
 

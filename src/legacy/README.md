@@ -1,14 +1,11 @@
-# 旧版本兼容实现
+# 暂时保留的旧推理与版本查询
 
-本目录中的实现文件仅为保留 KTAG 固定向量兼容边界而存在：
+本目录只包含：
 
-- `../ktag_feature_extract.cpp`、`../flow_hash.cpp`、`../rawbow_token_dfa.cpp`
-  和 `../feature_extract.cpp` 实现
-  `libktag_feature_compat.so`；
-- `ktag_legacy_inference.cpp` 和 `utils.cpp` 实现
-  `libktag_inference_compat.so`；
-- `getProductVersion.c` 属于历史聚合库。
+- `ktag_legacy_inference.cpp` 和 `utils.cpp`：固定向量旧模型推理；
+- `getProductVersion.c`：产品版本查询。
 
-新的 Capture、Feature 和 Inference 代码不得引用这些实现文件，也不得链接上述任一
-兼容库。命名迁移保留固定向量的数据布局和处理行为，调用方需要更新名称并重新
-编译；适配层本身的移除仍需项目所有者明确授权。
+旧特征提取接口与独立特征兼容库已移除。冻结特征算法位于
+`plugins/traffic_features/legacy/`，统一编译到 `libktag_traffic_features.so`。
+Capture、公共 Feature 和公共 Inference 层不得依赖本目录的旧推理实现。
+旧推理仅通过 `ktag_legacy_types.h` 使用数据类型，不再引用旧提取器头文件。

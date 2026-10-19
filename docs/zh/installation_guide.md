@@ -78,20 +78,22 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 sh /opt/KTAG/build.sh
 ```
 
-完整构建会同时生成三层公共库、旧接口兼容库、demo 和 Feature Plugin。主要产物如下：
+完整构建会同时生成三层公共库、暂时保留的旧推理库、demo 和 Feature Plugin。主要产物如下：
 
 ```
 /opt/KTAG/output/libktag_capture.so
 /opt/KTAG/output/libktag_feature.so
 /opt/KTAG/output/libktag_inference.so
-/opt/KTAG/output/libktag_feature_compat.so
 /opt/KTAG/output/libktag_inference_compat.so
 /opt/KTAG/output/ktag_demo
 /opt/KTAG/output/plugins/libktag_example_feature_plugin.so
+/opt/KTAG/output/plugins/libktag_traffic_features.so
 /opt/KTAG/output/plugins/libktag_proxy_features.so
 ```
 
-`libktag_feature_compat.so` 和 `libktag_inference_compat.so` 用于兼容旧固定向量接口；新接入推荐使用 Capture、Feature、Inference 三层公共库。代理分类需要构建并加载 `libktag_proxy_features.so`。
+
+冻结特征算法只由 Traffic Feature Plugin 提供。旧特征接口及独立特征兼容库已移除；
+升级后应清理原构建目录和产物，再重新构建。旧推理和版本查询暂时保留。
 
 相关构建选项：
 
@@ -105,12 +107,12 @@ cmake --build /opt/KTAG/build
 
 - `KTAG_BUILD_TOOLS`：构建 `ktag_demo` 和示例插件。
 - `KTAG_BUILD_PROXY_FEATURES`：构建正式代理 Feature Plugin，默认开启。
-- `KTAG_INSTALL_LEGACY_COMPAT`：安装固定向量兼容库、头文件和依赖兼容层的 demo，默认开启。
+- `KTAG_INSTALL_LEGACY_COMPAT`：安装旧推理库、数据头文件和 demo，默认开启。
 
 ## 命名迁移与安装布局
 
 项目中的头文件、接口、构建变量、组件名称和命令行程序已统一使用 KTAG 命名。
-固定向量兼容层保留原有数据布局与处理行为，但不再提供早期名称的别名。
+冻结特征算法统一位于 Traffic Feature Plugin；旧提取接口和独立特征兼容库已移除。
 升级现有项目时，需要更新头文件引用、类型和版本查询函数、链接库、CMake 参数、
 环境变量及运行脚本，并重新编译。Python 训练和评估入口分别为 `KTAG_Train` 和
 `KTAG_Evaluation`。
@@ -126,8 +128,8 @@ cmake --build /opt/KTAG/build
 ```
 
 仓外 CMake 工程继续通过 `find_package(KTAG CONFIG REQUIRED)` 和 `KTAG::capture`、
-`KTAG::feature`、`KTAG::inference` 集成。固定向量兼容库对应
-`KTAG::feature_compat` 和 `KTAG::inference_compat`。
+`KTAG::feature`、`KTAG::inference` 集成。暂时保留的旧推理库对应
+`KTAG::inference_compat`；特征提取统一使用公共 Feature API 和 Traffic Feature Plugin。
 
 新安装不会自动清理早期版本的安装目录及环境配置。已安装早期版本时，应在切换
 源码前使用对应版本的卸载入口清理原安装，再构建并安装当前版本。

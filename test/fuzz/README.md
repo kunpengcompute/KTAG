@@ -8,22 +8,20 @@ Fuzz 测试提供一个 LibFuzzer 目标：
 ktag_fuzzer
 ```
 
-它覆盖旧兼容接口边界：
+它通过公共 Feature API 覆盖插件特征提取：
 
-- `extractor_init`、`process_packet`、`process_packet_with_rawbow`；
-- `extractor_finalize`、`extractor_finalize_with_rawbow`；
-- `extractor_get_statistics`、`extractor_reset_statistics`；
+- Feature Context 的创建、报文处理、Flush 和销毁；
+- Traffic Feature Plugin 的加载、Provider 回调和 RawBoW 注解；
 - 可选的旧 `inference_init/inference_predict`；
-- 空指针、随机链路类型和随机长度输入。
+- Ethernet/Linux SLL 的随机报文和截断输入。
 
-输入以 Ethernet 或 Linux SLL 链路的 IPv4 候选帧为主。
+输入按 Ethernet 或 Linux SLL 链路解释。
 
 ## 2. 环境要求
 
 - Clang/Clang++，并包含 LibFuzzer；
 - CMake 3.16.3 或更高版本；
-- 已构建 `/opt/KTAG/output/libktag_feature_compat.so` 和
-  `/opt/KTAG/output/libktag_inference_compat.so`；
+- 已构建公共 Feature 库、`plugins/libktag_traffic_features.so` 和旧推理库；
 - yaml-cpp 0.8.0；
 - ONNX Runtime 1.22.0。
 

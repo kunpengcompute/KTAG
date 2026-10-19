@@ -26,7 +26,6 @@ sh /opt/KTAG/build.sh
 ```text
 /opt/KTAG/output/libktag_capture.so
 /opt/KTAG/output/libktag_feature.so
-/opt/KTAG/output/libktag_feature_compat.so
 /opt/KTAG/output/libktag_inference.so
 /opt/KTAG/output/libktag_inference_compat.so
 /opt/KTAG/output/ktag_demo
