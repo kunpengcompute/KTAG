@@ -27,7 +27,6 @@ sh /opt/KTAG/build.sh
 /opt/KTAG/output/libktag_capture.so
 /opt/KTAG/output/libktag_feature.so
 /opt/KTAG/output/libktag_inference.so
-/opt/KTAG/output/libktag_inference_compat.so
 /opt/KTAG/output/ktag_demo
 /opt/KTAG/output/plugins/libktag_example_feature_plugin.so
 /opt/KTAG/output/plugins/libktag_proxy_features.so
@@ -67,12 +66,26 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 /opt/KTAG/output/ktag_demo -e /opt/KTAG/tools/demo/proxy_config.yaml
 ```
 
-新的 pipeline 为可选启用。若 YAML 中缺少 `pipeline` 块或设置
-`pipeline.enabled: false`，则保留旧推理路径。应用任务使用
+新的 pipeline 为可选启用。若 YAML 中设置
+`pipeline.enabled: false`，则保留历史命令的调度和输出格式，推理仍调用公共 Inference API。应用任务使用
 `/opt/KTAG/tools/demo/config.yaml`，代理任务使用
 `/opt/KTAG/tools/demo/proxy_config.yaml`；其中的 `model_package_path` 必须指向与
 Schema 匹配的模型包。插件 ABI 见《[API 参考](../docs/zh/api_reference.md)》，代理
 Schema 的详细约定见《[用户指南](../docs/zh/user_guide.md)》。
+
+历史入口同样要求 `pipeline.model_package_path`，路径相对于 YAML 文件解析。
+`--pipeline-mode legacy` 保留 `-m 0/1/2` 的单流、批量和文件调度以及历史 CSV/JSON
+格式；列选择、标准化和包数过滤统一由模型包控制，修改旧顶层 `columns_to_remove`、
+`filter_packets` 或 `onnx_log_level` 后应重新生成模型包。已有 ONNX/Scaler 可转换：
+
+```bash
+python3 /opt/KTAG/tools/model_package/create_legacy_package.py \
+  --config /opt/KTAG/tools/demo/config.yaml \
+  --output /opt/KTAG/result/legacy_model_package
+```
+
+Demo 不再依赖旧推理库。没有外部旧 C 接口调用者时，可同时设置
+`-DKTAG_BUILD_LEGACY_COMPAT=OFF -DKTAG_INSTALL_LEGACY_COMPAT=OFF`，仍可构建并安装 Demo。
 
 同一份完整 YAML 可保持 `pipeline.enabled: false` 以默认走旧路径，并在某次调用时
 临时启用某种拓扑：

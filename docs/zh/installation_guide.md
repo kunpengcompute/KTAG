@@ -107,7 +107,7 @@ cmake --build /opt/KTAG/build
 
 - `KTAG_BUILD_TOOLS`：构建 `ktag_demo` 和示例插件。
 - `KTAG_BUILD_PROXY_FEATURES`：构建正式代理 Feature Plugin，默认开启。
-- `KTAG_INSTALL_LEGACY_COMPAT`：安装旧推理库、数据头文件和 demo，默认开启。
+- `KTAG_INSTALL_LEGACY_COMPAT`：安装可选旧推理库、版本库及兼容头文件，默认开启；Demo 的安装不依赖此选项。
 
 ## 命名迁移与安装布局
 

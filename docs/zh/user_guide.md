@@ -44,16 +44,15 @@ sh /opt/KTAG/build.sh
 /opt/KTAG/output/libktag_capture.so
 /opt/KTAG/output/libktag_feature.so
 /opt/KTAG/output/libktag_inference.so
-/opt/KTAG/output/libktag_inference_compat.so
 /opt/KTAG/output/plugins/libktag_traffic_features.so
 /opt/KTAG/output/plugins/libktag_proxy_features.so
 /opt/KTAG/output/python/training.py
 /opt/KTAG/output/python/evaluation.py
 ```
 
-`libktag_inference_compat.so` 暂时保留旧模型推理；特征提取统一使用
-Traffic Feature Plugin。新 Pipeline 使用 `libktag_capture.so`、`libktag_feature.so`、
-`libktag_inference.so`。代理分类还需要
+Demo 的全部推理入口（包括 `--pipeline-mode legacy`）统一使用 `libktag_capture.so`、
+`libktag_feature.so` 和 `libktag_inference.so`；特征提取统一使用 Traffic Feature Plugin。
+可选的 `libktag_inference_compat.so` 只供外部旧 C 接口调用者使用，Demo 不再依赖它。代理分类还需要
 `/opt/KTAG/output/plugins/libktag_proxy_features.so`。
 
 确认产物存在：
@@ -291,8 +290,8 @@ model_package_path/
 
 ### 6.1 应用分类
 
-`config.yaml` 默认保留旧推理路径。显式指定新 Pipeline Mode 会为本次运行启用新
-Pipeline：
+`config.yaml` 默认启用 `feature_parallel`。显式指定 Pipeline Mode 可以为本次运行选择
+其他调度方式：
 
 ```bash
 /opt/KTAG/output/ktag_demo \
@@ -306,6 +305,12 @@ Pipeline：
 
 即使 YAML 的 `pipeline.enabled: false`，也可通过 `--pipeline-mode` 仅为本次调用
 启用新 Pipeline。
+
+`--pipeline-mode legacy` 只保留应用分类的历史调度和 CSV/JSON 格式，推理同样调用
+公共 Inference API，并且必须设置 `pipeline.model_package_path`。该路径相对于 YAML
+文件解析；`-m 0/1/2` 分别保留单流、批量、文件往返模式。旧 ONNX/Scaler 可通过
+`tools/model_package/create_legacy_package.py` 转换；列选择、标准化和包数过滤均以
+生成的模型包为准，修改旧 YAML 顶层预处理字段后需要重新生成模型包。
 
 ### 6.2 代理分类
 
@@ -355,7 +360,7 @@ Pipeline：
 
 | 模式 | 说明 | 线程约束 |
 |---|---|---|
-| `legacy` | 保留旧在线推理路径 | 不接受新 Pipeline 线程参数 |
+| `legacy` | 保留历史调度和输出格式，推理改用公共 Inference API | 需要应用模型包，不接受新 Pipeline 线程参数 |
 | `single_thread` | Capture、Feature、Inference 串行执行 | Feature/Inference 均为 1 |
 | `staged` | 分阶段队列执行 | Feature/Inference 均为 1 |
 | `feature_parallel` | 多 Feature Worker，单 Inference Worker | `-n` 可大于 1 |
