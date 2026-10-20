@@ -26,12 +26,9 @@ typedef struct {
     double pcap_read_time;
     /* Parallel stages use the busiest worker's compute time. */
     double feature_extraction_time;
-    /* Slowest worker lifetime, including queue waits and backpressure. */
-    double feature_elapsed_time;
     /* Sum of compute time across all Feature workers (CPU-seconds). */
     double feature_cpu_time;
     double inference_time;
-    double inference_elapsed_time;
     /* Sum of compute time across all Inference workers (CPU-seconds). */
     double inference_cpu_time;
     double file_io_time;
