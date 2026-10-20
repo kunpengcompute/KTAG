@@ -8,3 +8,6 @@
 `packet_decode_internal.cpp` 和 `packet_decode_internal.h` 提供 Capture 与 Feature
 共用的有界 L2/L3/L4 解码实现。头文件仅供库内部使用；目录迁移不改变
 现有库的组织方式或公共接口。
+
+版本库由 `ENABLE_BUILD_LIB` 控制构建和安装，与模型推理独立；
+`sh build.sh -lib` 启用该目标。

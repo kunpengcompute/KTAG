@@ -48,17 +48,11 @@ function ktag_appid_build()
         echo "build failed: ${OUTPUT_DIR}/libktag_feature.so was not generated"
         exit 1
     fi
-    if grep -q '^KTAG_BUILD_LEGACY_COMPAT:BOOL=ON$' "${OBJ_DIR}/CMakeCache.txt" &&
-       [ ! -f "${OUTPUT_DIR}/libktag_inference_compat.so" ]; then
-        echo "build failed: ${OUTPUT_DIR}/libktag_inference_compat.so was not generated"
-        exit 1
-    fi
     if [ ! -f "${OUTPUT_DIR}/libktag_inference.so" ]; then
         echo "build failed: ${OUTPUT_DIR}/libktag_inference.so was not generated"
         exit 1
     fi
     if [[ "${COVERAGE_OPTION}" == *"-DENABLE_BUILD_LIB=ON"* ]] &&
-       grep -q '^KTAG_BUILD_LEGACY_COMPAT:BOOL=ON$' "${OBJ_DIR}/CMakeCache.txt" &&
        [ ! -f "${OUTPUT_DIR}/libktag_appidlib.so" ]; then
         echo "build failed: ${OUTPUT_DIR}/libktag_appidlib.so was not generated"
         exit 1
@@ -112,23 +106,10 @@ function ktag_appid_build()
         done
     fi
 
-    if command -v readelf >/dev/null 2>&1; then
-        for artifact in libktag_inference.so ktag_demo; do
-            if readelf -d "${OUTPUT_DIR}/${artifact}" 2>/dev/null | \
-               grep -q "libktag_inference_compat"; then
-                echo "build failed: ${artifact} depends on a legacy inference adapter"
-                exit 1
-            fi
-        done
-    fi
-
     echo "build success"
     echo "  library: ${OUTPUT_DIR}/libktag_capture.so"
     echo "  library: ${OUTPUT_DIR}/libktag_feature.so"
     echo "  library: ${OUTPUT_DIR}/libktag_inference.so"
-    if grep -q '^KTAG_BUILD_LEGACY_COMPAT:BOOL=ON$' "${OBJ_DIR}/CMakeCache.txt"; then
-        echo "  library: ${OUTPUT_DIR}/libktag_inference_compat.so"
-    fi
     echo "  demo:    ${OUTPUT_DIR}/ktag_demo"
     echo "  example: ${OUTPUT_DIR}/ktag_three_layer_example"
     echo "  plugin:  ${OUTPUT_DIR}/plugins/libktag_example_feature_plugin.so"

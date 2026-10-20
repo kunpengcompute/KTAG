@@ -7,7 +7,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
 #include "ktag_core.h"
 #include "ktag_export.h"
 #include "ktag_appidver.h"
-const KTAGLibraryVersion *KTAG_GetLibVersion(void)
+KTAG_API const KTAGLibraryVersion *KTAG_GetLibVersion(void)
 {
     static KTAGLibraryVersion libVersion = {KTAG_APPID_VERSION_MAJOR, KTAG_APPID_VERSION_MINOR,
                                              KTAG_APPID_VERSION_PATCH, KTAG_APPID_VERSION_BUILDDATE};

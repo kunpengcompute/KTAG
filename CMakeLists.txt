@@ -61,22 +61,12 @@ option(KTAG_BUILD_FEATURE_PLUGINS
 option(KTAG_BUILD_PROXY_FEATURES
        "Build the official proxy protocol Feature Provider plugin"
        ON)
-option(KTAG_BUILD_LEGACY_COMPAT
-       "Build the retained fixed-vector inference and version libraries"
-       ON)
 option(KTAG_ENABLE_DPDK_UB
        "Enable the optional DPDK UB transport in ktag_demo"
        OFF)
 option(KTAG_ENABLE_DPDK
        "Build the optional DPDK poll-mode live capture backend" OFF)
-option(KTAG_INSTALL_LEGACY_COMPAT
-       "Install the retained fixed-vector inference and version libraries and headers"
-       ON)
 
-if(KTAG_INSTALL_LEGACY_COMPAT AND NOT KTAG_BUILD_LEGACY_COMPAT)
-    message(FATAL_ERROR
-        "KTAG_INSTALL_LEGACY_COMPAT requires KTAG_BUILD_LEGACY_COMPAT")
-endif()
 if(KTAG_BUILD_TOOLS AND NOT KTAG_BUILD_FEATURE_PLUGINS)
     message(FATAL_ERROR "KTAG_BUILD_TOOLS requires KTAG_BUILD_FEATURE_PLUGINS")
 endif()
@@ -107,16 +97,13 @@ set(KTAG_PUBLIC_HEADERS
     include/ktag_feature_plugin.h
     include/ktag_traffic_features.h
     include/ktag_inference.h
+    include/ktag_core.h
+    include/ktag_type.h
+    include/ktag_legacy_types.h
 )
 install(FILES ${KTAG_PUBLIC_HEADERS}
         DESTINATION "${KTAG_INSTALL_INCLUDEDIR}")
 
-# The retained inference adapter exposes data-only types, never old extraction internals.
-if(KTAG_INSTALL_LEGACY_COMPAT)
-    install(FILES include/ktag_legacy_inference.h include/ktag_legacy_types.h
-                  include/ktag_core.h include/ktag_type.h
-            DESTINATION "${KTAG_INSTALL_INCLUDEDIR}")
-endif()
 
 configure_package_config_file(
     "${PROJECT_SOURCE_DIR}/cmake/KTAGConfig.cmake.in"

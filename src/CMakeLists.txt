@@ -219,70 +219,26 @@ set_target_properties(ktag_inference PROPERTIES
     INSTALL_RPATH "$ORIGIN;${YAML_CPP_LIB_DIR};${ONNXRUNTIME_LIB_DIR}"
 )
 
-# ============= Deprecated fixed-vector inference adapter =============
-set(KTAG_LEGACY_INFERENCE_ADAPTER_SOURCES
-    ${PROJECT_SOURCE_DIR}/src/legacy/utils.cpp
-    ${PROJECT_SOURCE_DIR}/src/legacy/ktag_legacy_inference.cpp
-)
-if(KTAG_BUILD_LEGACY_COMPAT)
-    add_library(ktag_inference_compat SHARED
-        ${KTAG_LEGACY_INFERENCE_ADAPTER_SOURCES}
-    )
-
-    target_compile_definitions(ktag_inference_compat PRIVATE KTAG_BUILDING_DLL)
-
-    # 直接使用库文件路径，不使用 -l 链接
-    target_link_libraries(ktag_inference_compat PRIVATE
-        ${ONNXRUNTIME_LIB}
-        ${YAML_CPP_LIB}
-    )
-
-    target_include_directories(ktag_inference_compat
-        PUBLIC
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
-        PRIVATE
-        ${PROJECT_SOURCE_DIR}/
-        ${YAML_CPP_INCLUDE}
-        ${ONNXRUNTIME_INCLUDE_DIR}
-    )
-
-    set_target_properties(ktag_inference_compat PROPERTIES
-        EXPORT_NAME inference_compat
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        BUILD_RPATH "${YAML_CPP_LIB_DIR};${ONNXRUNTIME_LIB_DIR}"
-        INSTALL_RPATH "${YAML_CPP_LIB_DIR};${ONNXRUNTIME_LIB_DIR}"
-    )
-endif()
-
-# ============= 生成动态库(可选) =============
-if(ENABLE_BUILD_LIB AND KTAG_BUILD_LEGACY_COMPAT)
+# ============= Product and component version queries =============
+if(ENABLE_BUILD_LIB)
     add_library(ktag_appidlib SHARED
         ${PROJECT_SOURCE_DIR}/src/core/version.c
     )
-
     target_compile_definitions(ktag_appidlib PRIVATE KTAG_BUILDING_DLL)
-
-
     target_include_directories(ktag_appidlib PRIVATE
         ${PROJECT_SOURCE_DIR}/
         ${PROJECT_SOURCE_DIR}/include
-        ${ONNXRUNTIME_INCLUDE_DIR}
     )
-
     set_target_properties(ktag_appidlib PROPERTIES
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
+        C_STANDARD 11
+        C_STANDARD_REQUIRED ON
         BUILD_RPATH "$ORIGIN"
         INSTALL_RPATH "$ORIGIN"
     )
-    if(KTAG_INSTALL_LEGACY_COMPAT)
-        install(TARGETS ktag_appidlib
-                LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
-                ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
-                RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
-    endif()
+    install(TARGETS ktag_appidlib
+            LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
+            ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
+            RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
 endif()
 
 install(TARGETS ktag_capture ktag_feature ktag_inference
@@ -291,12 +247,5 @@ install(TARGETS ktag_capture ktag_feature ktag_inference
         ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
         RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
 
-if(KTAG_INSTALL_LEGACY_COMPAT AND KTAG_BUILD_LEGACY_COMPAT)
-    install(TARGETS ktag_inference_compat
-            EXPORT KTAGTargets
-            LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
-            ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
-            RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
-endif()
 
 KTAG_APPID_glob_modules(${KTAG_APPID_MODULES_PATH})

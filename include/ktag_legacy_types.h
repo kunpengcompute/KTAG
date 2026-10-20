@@ -1,5 +1,5 @@
 /* Copyright (c) Huawei Technologies Co., Ltd. 2025-2026. All rights reserved. */
-/* Data-only bridge for the retained fixed-vector inference and file formats.
+/* Data-only bridge for historical Demo file formats.
  * Feature extraction uses ktag_feature.h and plugin Providers exclusively. */
 #ifndef KTAG_LEGACY_TYPES_H
 #define KTAG_LEGACY_TYPES_H

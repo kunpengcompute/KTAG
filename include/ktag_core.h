@@ -16,6 +16,9 @@ extern "C" {
                               KTAG_STS_NULL_PTR_ERR Indicates an error when any of the specified pointers is NULL.
  */
 KTAGResult KTAG_API KTAG_GetProductVersion(KTAGProVersion *packageInfo);
+
+/* Borrowed immutable library version; no caller allocation is required. */
+KTAG_API const KTAGLibraryVersion *KTAG_GetLibVersion(void);
 #ifdef __cplusplus
 }
 #endif

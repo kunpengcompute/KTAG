@@ -2,7 +2,6 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
  */
 #include "ktag_test.h"
-extern "C" const KTAGLibraryVersion* KTAG_GetLibVersion();
 typedef KTAGResult (*GetProductVersionFn)(KTAGProVersion *packageInfo);
 typedef const KTAGLibraryVersion* (*GetLibVersionFunc)();
 
