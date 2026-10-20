@@ -218,7 +218,7 @@ fuzz:
 rfuzz:
 	@test -x "$(FUZZ_BUILD_DIR)/ktag_fuzzer" || \
 		(echo "missing fuzz binary; run 'make fuzz' first"; exit 1)
-	env KTAG_LEGACY_CONFIG=$(ROOT_DIR)/tools/demo/config.yaml \
+	env KTAG_FUZZ_MODEL_PACKAGE="$(fuzzmodel)" \
 		LD_LIBRARY_PATH=$(KTAG_APPID_OUTPUT_DIR):$(ROOT_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib:$$LD_LIBRARY_PATH \
 		$(FUZZ_BUILD_DIR)/ktag_fuzzer \
 		$(if $(fuzzcount),-runs=$(fuzzcount),) $(fuzzargs)
@@ -283,6 +283,7 @@ help:
 	@echo "  func=<funcname>    -- run function(s)"
 	@echo "  fuzzcount=<count>  -- number of LibFuzzer runs"
 	@echo "  fuzzargs='<args>'  -- additional LibFuzzer arguments"
+	@echo "  fuzzmodel=<path>   -- optional Schema-bound inference model package"
 	@echo " "
 	@echo "Target:"
 	@echo "  all                -- default"

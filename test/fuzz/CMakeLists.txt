@@ -4,7 +4,7 @@ project(ktag_fuzz_test LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Fuzzing exercises the public Feature API and the dynamically loaded Traffic plugin. The
+# Fuzzing exercises public Feature/Inference APIs and the dynamically loaded Traffic plugin. The
 # target is not meaningful without the product libraries, so fail during
 # configuration instead of creating an executable that later fails to link.
 find_library(KTAG_FEATURE_LIBRARY NAMES ktag_feature PATHS
@@ -13,14 +13,14 @@ find_library(KTAG_FEATURE_LIBRARY NAMES ktag_feature PATHS
     REQUIRED
 )
 
-find_library(KTAG_INFERENCE_LIBRARY NAMES ktag_inference_compat PATHS
+find_library(KTAG_INFERENCE_LIBRARY NAMES ktag_inference PATHS
     ${CMAKE_SOURCE_DIR}/../../output
     NO_DEFAULT_PATH
     REQUIRED
 )
 
 message(STATUS "Found ktag_feature: ${KTAG_FEATURE_LIBRARY}")
-message(STATUS "Found ktag_inference_compat: ${KTAG_INFERENCE_LIBRARY}")
+message(STATUS "Found ktag_inference: ${KTAG_INFERENCE_LIBRARY}")
 
 # 查找ONNX Runtime库
 find_library(ONNX_RUNTIME_LIBRARY NAMES onnxruntime PATHS

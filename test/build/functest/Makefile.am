@@ -48,7 +48,6 @@ LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
 				-lktag_capture \
 				-lktag_feature \
 				-lktag_inference \
-				-lktag_inference_compat \
 				-L$(KTAG_APPID_OUTPUT_DIR)/plugins \
 				-lktag_proxy_features \
 				-lktag_traffic_features \

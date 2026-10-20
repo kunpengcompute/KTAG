@@ -12,7 +12,7 @@ ktag_fuzzer
 
 - Feature Context 的创建、报文处理、Flush 和销毁；
 - Traffic Feature Plugin 的加载、Provider 回调和 RawBoW 注解；
-- 可选的旧 `inference_init/inference_predict`；
+- 可选的公共 Inference API：模型包初始化与 Feature Batch 批量推理；
 - Ethernet/Linux SLL 的随机报文和截断输入。
 
 输入按 Ethernet 或 Linux SLL 链路解释。
@@ -21,7 +21,7 @@ ktag_fuzzer
 
 - Clang/Clang++，并包含 LibFuzzer；
 - CMake 3.16.3 或更高版本；
-- 已构建公共 Feature 库、`plugins/libktag_traffic_features.so` 和旧推理库；
+- 已构建公共 Feature/Inference 库和 `plugins/libktag_traffic_features.so`；
 - yaml-cpp 0.8.0；
 - ONNX Runtime 1.22.0。
 
@@ -44,13 +44,19 @@ cd /opt/KTAG/test/build
 make rfuzz fuzzcount=10000 fuzzargs="-max_total_time=60"
 ```
 
-`rfuzz` 会设置运行所需的 `LD_LIBRARY_PATH`，并把
-`/opt/KTAG/tools/demo/config.yaml` 作为可选旧推理配置传入。配置中的 ONNX 与
-Scaler 路径必须有效；不需要覆盖旧推理时，可直接运行二进制且不设置
-`KTAG_LEGACY_CONFIG`：
+`rfuzz` 会设置运行所需的 `LD_LIBRARY_PATH`。默认仅覆盖特征提取；需要同时
+覆盖公共推理时，通过 `fuzzmodel` 指定与 `ktag_legacy_v1` 匹配的模型包：
 
 ```bash
-/opt/KTAG/test/fuzz/build/ktag_fuzzer -runs=10000 -max_total_time=60
+make rfuzz fuzzcount=10000 fuzzmodel=/opt/KTAG/result/legacy_model_package
+```
+
+直接运行二进制时，使用 `KTAG_FUZZ_MODEL_PACKAGE` 指定模型包；不设置该变量则
+仅测试特征提取。指定模型包但初始化失败时会报告错误并停止运行。
+
+```bash
+KTAG_FUZZ_MODEL_PACKAGE=/opt/KTAG/result/legacy_model_package \
+  /opt/KTAG/test/fuzz/build/ktag_fuzzer -runs=10000 -max_total_time=60
 ```
 
 常用 LibFuzzer 参数：

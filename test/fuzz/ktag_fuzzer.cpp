@@ -1,39 +1,47 @@
 #include "ktag_feature.h"
 #include "ktag_feature_plugin.h"
 #include "ktag_traffic_features.h"
-#include "ktag_legacy_inference.h"
+#include "ktag_inference.h"
 
 #include <stddef.h>
 #include <stdint.h>
+#include <cstdio>
 #include <cstdlib>
-#include <cstring>
 
 namespace {
-
 struct inference_holder {
-    inference_engine *engine = nullptr;
+    ktag_inference_context *context = nullptr;
+    ktag_prediction_batch *predictions = nullptr;
 
-    inference_holder()
-    {
-        const char *config_path = std::getenv("KTAG_LEGACY_CONFIG");
-        if (config_path != nullptr && config_path[0] != '\0') {
-            inference_config config = {config_path};
-            engine = inference_init(&config);
+    explicit inference_holder(const ktag_feature_schema *schema) {
+        const char *package = std::getenv("KTAG_FUZZ_MODEL_PACKAGE");
+        if (!package || !*package) return;
+        ktag_inference_config config{};
+        config.struct_size = sizeof(config);
+        config.api_version = KTAG_API_VERSION;
+        config.feature_schema = schema;
+        config.model_package_path = package;
+        config.intra_op_threads = config.inter_op_threads = 1U;
+        context = ktag_inference_create(&config);
+        if (!context) {
+            std::fprintf(stderr, "Fuzz model package initialization failed: %s\n",
+                         ktag_inference_get_last_error());
+            std::abort();
         }
+        predictions = ktag_prediction_batch_create(1U);
+        if (!predictions) std::abort();
     }
-
-    ~inference_holder()
-    {
-        inference_destroy(engine);
+    ~inference_holder() {
+        ktag_prediction_batch_destroy(predictions);
+        ktag_inference_destroy(context);
     }
 };
 
-inference_engine *fuzz_inference_engine()
-{
-    static inference_holder holder;
-    return holder.engine;
+inference_holder &fuzz_inference(const ktag_feature_schema *schema) {
+    // Context owns its resolved schema plan; schema is borrowed only on create.
+    static inference_holder holder(schema);
+    return holder;
 }
-
 } // namespace
 
 // Exercise packet processing and plugin callbacks through the public Feature API.
@@ -53,6 +61,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     auto *context = ktag_feature_create(&config);
     auto *batch = ktag_feature_batch_create(schema, 1U);
     if (!context || !batch) std::abort();
+    auto &inference = fuzz_inference(schema);
     ktag_packet packet{};
     packet.struct_size = sizeof(packet); packet.api_version = KTAG_API_VERSION;
     packet.data = data; packet.captured_length = packet.original_length = static_cast<uint32_t>(size);
@@ -65,15 +74,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         if (ktag_feature_batch_get_record(batch, i, &record) != KTAG_SUCCESS) std::abort();
         const char *annotation = nullptr;
         (void)ktag_feature_batch_get_annotation(batch, i, KTAG_TRAFFIC_RAWBOW_ANNOTATION, &annotation);
-        if (auto *engine = fuzz_inference_engine()) {
-            feature_vector vector{};
-            if (record.value_count > FEATURES_NUM) std::abort();
-            std::memcpy(vector.features, record.values, record.value_count * sizeof(float));
-            feature_vector_list list{&vector, 1U, 1U};
-            int prediction = 0;
-            inference_result result{&prediction, 0U};
-            (void)inference_predict(engine, &list, &result);
-        }
+    }
+    if (inference.context) {
+        (void)ktag_inference_predict(inference.context, batch, inference.predictions);
     }
     ktag_feature_batch_destroy(batch);
     ktag_feature_destroy(context);

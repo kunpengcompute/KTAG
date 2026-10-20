@@ -50,10 +50,9 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 | `func_feature_extract.cpp` | 插件冻结统计算法 |
 | `func_feature_provider.cpp` | Provider 回调和 Fill Zero 策略（需 `internal=y`，使用内部头文件） |
 | `func_feature_schema.cpp` | Schema 组合与维度展开 |
-| `func_inference.cpp` | Inference Context 基本流程 |
+| `func_inference.cpp` | 公共 Inference 配置校验、线程数边界和 Prediction Batch 生命周期 |
 | `func_inference_contract.cpp` | 模型包与 Schema 契约校验 |
 | `func_demo_inference_session.cpp` | 历史 Demo 调度的公共推理桥接：真实 ONNX 推理、过滤后源记录对齐、标准化及错误处理 |
-| `func_inference_legacy_adapter.cpp` | 旧推理接口适配 |
 | `func_proxy_features.cpp` | 代理特征插件：Sequence/Burst、TCP Signature、QUIC |
 | `func_demo_pipeline.cpp` | demo Pipeline：配置解析、队列容量与背压、Schema CSV/预测输出契约、插件加载与卸载、冻结 Schema 保护 |
 | `compile_ktag_public_headers.c` | 6 个公共头文件可独立编译 |

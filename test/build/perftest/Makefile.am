@@ -37,7 +37,6 @@ LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
                 -L$(KTAG_APPID_OUTPUT_DIR) \
                 -lktag_appidlib \
 				-lktag_feature \
-				-lktag_inference_compat \
 				-L$(ONNXRUNTIME_LIB_DIR) \
 				-lonnxruntime
 
