@@ -4,16 +4,20 @@
 
 \[2026-09-15\]: 增加 Capture、Feature、Inference 三层公共 API、IPv4/IPv6 双栈 Schema Pipeline 和代理 Feature Plugin。
 
-\[2026-06-30\]: KDADK-APPID更名为KTAG。
+\[2026-06-30\]: 项目更名为 KTAG。
 
-\[2026-03-30\]: 发布KDADK-APPID 1.0.0。更新了特征提取及特征推理接口头文件及软件包。
+\[2026-03-30\]: 发布 1.0.0。更新了特征提取及特征推理接口头文件及软件包。
 
 ## 1. 项目介绍
 KTAG是鲲鹏数据分析开发套件的网络流分类库，包含流汇聚、协议检测、特征计算、AI引擎和训练工具包，针对鲲鹏特性进行极致亲和优化，在具备对明文流量分析能力的同时，亦能对加密流量进行实时分析，弥补传统基于规则检测的DPI方案无法分析加密流量的短板，为解决业界普遍难题提供端到端参考方案。
 
 当前公共库按 Capture、Feature、Inference 三层交付。新架构支持 callbacks
-自定义特征、Schema 化模型契约和由 demo 组织的单线程/多线程流水线。旧固定
-`feature_vector` 与旧模型接口继续作为 deprecated 兼容层保留。
+自定义特征、Schema 化模型契约和由 demo 组织的单线程/多线程流水线。冻结的 `ktag_legacy_v1` 特征由 Traffic Feature Plugin 提供；旧提取接口已移除，
+模型推理统一使用公共 Inference API，旧固定向量推理接口和独立兼容库已移除；产品版本查询独立保留。
+
+项目命名已统一为 KTAG。使用早期版本的项目需要同步更新头文件、库名、
+接口名称、构建参数和安装路径，并重新编译；命令行程序统一为 `ktag_demo`。
+冻结特征计算统一由插件执行；历史文件格式的数据布局继续保留，提取和推理统一使用公共 API。
 
 当前仓库还提供 IPv4/IPv6 双栈 Schema 特征提取和独立的应用/代理分类配置。代理
 分类使用可选的 `libktag_proxy_features.so` 插件和 619 维 `ktag_proxy_v1` Schema。
@@ -33,12 +37,12 @@ KTAG是鲲鹏数据分析开发套件的网络流分类库，包含流汇聚、�
 │       └── api_reference.md                                  # API参考
 |—— examples                                                  # 公共 API 示例
 |—— include                                                   # 头文件目录
-|—— plugins                                                   # 代理特征插件源码
+|—— plugins                                                   # 冻结流量特征与代理特征插件
 |—— src                                                       # 源码目录
+│   ├── core                                                  # 库级基础能力与版本查询
 │   ├── capture                                               # 报文读取与流标识
 │   ├── feature                                               # 组流与特征计算
-│   ├── inference                                             # 模型加载与批量推理
-│   └── legacy                                                # 旧固定向量接口兼容层
+│   └── inference                                             # 模型加载与批量推理
 |—— test                                                      # 测试框架
 |—— tools                                                     # 工具集
 │   ├── demo                                                  # 训练/评估/推理命令行工具
@@ -48,7 +52,7 @@ KTAG是鲲鹏数据分析开发套件的网络流分类库，包含流汇聚、�
 │   ├── model_package                                         # 模型包打包工具
 │   └── validation                                            # 一致性验收脚本
 |—— README.md                                                 # 说明文档
-|—— kdadk_appidver.h                                          # 项目版本信息头文件
+|—— ktag_appidver.h                                          # 项目版本信息头文件
 |—— build.sh                                                  # 项目编译脚本
 ```
 

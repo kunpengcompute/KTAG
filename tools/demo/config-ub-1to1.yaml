@@ -15,12 +15,12 @@
 # 启动命令（--distributed-role 会强制启用本 distributed 段）：
 #
 #   Frontend (computer01):
-#     output/kdadk_demo -r tools/demo/config-ub-1to1.yaml \
+#     output/ktag_demo -r tools/demo/config-ub-1to1.yaml \
 #       -p /data/class0.pcap -p /data/class1.pcap \
 #       --distributed-role frontend --node-id "$(hostname)"
 #
 #   Backend (controller):
-#     output/kdadk_demo -r tools/demo/config-ub-1to1.yaml \
+#     output/ktag_demo -r tools/demo/config-ub-1to1.yaml \
 #       --distributed-role backend --node-id "$(hostname)" \
 #       -c /data/result/distributed-1to1.csv
 
@@ -74,7 +74,7 @@ pipeline:
       # ground_truth_labels:
       #   computer01: [0, 1]
       # 第一项是 EAL 的 argv[0]；-l 为绑核列表，现场按 CPU 拓扑调整。
-      eal_arguments: [kdadk_demo, --no-huge, -l, "0"]
+      eal_arguments: [ktag_demo, --no-huge, -l, "0"]
 
   plugins: []
   schema:

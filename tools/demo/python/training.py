@@ -310,7 +310,7 @@ def _log_family_support(prepared, group_count):
                 missing)
 
 
-def KDADK_Train(config_file):
+def KTAG_Train(config_file):
     logging.info('Loaded config file: %s', config_file)
     config_path = Path(config_file).expanduser().resolve()
     config_dir = config_path.parent
@@ -386,4 +386,4 @@ if __name__ == '__main__':
     if len(sys.argv) != 2:
         logging.info('Usage: python3 training.py <path_to_config>')
         sys.exit(1)
-    sys.exit(0 if KDADK_Train(sys.argv[1]) == 0 else 1)
+    sys.exit(0 if KTAG_Train(sys.argv[1]) == 0 else 1)

@@ -104,7 +104,7 @@ bool initialize_eal(const ktag_demo_ub_transport_config &config, bool *owns_eal,
 
     std::vector<std::string> arguments = config.eal_arguments;
     if (arguments.empty()) {
-        arguments = {"kdadk_demo", "--no-huge", "-l", "0"};
+        arguments = {"ktag_demo", "--no-huge", "-l", "0"};
     } else if (arguments.front().empty()) {
         set_error(error, "the first DPDK EAL argument must be a program name");
         return false;

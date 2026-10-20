@@ -127,7 +127,7 @@ cmake --build /tmp/ktag-external-consumer-build --parallel 4
 ### 运行
 
 ```bash
-LD_LIBRARY_PATH=/tmp/ktag-stage/lib/KDADK_APPID:$LD_LIBRARY_PATH \
+LD_LIBRARY_PATH=/tmp/ktag-stage/lib/KTAG_APPID:$LD_LIBRARY_PATH \
   /tmp/ktag-external-consumer-build/ktag_external_consumer \
   /path/to/model_package \
   /path/to/input.pcap

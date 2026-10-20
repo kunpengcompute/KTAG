@@ -214,7 +214,7 @@ class SchemaTrainingTest(unittest.TestCase):
             config_path = directory / 'config.yaml'
             _write_config(config_path, config)
 
-            self.assertEqual(0, training.KDADK_Train(config_path))
+            self.assertEqual(0, training.KTAG_Train(config_path))
             self.assertTrue((directory / 'result' /
                              'feature_importance.csv').is_file())
             importance = pd.read_csv(
@@ -235,7 +235,7 @@ class SchemaTrainingTest(unittest.TestCase):
                 'legacy.flow_id',
                 [item['feature_id'] for item in manifest['input_features']])
 
-            self.assertEqual(0, evaluation.KDADK_Evaluation(config_path))
+            self.assertEqual(0, evaluation.KTAG_Evaluation(config_path))
             details = pd.read_csv(directory / 'predictions.csv')
             self.assertIn('confidence', details.columns)
             self.assertEqual(24, len(details))
@@ -368,8 +368,8 @@ class SchemaTrainingTest(unittest.TestCase):
                 config_path = directory / 'config.yaml'
                 _write_config(config_path, config)
 
-                self.assertEqual(0, training.KDADK_Train(config_path))
-                self.assertEqual(0, evaluation.KDADK_Evaluation(config_path))
+                self.assertEqual(0, training.KTAG_Train(config_path))
+                self.assertEqual(0, evaluation.KTAG_Evaluation(config_path))
                 manifest = json.loads(
                     (directory / 'model_package' / 'manifest.json').read_text(
                         encoding='utf-8'))

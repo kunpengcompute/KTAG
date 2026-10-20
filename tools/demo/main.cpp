@@ -1,11 +1,11 @@
+#include "feature_session.h"
 /*
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 
 #include "capture_adapter.h"
-#include "kdadk_file_writer.h"
-#include "kdadk_inference.h"
-#include "kdadk_type.h"
+#include "ktag_file_writer.h"
+#include "ktag_type.h"
 #include "online_inference.h"
 #include "pipeline/pipeline_config.h"
 #include "pipeline/pipeline_runner.h"
@@ -76,8 +76,8 @@ int feature_extraction_mode(const char *pcap_file, const char *output_file,
     return -1;
   }
 
-  feature_extractor *extractor =
-      extractor_init(static_cast<int>(ktag_capture_get_link_type(capture)));
+  ktag_demo_feature_session *extractor =
+      ktag_demo_feature_session::create(static_cast<int>(ktag_capture_get_link_type(capture)));
   if (!extractor) {
     fprintf(stderr, "错误: 无法初始化特征提取器\n");
     ktag_capture_close(capture);
@@ -97,7 +97,7 @@ int feature_extraction_mode(const char *pcap_file, const char *output_file,
   if (!writer) {
     fprintf(stderr, "错误: 无法创建文件写入器\n");
     ktag_capture_close(capture);
-    extractor_destroy(extractor);
+    delete extractor;
     return -1;
   }
 
@@ -118,7 +118,7 @@ int feature_extraction_mode(const char *pcap_file, const char *output_file,
     fprintf(stderr, "错误: 无法分配特征向量内存\n");
     writer_destroy(writer);
     ktag_capture_close(capture);
-    extractor_destroy(extractor);
+    delete extractor;
     return -1;
   }
 
@@ -132,7 +132,7 @@ int feature_extraction_mode(const char *pcap_file, const char *output_file,
       free(all_features.vectors);
       writer_destroy(writer);
       ktag_capture_close(capture);
-      extractor_destroy(extractor);
+      delete extractor;
       return -1;
     }
   }
@@ -158,15 +158,15 @@ int feature_extraction_mode(const char *pcap_file, const char *output_file,
     int ret;
     const timeval timestamp = packet_timeval(packet);
     if (with_rawbow) {
-      ret = process_packet_with_rawbow(extractor, packet.data,
+      ret = extractor->process_with_rawbow(packet.data,
                                        packet.captured_length, &timestamp,
                                        &features, &raw_payload, &has_feature);
     } else {
-      ret = process_packet(extractor, packet.data, packet.captured_length,
+      ret = extractor->process(packet.data, packet.captured_length,
                            &timestamp, &features, &has_feature);
     }
     ktag_packet_release(&packet);
-    if (ret == EXTRACTOR_SUCCESS && has_feature) {
+    if (ret == KTAG_SUCCESS && has_feature) {
       if (all_features.count >= all_features.capacity) {
         size_t new_capacity = all_features.capacity * 2;
         feature_vector *new_vectors = (feature_vector *)realloc(
@@ -224,12 +224,12 @@ int feature_extraction_mode(const char *pcap_file, const char *output_file,
   }
   int ret;
   if (with_rawbow) {
-    ret = extractor_finalize_with_rawbow(extractor, &remaining,
+    ret = extractor->flush_with_rawbow(&remaining,
                                          &remaining_rawbows);
   } else {
-    ret = extractor_finalize(extractor, &remaining);
+    ret = extractor->flush(&remaining);
   }
-  if (ret == EXTRACTOR_SUCCESS) {
+  if (ret == KTAG_SUCCESS) {
     for (uint32_t i = 0; i < remaining.count; i++) {
       // 扩容特征向量列表
       if (all_features.count >= all_features.capacity) {
@@ -320,7 +320,7 @@ cleanup:
   writer_destroy(writer);
   ktag_packet_release(&packet);
   ktag_capture_close(capture);
-  extractor_destroy(extractor);
+  delete extractor;
 
   return ret_code;
 }
@@ -791,9 +791,9 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
                       "参数指定JSON格式输出\n");
       fprintf(stderr, "示例:\n");
       fprintf(stderr, "  %s -f input.pcap -c output.csv\n",
-              (argc > 0) ? argv[0] : "kdadk_demo");
+              (argc > 0) ? argv[0] : "ktag_demo");
       fprintf(stderr, "  %s -f input.pcap -j output.json\n",
-              (argc > 0) ? argv[0] : "kdadk_demo");
+              (argc > 0) ? argv[0] : "ktag_demo");
       return -1;
     }
     if (args->feature_config_file != nullptr) {
@@ -867,11 +867,11 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       fprintf(stderr, "示例:\n");
       fprintf(stderr,
               "  %s -r config.yaml -p file1.pcap -p file2.pcap -c result.csv\n",
-              (argc > 0) ? argv[0] : "kdadk_demo");
+              (argc > 0) ? argv[0] : "ktag_demo");
       fprintf(
           stderr,
           "  %s -r config.yaml -p file1.pcap -p file2.pcap -j result.json\n",
-          (argc > 0) ? argv[0] : "kdadk_demo");
+          (argc > 0) ? argv[0] : "ktag_demo");
       return -1;
     }
 

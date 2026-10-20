@@ -14,8 +14,8 @@ PWD := $(CURDIR)
 ROOT_DIR := $(abspath $(CURDIR)/../..)
 GTEST_DOWNLOAD_DIR = $(ROOT_DIR)/test/gtest-download
 GOOGLE_TEST_DIR = $(ROOT_DIR)/test/googletest-release-1.8.0
-KDADK_APPID_OBJ_DIR = $(ROOT_DIR)/build
-KDADK_APPID_OUTPUT_DIR = $(ROOT_DIR)/output
+KTAG_APPID_OBJ_DIR = $(ROOT_DIR)/build
+KTAG_APPID_OUTPUT_DIR = $(ROOT_DIR)/output
 FUZZ_SOURCE_DIR = $(ROOT_DIR)/test/fuzz
 FUZZ_BUILD_DIR = $(FUZZ_SOURCE_DIR)/build
 REDEF_FILE = $(PWD)/../common/include/*_redefine.h
@@ -24,13 +24,13 @@ CMAKE_IN_FILE = $(ROOT_DIR)/config.cmake.in
 NO_OMP_RESULT_FILE = no_omp_result.txt
 OMP_RESULT_FILE = omp_result.txt
 RPM = y
-KDADK_APPID_INFO_VERSION = $(shell xmllint --xpath "//KDADK_APPID_INFO_VERSION/text()" ${ROOT_DIR}/dependence.xml)
-KDADK_APPID_INFO_COMPONENT_NAME = $(shell xmllint --xpath "//KDADK_APPID_INFO_COMPONENT_NAME/text()" ${ROOT_DIR}/dependence.xml)
-KDADK_APPID_INFO_SOFTWARE_NAME = $(shell xmllint --xpath "//KDADK_APPID_INFO_SOFTWARE_NAME/text()" ${ROOT_DIR}/dependence.xml)
-KDADK_APPID_INFO_PRODUCT_VERSION = $(shell xmllint --xpath "//KDADK_APPID_INFO_PRODUCT_VERSION/text()" ${ROOT_DIR}/dependence.xml)
+KTAG_APPID_INFO_VERSION = $(shell xmllint --xpath "//KTAG_APPID_INFO_VERSION/text()" ${ROOT_DIR}/dependence.xml)
+KTAG_APPID_INFO_COMPONENT_NAME = $(shell xmllint --xpath "//KTAG_APPID_INFO_COMPONENT_NAME/text()" ${ROOT_DIR}/dependence.xml)
+KTAG_APPID_INFO_SOFTWARE_NAME = $(shell xmllint --xpath "//KTAG_APPID_INFO_SOFTWARE_NAME/text()" ${ROOT_DIR}/dependence.xml)
+KTAG_APPID_INFO_PRODUCT_VERSION = $(shell xmllint --xpath "//KTAG_APPID_INFO_PRODUCT_VERSION/text()" ${ROOT_DIR}/dependence.xml)
 
-KDADK_APPID_C_TOOLCHAIN = $(shell xmllint --xpath "//KDADK_APPID_C_TOOLCHAIN/text()" ${ROOT_DIR}/dependence.xml)
-export CC=${KDADK_APPID_C_TOOLCHAIN}
+KTAG_APPID_C_TOOLCHAIN = $(shell xmllint --xpath "//KTAG_APPID_C_TOOLCHAIN/text()" ${ROOT_DIR}/dependence.xml)
+export CC=${KTAG_APPID_C_TOOLCHAIN}
 
 ifeq ($(start), )
 	start = 1
@@ -169,23 +169,23 @@ rpmtest: chmodpermission googletest
 	make rpmfunctest
 	make rpmperftest
 
-KDADK_APPIDlib:
+KTAG_APPIDlib:
 ifeq ("$(cover)", "y")
 	sed -i 's/\bTRUE\b/FALSE/g' $(CMAKE_IN_FILE)
 endif
 	sh $(ROOT_DIR)/build.sh util
-	cd $(KDADK_APPID_OBJ_DIR)/;\
-	cmake $(ROOT_DIR) -DKDADK_APPID_TOOLCHAIN_INFO:STRING=${KDADK_APPID_C_TOOLCHAIN} \
-		-DKDADK_APPID_VERSION_INFO=${KDADK_APPID_INFO_VERSION} \
-		-DKDADK_APPID_COMPONENT_NAME:STRING=${KDADK_APPID_INFO_COMPONENT_NAME} \
-		-DKDADK_APPID_SOFTWARE_NAME:STRING=${KDADK_APPID_INFO_SOFTWARE_NAME} \
-		-DKDADK_APPID_PRODUCT_VERSION:STRING=${KDADK_APPID_INFO_PRODUCT_VERSION} \
+	cd $(KTAG_APPID_OBJ_DIR)/;\
+	cmake $(ROOT_DIR) -DKTAG_APPID_TOOLCHAIN_INFO:STRING=${KTAG_APPID_C_TOOLCHAIN} \
+		-DKTAG_APPID_VERSION_INFO=${KTAG_APPID_INFO_VERSION} \
+		-DKTAG_APPID_COMPONENT_NAME:STRING=${KTAG_APPID_INFO_COMPONENT_NAME} \
+		-DKTAG_APPID_SOFTWARE_NAME:STRING=${KTAG_APPID_INFO_SOFTWARE_NAME} \
+		-DKTAG_APPID_PRODUCT_VERSION:STRING=${KTAG_APPID_INFO_PRODUCT_VERSION} \
 		-DENABLE_BUILD_LIB=ON \
-		-DKDADK_ENABLE_HIDDEN_VISIBILITY=OFF \
+		-DKTAG_ENABLE_HIDDEN_VISIBILITY=OFF \
 		$(WITH_OMP) $(WITH_COVER) $(WITH_ASAN) $(IPP_2021);\
-	make -C $(KDADK_APPID_OBJ_DIR)/ -j16
+	make -C $(KTAG_APPID_OBJ_DIR)/ -j16
 
-arm: KDADK_APPIDlib
+arm: KTAG_APPIDlib
 	make test
 
 x86: test
@@ -209,22 +209,22 @@ rrperf:
 rrun: rrfunc rrperf
 
 fuzz:
-	$(MAKE) KDADK_APPIDlib cover=asan
+	$(MAKE) KTAG_APPIDlib cover=asan
 	cmake -S $(FUZZ_SOURCE_DIR) -B $(FUZZ_BUILD_DIR) \
 		-DCMAKE_C_COMPILER=clang \
 		-DCMAKE_CXX_COMPILER=clang++
 	cmake --build $(FUZZ_BUILD_DIR) --parallel 16
 
 rfuzz:
-	@test -x "$(FUZZ_BUILD_DIR)/kdadk_fuzzer" || \
+	@test -x "$(FUZZ_BUILD_DIR)/ktag_fuzzer" || \
 		(echo "missing fuzz binary; run 'make fuzz' first"; exit 1)
-	env KTAG_LEGACY_CONFIG=$(ROOT_DIR)/tools/demo/config.yaml \
-		LD_LIBRARY_PATH=$(KDADK_APPID_OUTPUT_DIR):$(ROOT_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib:$$LD_LIBRARY_PATH \
-		$(FUZZ_BUILD_DIR)/kdadk_fuzzer \
+	env KTAG_FUZZ_MODEL_PACKAGE="$(fuzzmodel)" \
+		LD_LIBRARY_PATH=$(KTAG_APPID_OUTPUT_DIR):$(ROOT_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib:$$LD_LIBRARY_PATH \
+		$(FUZZ_BUILD_DIR)/ktag_fuzzer \
 		$(if $(fuzzcount),-runs=$(fuzzcount),) $(fuzzargs)
 
 asan: chmodpermission googletest
-	$(MAKE) KDADK_APPIDlib cover=asan
+	$(MAKE) KTAG_APPIDlib cover=asan
 	$(MAKE) func cover=asan
 
 rasan:
@@ -283,6 +283,7 @@ help:
 	@echo "  func=<funcname>    -- run function(s)"
 	@echo "  fuzzcount=<count>  -- number of LibFuzzer runs"
 	@echo "  fuzzargs='<args>'  -- additional LibFuzzer arguments"
+	@echo "  fuzzmodel=<path>   -- optional Schema-bound inference model package"
 	@echo " "
 	@echo "Target:"
 	@echo "  all                -- default"

@@ -1,6 +1,6 @@
 # API 参考
 
-本文以 `include/` 下发布的头文件为准，按模块分章介绍 KTAG 的公开 C API。每章先给出 API 清单，再逐个说明 API 的功能、签名、参数和返回值；关键流程在章末补充最小用例。新项目应使用 Capture、Feature、Inference 三层 API；旧的固定 `feature_vector` 接口仅保留兼容性（见[第 8 章](#8-历史兼容-api已弃用)）。
+本文以 `include/` 下发布的头文件为准，按模块分章介绍 KTAG 的公开 C API。每章先给出 API 清单，再逐个说明 API 的功能、签名、参数和返回值；关键流程在章末补充最小用例。所有推理入口统一使用 Capture、Feature、Inference 三层 API；历史文件格式的数据桥接见[第 8 章](#8-冻结特征契约与数据桥接)。
 
 应用/代理分类配置和命令行操作见《[用户指南](user_guide.md)》；快速执行 demo 见《[快速上手指南](quick_start.md)》。
 
@@ -13,16 +13,17 @@
 | `ktag_types.h` | 状态码、时间戳、IP 地址和 Flow Key | 必需 |
 | `ktag_capture.h` | PCAP/网口读取、报文生命周期、Flow Key、设备发现 | 推荐 |
 | `ktag_feature.h` | 组流、Schema、Provider、Domain Store、Feature Batch | 推荐 |
-| `ktag_feature_plugin.h` | 动态 Feature Provider 插件 ABI | 按需 |
+| `ktag_feature_plugin.h` | 动态 Feature Provider 插件 ABI、公共加载与卸载接口 | 按需 |
+| `ktag_traffic_features.h` | Traffic Provider 直接注册入口与 RawBoW 注解键 | 按需 |
 | `ktag_inference.h` | 模型包校验和 Schema-aware 批量推理 | 推荐 |
-| `kdadk_feature_extract.h`、`kdadk_inference.h` | 历史固定向量接口 | 仅兼容 |
-| `kdadk_core.h`、`kdadk_type.h` | 历史产品版本查询及其返回类型 | 仅兼容 |
+| `ktag_legacy_types.h` | 历史 Demo 文件格式的数据类型，不提供推理接口 | 仅数据转换 |
+| `ktag_core.h`、`ktag_type.h` | 产品版本查询及其返回类型 | 按需 |
 
-运行时对应三个共享库：`libktag_capture.so`、`libktag_feature.so`、`libktag_inference.so`。构建产物位于仓库 `output/` 目录，构建方式见《[快速上手](quick_start.md)》。
+运行时对应三个共享库：`libktag_capture.so`、`libktag_feature.so`、`libktag_inference.so`。构建产物位于仓库 `output/` 目录，特征计算由 `output/plugins/` 中的 Traffic/Proxy 插件提供；可选版本查询库为 `libktag_appidlib.so`。构建方式见《[编译指南](installation_guide.md)》。
 
 ### 1.2 公共约定
 
-以下约定适用于全部现代 API（`ktag_*.h`），各 API 小节不再重复。
+以下约定适用于 Capture、Feature、Inference 及插件加载 API；第 8 章的产品版本接口使用独立的数据类型与状态码。
 
 #### 1.2.1 ABI 版本与版本化结构体
 
@@ -34,7 +35,7 @@ config.struct_size = sizeof(config);
 config.api_version = KTAG_API_VERSION;
 ```
 
-这包括 `ktag_packet`、各种 `*_config`、Feature 描述符、Provider 注册信息、统计信息、记录和模型包校验结果。没有这两个字段的类型（如 `ktag_flow_packet_sample`）不适用。尺寸不足或版本不匹配会返回 `KTAG_ERROR_INVALID_ARGUMENT`。
+这包括 `ktag_packet`、各种 `*_config`、Feature 描述符、Provider 注册信息、统计信息、记录和模型包校验结果。没有这两个字段的类型（如 `ktag_timestamp`）不适用。尺寸不足或版本不匹配会返回 `KTAG_ERROR_INVALID_ARGUMENT`。
 
 #### 1.2.2 状态码
 
@@ -104,7 +105,7 @@ typedef struct {
 } ktag_flow_key;
 ```
 
-端点 A 按地址/端口排序后一定位于端点 B 之前，因此同一业务流的正向和反向报文归入同一个 Key。它适合哈希、分流和关联，但**不表示首包的源/目的方向**。需要首包方向五元组时，使用 `ktag_flow_view_get_legacy_tuple()`（见 4.4.3）或 `ktag_feature_record_details`（见 4.6.2）。
+端点 A 按地址/端口排序后一定位于端点 B 之前，因此同一业务流的正向和反向报文归入同一个 Key。它适合哈希、分流和关联，但**不表示首包的源/目的方向**。需要首包方向五元组时，使用 `ktag_flow_view_get_endpoint()`（见 4.4.3）或 `ktag_feature_record_details`（见 4.6.2）。
 
 ## 3 Capture API（ktag_capture.h）
 
@@ -467,7 +468,7 @@ KTAG_API const char *ktag_capture_device_list_get_ipv6(const ktag_capture_device
 
 ### 3.18 最小用例
 
-读取一个 PCAP 文件，解析每个报文的 Flow Key 并统计正反方向归一后的流数量。
+读取一个 PCAP 文件，解析每个报文的 Flow Key，并统计报文总数和可解析报文数；示例不去重统计流数。
 
 ```c
 #include <stdio.h>
@@ -541,12 +542,12 @@ packets=128 parsed=126
 
 ## 4 Feature API（ktag_feature.h）
 
-Feature 层把报文组成流、调度已注册的 Feature Provider 计算特征，并按 Schema 契约输出 Feature Batch。本章按对象族分为 8 节：Schema（4.2）、Registry 与 Provider（4.3）、Provider 视图与输出（4.4）、Feature Context（4.5）、Feature Batch（4.6）、Domain Store（4.7）、Domain Cache（4.8）。
+Feature 层把报文组成流、调度已注册的 Feature Provider 计算特征，并按 Schema 契约输出 Feature Batch。本章按对象族说明：Schema（4.2）、Registry 与 Provider（4.3）、Provider 视图与输出（4.4）、Feature Context（4.5）、Feature Batch（4.6）、Domain Store（4.7）、Domain Cache（4.8）。
 
 ### 4.1 对象关系总览
 
 ```text
-ktag_feature_registry ──register──▶ Provider（内置/插件）
+ktag_feature_registry ──register──▶ Provider（自定义/插件）
         │
         ▼
 ktag_feature_schema（freeze 后不可变，绑定 Feature ID/维度/顺序）
@@ -799,7 +800,7 @@ KTAG_API ktag_status ktag_feature_schema_find(
 
 #### 4.2.12 `ktag_feature_schema_create_legacy_v1`
 
-重构前固定 354 值 CSV/模型契约的 Schema 工厂，返回**已冻结**的 `ktag_legacy_v1` v1 Schema（53 个 Feature、354 个值）。与之配套的 Provider 通过 `ktag_feature_registry_register_legacy_builtins()` 注册。
+重构前固定 354 值 CSV/模型契约的 Schema 工厂，返回**已冻结**的 `ktag_legacy_v1` v1 Schema（53 个 Feature、354 个值）。该工厂只创建 Schema；配套 Provider 由 Traffic 插件提供，应先通过 `ktag_feature_plugin_load()` 加载并注册（见 4.3.6）。
 
 ```c
 KTAG_API ktag_feature_schema *ktag_feature_schema_create_legacy_v1(void);
@@ -823,7 +824,7 @@ Registry 管理 Provider 注册项；Feature Context 创建时把 Registry 和 S
 | 生命周期 | `ktag_feature_registry_destroy` | 销毁 Registry。 |
 | 注册 | `ktag_feature_registry_register` | 注册 Provider。 |
 | 注册 | `ktag_feature_registry_unregister` | 注销 Provider。 |
-| 注册 | `ktag_feature_registry_register_legacy_builtins` | 注册旧契约内置 Provider。 |
+| 插件注册 | `ktag_feature_plugin_load` | 加载 Traffic 等插件并注册其 Provider，声明位于 `ktag_feature_plugin.h`。 |
 | 查询 | `ktag_feature_registry_get_provider_count` | 已注册 Provider 数量。 |
 
 注册标志：
@@ -874,6 +875,7 @@ KTAG_API ktag_status ktag_feature_registry_register(
 | `callbacks` | 回调集合，见 4.4.1 |
 | `callback_error_policy` | 回调失败策略，见下 |
 | `user_data` | 原样传给各回调的用户数据，借用语义 |
+| `contract_provider_id` | 可选的模型契约 Provider 标识；`NULL` 时使用 `provider_id`，用于解耦运行实现与冻结契约身份 |
 
 回调失败策略：
 
@@ -925,25 +927,22 @@ ktag_feature_registry_get_provider_count(const ktag_feature_registry *registry);
 
 返回值：已注册 Provider 数量。
 
-#### 4.3.6 `ktag_feature_registry_register_legacy_builtins`
+#### 4.3.6 Traffic Provider 注册
 
-注册 `ktag_feature_schema_create_legacy_v1()` 所需的全部内置 Provider。使用 Legacy V1 Schema 前必须调用。
+冻结应用 Schema 所需的 Provider 由 `libktag_traffic_features.so` 提供，核心库不再内置特征算法。动态宿主使用公共加载器：
 
 ```c
-KTAG_API ktag_status
-ktag_feature_registry_register_legacy_builtins(ktag_feature_registry *registry);
+KTAG_API ktag_loaded_feature_plugin *ktag_feature_plugin_load(
+    const char *path, ktag_feature_registry *registry);
 ```
 
 | 参数 | 说明 |
 |---|---|
-| `registry` | 目标 Registry。 |
+| `path` | Traffic 插件共享库路径。 |
+| `registry` | 接收插件 Provider 的 Registry。 |
 
-返回值：
-
-| 返回值 | 说明 |
-|---|---|
-| `KTAG_SUCCESS` | 注册成功。 |
-| 其他负数 | 注册失败。 |
+返回值：成功返回插件句柄；失败返回 `NULL`，用 `ktag_feature_plugin_get_last_error()` 查询详情。
+在相关 Context、Schema 和 Registry 销毁后调用 `ktag_feature_plugin_unload()`。直接链接 Traffic 插件的宿主也可调用 `ktag_traffic_features_register()`（`ktag_traffic_features.h`），不能与动态加载重复注册同一组 Provider。
 
 ### 4.4 Provider 回调、视图与输出 API
 
@@ -996,6 +995,9 @@ KTAG_API ktag_status ktag_feature_output_set(ktag_feature_output *output,
                                              const char *feature_id,
                                              const float *values,
                                              uint32_t value_count);
+KTAG_API uint32_t ktag_feature_output_annotations_enabled(const ktag_feature_output *output);
+KTAG_API ktag_status ktag_feature_output_set_annotation(
+    ktag_feature_output *output, const char *key, const char *value);
 ```
 
 | 参数 | 说明 |
@@ -1015,6 +1017,10 @@ KTAG_API ktag_status ktag_feature_output_set(ktag_feature_output *output,
 | `KTAG_ERROR_SCHEMA_MISMATCH` | Feature 属于其他 Provider，或 `value_count` 与声明的 `dimension` 不符。 |
 | `KTAG_ERROR_INVALID_STATE` | 同一 Feature 已在本流写入过。 |
 
+文本注解与数值特征独立：Provider 可先查询 `ktag_feature_output_annotations_enabled()`，
+再用 `ktag_feature_output_set_annotation()` 写入诊断文本；只有开启 `collect_annotations` 时才收集，
+由 Batch 注解接口读取，不计入 Schema 数值或模型输入。
+
 #### 4.4.3 Flow View 查询 API
 
 Flow View 是 `flow_create`/`on_packet`/`flow_finish` 回调中的只读流视图：
@@ -1022,31 +1028,23 @@ Flow View 是 `flow_create`/`on_packet`/`flow_finish` 回调中的只读流视�
 ```c
 KTAG_API uint64_t ktag_flow_view_get_flow_id(const ktag_flow_view *flow);
 KTAG_API ktag_status ktag_flow_view_get_flow_key(const ktag_flow_view *flow, ktag_flow_key *key);
-KTAG_API ktag_status ktag_flow_view_get_legacy_tuple(const ktag_flow_view *flow,
-    uint32_t *src_ip, uint16_t *src_port, uint32_t *dst_ip, uint16_t *dst_port,
-    uint8_t *protocol);
+KTAG_API ktag_status ktag_flow_view_get_endpoint(const ktag_flow_view *flow,
+    ktag_direction direction, ktag_ip_address *address, uint16_t *port);
 KTAG_API uint32_t ktag_flow_view_get_packet_count(const ktag_flow_view *flow, ktag_direction direction);
 KTAG_API uint64_t ktag_flow_view_get_total_bytes(const ktag_flow_view *flow, ktag_direction direction);
-KTAG_API ktag_status ktag_flow_view_get_packet_sample(const ktag_flow_view *flow,
-    ktag_direction direction, uint32_t index, ktag_flow_packet_sample *sample);
 KTAG_API const char *ktag_flow_view_get_domain(const ktag_flow_view *flow, ktag_direction direction);
-KTAG_API uint32_t ktag_flow_view_get_rawbow_count(const ktag_flow_view *flow);
-KTAG_API const char *ktag_flow_view_get_rawbow_token(const ktag_flow_view *flow, uint32_t index);
 ```
 
 | API | 说明 |
 |---|---|
 | `ktag_flow_view_get_flow_id` | 返回流 ID（`uint64_t`）。 |
 | `ktag_flow_view_get_flow_key` | 输出规范化 Flow Key；`key` 需初始化版本头。 |
-| `ktag_flow_view_get_legacy_tuple` | 输出**首包方向**的原始 IPv4 五元组（网络字节序 `src_ip`/`dst_ip`），供旧逻辑迁移。 |
+| `ktag_flow_view_get_endpoint` | 按方向输出首包源端点（FORWARD）或目的端点（REVERSE）的 IPv4/IPv6 地址及端口；不使用规范化 A/B 排序。 |
 | `ktag_flow_view_get_packet_count` | 返回指定方向（`KTAG_DIRECTION_FORWARD`/`REVERSE`）的累计包数。 |
 | `ktag_flow_view_get_total_bytes` | 返回指定方向的累计字节数。 |
-| `ktag_flow_view_get_packet_sample` | 取第 `index` 个包样本到 `sample`（**无版本头**结构体，字段：`header_length`、`payload_length`、`timestamp`）；索引越界返回 `KTAG_ERROR_NOT_FOUND`。 |
 | `ktag_flow_view_get_domain` | 返回指定方向端点的域名（来自 Domain Cache/Store），未命中返回 `NULL`。 |
-| `ktag_flow_view_get_rawbow_count` | 返回 RawBoW token 数量。 |
-| `ktag_flow_view_get_rawbow_token` | 返回第 `index` 个 RawBoW token；越界返回 `NULL`。 |
 
-方向枚举：`KTAG_DIRECTION_FORWARD`（`0`，首包方向）/ `KTAG_DIRECTION_REVERSE`（`1`）。
+方向枚举：`KTAG_DIRECTION_FORWARD`（`0`，首包方向）/ `KTAG_DIRECTION_REVERSE`（`1`）。逐包历史由各 Provider 的私有流状态维护；RawBoW 使用 Feature Batch 注解读取，不再从 Flow View 查询。
 
 #### 4.4.4 Packet View 查询 API
 
@@ -1057,6 +1055,8 @@ KTAG_API const uint8_t *ktag_packet_view_get_data(const ktag_packet_view *packet
 KTAG_API ktag_status ktag_packet_view_get_timestamp(const ktag_packet_view *packet, ktag_timestamp *timestamp);
 KTAG_API ktag_status ktag_packet_view_get_transport(const ktag_packet_view *packet, ktag_packet_transport_view *transport);
 KTAG_API const uint8_t *ktag_packet_view_get_payload(const ktag_packet_view *packet, uint32_t *length);
+KTAG_API ktag_status ktag_packet_view_get_capture_lengths(const ktag_packet_view *packet,
+    uint32_t *packet_length, uint32_t *header_length, uint32_t *payload_length);
 ```
 
 | API | 说明 |
@@ -1065,6 +1065,7 @@ KTAG_API const uint8_t *ktag_packet_view_get_payload(const ktag_packet_view *pac
 | `ktag_packet_view_get_timestamp` | 输出报文时间戳。 |
 | `ktag_packet_view_get_transport` | 输出传输层视图，见下表；`transport` 必须先初始化版本头。 |
 | `ktag_packet_view_get_payload` | 返回 L4 载荷指针，`length` 输出字节数；无载荷时长度为 0。 |
+| `ktag_packet_view_get_capture_lengths` | 输出捕获报文、头部和载荷长度，供 Provider 保持链路层填充统计语义。 |
 
 `ktag_packet_transport_view` 字段：
 
@@ -1107,6 +1108,7 @@ Feature Context 持有组流状态和 Provider Pipeline，是特征提取的执�
 | `udp_packet_limit` | UDP 包数上限；`0` 使用默认值 100 |
 | `domain_authority_lookup_on_miss` | Cache 未命中时是否回查 Domain Store |
 | `lifecycle_mode` | 生命周期模式，见下 |
+| `collect_annotations` | 非 0 时收集 Provider 文本注解，仅供诊断，不进入模型输入 |
 
 生命周期模式：
 
@@ -1258,10 +1260,11 @@ Feature Batch 是动态记录数组，承载流完成后的特征记录。记录
 | 查询 | `ktag_feature_batch_get_schema_hash` | Schema Hash。 |
 | 查询 | `ktag_feature_batch_get_record` | 按下标取记录。 |
 | 查询 | `ktag_feature_batch_get_record_details` | 按下标取审计详情。 |
+| 查询 | `ktag_feature_batch_get_annotation` | 按记录下标和键读取文本注解。 |
 
 #### 4.6.2 记录结构
 
-`ktag_feature_record_metadata`（核心元数据，进入模型输入管线）：
+`ktag_feature_record_metadata`（用于记录关联、结果回溯，字段本身不作为模型特征）：
 
 | 字段 | 说明 |
 |---|---|
@@ -1363,6 +1366,8 @@ KTAG_API void ktag_feature_batch_clear(ktag_feature_batch *batch);
 KTAG_API uint32_t ktag_feature_batch_get_count(const ktag_feature_batch *batch);
 KTAG_API uint32_t ktag_feature_batch_get_value_count(const ktag_feature_batch *batch);
 KTAG_API uint64_t ktag_feature_batch_get_schema_hash(const ktag_feature_batch *batch);
+KTAG_API ktag_status ktag_feature_batch_get_annotation(
+    const ktag_feature_batch *batch, uint32_t index, const char *key, const char **value);
 ```
 
 | API | 返回值 |
@@ -1370,6 +1375,7 @@ KTAG_API uint64_t ktag_feature_batch_get_schema_hash(const ktag_feature_batch *b
 | `ktag_feature_batch_get_count` | 当前记录数量。 |
 | `ktag_feature_batch_get_value_count` | 每条记录的值数量。 |
 | `ktag_feature_batch_get_schema_hash` | 绑定 Schema 的 Hash。 |
+| `ktag_feature_batch_get_annotation` | 读取指定记录的注解；成功返回 `KTAG_SUCCESS`，缺失返回 `KTAG_ERROR_NOT_FOUND`。文本借用至 Batch 再次修改或销毁；RawBoW 键为 `traffic.rawbow.text`。 |
 
 #### 4.6.8 `ktag_feature_batch_get_record`
 
@@ -1687,6 +1693,23 @@ KTAG_API ktag_status ktag_domain_cache_get_stats(
 #include <stdio.h>
 #include "ktag_capture.h"
 #include "ktag_feature.h"
+#include "ktag_feature_plugin.h"
+
+static void print_feature_batch(const ktag_feature_batch *batch)
+{
+    uint32_t index;
+    for (index = 0U;
+         index < ktag_feature_batch_get_count(batch); ++index) {
+        ktag_feature_record record = {0};
+        record.struct_size = sizeof(record);
+        record.api_version = KTAG_API_VERSION;
+        if (ktag_feature_batch_get_record(batch, index, &record) ==
+            KTAG_SUCCESS) {
+            printf("flow=%" PRIu64 " values=%u\n",
+                   record.metadata.flow_id, record.value_count);
+        }
+    }
+}
 
 int main(int argc, char **argv)
 {
@@ -1697,9 +1720,10 @@ int main(int argc, char **argv)
 
     ktag_feature_schema *schema = ktag_feature_schema_create_legacy_v1();
     ktag_feature_registry *registry = ktag_feature_registry_create();
-    if (schema == NULL || registry == NULL ||
-        ktag_feature_registry_register_legacy_builtins(registry) !=
-            KTAG_SUCCESS) {
+    ktag_loaded_feature_plugin *plugin = registry == NULL ? NULL :
+        ktag_feature_plugin_load(
+            "/opt/KTAG/output/plugins/libktag_traffic_features.so", registry);
+    if (schema == NULL || plugin == NULL) {
         fprintf(stderr, "Could not create the Legacy V1 feature contract\n");
         return 1;
     }
@@ -1709,7 +1733,7 @@ int main(int argc, char **argv)
     config.api_version = KTAG_API_VERSION;
     config.schema = schema;
     config.registry = registry;
-    config.lifecycle_mode = KTAG_FEATURE_LIFECYCLE_MODERN;
+    config.lifecycle_mode = KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT;
     ktag_feature_context *feature = ktag_feature_create(&config);
     ktag_feature_batch *batch = ktag_feature_batch_create(schema, 16U);
     if (feature == NULL || batch == NULL) {
@@ -1738,30 +1762,22 @@ int main(int argc, char **argv)
         }
         if (ktag_feature_process_packet(feature, &packet, batch) !=
             KTAG_SUCCESS) {
+            ktag_packet_release(&packet);
             break;
         }
+        print_feature_batch(batch);
         ktag_packet_release(&packet);
     }
     ktag_feature_flush(feature, batch);
 
-    uint32_t index;
-    for (index = 0U;
-         index < ktag_feature_batch_get_count(batch); ++index) {
-        ktag_feature_record record = {0};
-        record.struct_size = sizeof(record);
-        record.api_version = KTAG_API_VERSION;
-        if (ktag_feature_batch_get_record(batch, index, &record) ==
-            KTAG_SUCCESS) {
-            printf("flow=%" PRIu64 " values=%u\n",
-                   record.metadata.flow_id, record.value_count);
-        }
-    }
+    print_feature_batch(batch);
 
     ktag_capture_close(capture);
     ktag_feature_batch_destroy(batch);
     ktag_feature_destroy(feature);
     ktag_feature_registry_destroy(registry);
     ktag_feature_schema_destroy(schema);
+    ktag_feature_plugin_unload(plugin);
     return 0;
 }
 ```
@@ -1787,7 +1803,7 @@ flow=2 values=354
 
 ## 5 动态 Feature 插件 ABI（ktag_feature_plugin.h）
 
-Feature Provider 可以编译为独立共享库，由宿主（如 demo 加载器）在运行期通过 `dlopen` 加载。本章定义插件必须满足的 C ABI 契约；宿主负责动态库生命周期、ABI 版本协商和卸载顺序，插件不创建流水线线程。
+Feature Provider 可以编译为独立共享库，由宿主通过 `ktag_feature_plugin_load()` 在运行期加载。本章定义插件必须满足的 C ABI 契约；宿主负责动态库生命周期、ABI 版本协商和卸载顺序，插件不创建流水线线程。
 
 ### 5.1 常量与入口符号
 
@@ -1862,9 +1878,11 @@ KTAG_FEATURE_PLUGIN_EXPORT ktag_status ktag_feature_plugin_query(
 
 ### 5.4 生命周期约束
 
+宿主加载器由 `libktag_feature.so` 提供，加载时完成 ABI 校验和 Provider 注册。`ktag_feature_plugin_get_id()` / `ktag_feature_plugin_get_version()` 查询句柄信息；`ktag_feature_plugin_get_last_error()` 返回线程本地加载错误。插件卸载使用 `ktag_feature_plugin_unload()`，不能直接释放句柄。
+
 - 插件状态由插件管理到 `plugin_destroy`；Provider 注册数据由 Registry 深拷贝（见 4.3.2）。
 - 在 Registry、Schema、Feature Context 或任何回调仍引用插件代码/数据时，**不得卸载**动态库；卸载必须发生在所有 Context 销毁之后。
-- 官方 `libktag_proxy_features.so` 是 `ktag_proxy_v1` Schema 的必需插件，该 Schema 需要完整的 68 个 `proxy.*` Feature；加载与配置方式见《[用户指南](user_guide.md)》。
+- 官方 `libktag_traffic_features.so` 提供通用冻结特征。应用分类加载 Traffic 插件；`ktag_proxy_v1` 还需要 `libktag_proxy_features.so` 提供完整的 68 个 `proxy.*` Feature，两者必须同时加载。配置方式见《[用户指南](user_guide.md)》。
 
 ### 5.5 最小用例
 
@@ -2130,7 +2148,25 @@ KTAG_API ktag_status ktag_prediction_batch_get_record(
 #include <stdio.h>
 #include "ktag_capture.h"
 #include "ktag_feature.h"
+#include "ktag_feature_plugin.h"
 #include "ktag_inference.h"
+
+static void print_prediction_batch(const ktag_prediction_batch *predictions)
+{
+    uint32_t index;
+    for (index = 0U;
+         index < ktag_prediction_batch_get_count(predictions); ++index) {
+        ktag_prediction_record record = {0};
+        record.struct_size = sizeof(record);
+        record.api_version = KTAG_API_VERSION;
+        if (ktag_prediction_batch_get_record(
+                predictions, index, &record) == KTAG_SUCCESS) {
+            printf("flow=%" PRIu64 " label=%" PRId64 " confidence=%.6f\n",
+                   record.metadata.flow_id, record.label,
+                   (double)record.confidence);
+        }
+    }
+}
 
 int main(int argc, char **argv)
 {
@@ -2142,9 +2178,10 @@ int main(int argc, char **argv)
     /* 1. Schema 与 Provider（Legacy V1 契约）。 */
     ktag_feature_schema *schema = ktag_feature_schema_create_legacy_v1();
     ktag_feature_registry *registry = ktag_feature_registry_create();
-    if (schema == NULL || registry == NULL ||
-        ktag_feature_registry_register_legacy_builtins(registry) !=
-            KTAG_SUCCESS) {
+    ktag_loaded_feature_plugin *plugin = registry == NULL ? NULL :
+        ktag_feature_plugin_load(
+            "/opt/KTAG/output/plugins/libktag_traffic_features.so", registry);
+    if (schema == NULL || plugin == NULL) {
         return 1;
     }
 
@@ -2203,29 +2240,18 @@ int main(int argc, char **argv)
         if (ktag_feature_process_packet(feature, &packet, features) ==
                 KTAG_SUCCESS &&
             ktag_feature_batch_get_count(features) > 0U) {
-            ktag_inference_predict(inference, features, predictions);
+            if (ktag_inference_predict(inference, features, predictions) == KTAG_SUCCESS) {
+                print_prediction_batch(predictions);
+            }
         }
         ktag_packet_release(&packet);
     }
 
     /* 5. EOF：flush 剩余流并推理。 */
-    ktag_feature_flush(feature, features);
-    if (ktag_feature_batch_get_count(features) > 0U) {
-        ktag_inference_predict(inference, features, predictions);
-    }
-
-    uint32_t index;
-    for (index = 0U;
-         index < ktag_prediction_batch_get_count(predictions); ++index) {
-        ktag_prediction_record record = {0};
-        record.struct_size = sizeof(record);
-        record.api_version = KTAG_API_VERSION;
-        if (ktag_prediction_batch_get_record(
-                predictions, index, &record) == KTAG_SUCCESS) {
-            printf("flow=%" PRIu64 " label=%" PRId64 " confidence=%.6f\n",
-                   record.metadata.flow_id, record.label,
-                   (double)record.confidence);
-        }
+    if (ktag_feature_flush(feature, features) == KTAG_SUCCESS &&
+        ktag_feature_batch_get_count(features) > 0U &&
+        ktag_inference_predict(inference, features, predictions) == KTAG_SUCCESS) {
+        print_prediction_batch(predictions);
     }
 
     /* 6. 反向销毁。 */
@@ -2236,6 +2262,7 @@ int main(int argc, char **argv)
     ktag_feature_destroy(feature);
     ktag_feature_registry_destroy(registry);
     ktag_feature_schema_destroy(schema);
+    ktag_feature_plugin_unload(plugin);
     return 0;
 }
 ```
@@ -2260,107 +2287,74 @@ flow=2 label=0 confidence=0.873210
 ## 7 端到端调用顺序
 
 ```text
-Capture open → Registry/Schema freeze → Feature Context/Batch
+Capture open → Registry/插件加载/Schema freeze → Feature Context/Batch
       → 模型包校验 → Inference Context/Prediction Batch
       → next → process_packet →（有 Feature 时）predict
       → EOF → flush →（有 Feature 时）predict
       → 依赖对象的反向销毁
 ```
 
-处理 EOF 时，先 `ktag_feature_flush()`，再按依赖反向销毁：Prediction Batch → Inference Context → Capture → Feature Context → Feature Batch → Schema → Registry。生产系统还应定期调用 `ktag_feature_expire()`、处理 `KTAG_STATUS_TIMEOUT`、检查状态码并落实队列背压与资源监控。
+处理 EOF 时，先 `ktag_feature_flush()`，再按依赖反向销毁：Prediction Batch → Inference Context → Capture → Feature Context → Feature Batch → Schema → Registry → 插件卸载。生产系统还应定期调用 `ktag_feature_expire()`、处理 `KTAG_STATUS_TIMEOUT`、检查状态码并落实队列背压与资源监控。
 
-## 8 历史兼容 API（已弃用）
+## 8 冻结特征契约与数据桥接
 
-### 8.1 兼容性开关
+### 8.1 冻结特征提取
 
-`kdadk_feature_extract.h`、`kdadk_inference.h` 保留重构前的旧 ABI，编译开关 `KTAG_LEGACY_FEATURE_COMPAT_AVAILABLE` 与 `KTAG_LEGACY_INFERENCE_COMPAT_AVAILABLE` 当前均为 `1`，在项目所有者明确授权移除前保持源/二进制兼容。全部接口标记 `KDADK_DEPRECATED`，新代码必须使用现代接口。
+特征提取统一使用公共 Feature API，
+由 `libktag_traffic_features.so` 的 Provider 执行。`plugins/traffic_features/legacy/`
+保存冻结的统计算法、HTTP 处理、RawBoW 和 DFA 分词规则。
 
-### 8.2 旧特征提取 API（kdadk_feature_extract.h）
+调用顺序为：创建 Registry → 加载 Traffic Feature Plugin → 构造 Schema → 创建
+Feature Context/Batch → `ktag_feature_process_packet` → `ktag_feature_flush`。
+需要历史流生命周期时，设置 `KTAG_FEATURE_LIFECYCLE_LEGACY_COMPAT`。
+RawBoW 文本在 `collect_annotations` 开启后，用 `ktag_feature_batch_get_annotation()`
+读取 `KTAG_TRAFFIC_RAWBOW_ANNOTATION`（`traffic.rawbow.text`，定义于 `ktag_traffic_features.h`）；不进入模型输入。
+冻结 Schema 继续使用 `ktag_legacy_v1`，每条记录包含 354 个值。
 
-返回值约定：`EXTRACTOR_SUCCESS`（`0`）/ `EXTRACTOR_ERROR`（`-1`）。
+### 8.2 固定向量数据桥接
 
-```c
-feature_extractor *extractor_init(int link_type);
-feature_extractor *extractor_init_with_domain_store(
-    int link_type, ktag_domain_store *domain_store);
-void extractor_destroy(feature_extractor *extractor);
-int process_packet(feature_extractor *extractor, const unsigned char *packet,
-                   uint32_t packet_len, const struct timeval *ts,
-                   feature_vector *features, int *has_feature);
-int process_packet_with_rawbow(feature_extractor *extractor,
-                   const unsigned char *packet, uint32_t packet_len,
-                   const struct timeval *ts, feature_vector *features,
-                   rawbow *rawbows, int *has_feature);
-int extractor_finalize(feature_extractor *extractor,
-                       feature_vector_list *features);
-int extractor_finalize_with_rawbow(feature_extractor *extractor,
-                       feature_vector_list *features, rawbow_list *rawbows);
-int extractor_get_statistics(feature_extractor *extractor, statistics *stats);
-void extractor_reset_statistics(feature_extractor *extractor);
-```
+`ktag_legacy_types.h` 仅保留历史 Demo 文件格式使用的数据类型，不包含提取算法、
+提取器或推理接口。`feature_vector` 仍有 355 个浮点槽位：Feature Batch 的 354 个值按原顺序
+写入前 354 个槽位，最后一个保留槽位为零。Flow ID 位于第 0 个槽位。
+Demo 的私有 C++ Session 负责上述转换，不构成 SDK 公共接口或独立动态库。
 
-| API | 说明 |
-|---|---|
-| `extractor_init` | 按链路层类型创建旧提取器。 |
-| `extractor_init_with_domain_store` | 创建共享 Domain Store 的旧提取器。 |
-| `extractor_destroy` | 销毁提取器。 |
-| `process_packet` | 处理一个原始报文；仅当流结束时通过 `has_feature` 输出单条向量。 |
-| `process_packet_with_rawbow` | 同上，并额外输出 RawBoW。 |
-| `extractor_finalize` / `_with_rawbow` | 输出全部剩余流。 |
-| `extractor_get_statistics` | 查询旧统计（`total_packets`/`total_bytes`/`decoded_packets`/`extracted_flows`）。 |
-| `extractor_reset_statistics` | 重置统计。 |
+### 8.3 统一公共推理 API
 
-数据布局约定：`feature_vector.features[0]` 是 Flow ID，`features[1..354]` 是特征值，`FEATURES_NUM` 为 355。新 Schema 模型包不应继续依赖这一布局。
+模型推理统一使用`ktag_inference_create`、`ktag_inference_predict` 和 `ktag_inference_destroy`，
+输入为 Schema 绑定的 Feature Batch，输出为 Prediction Batch。
+历史 ONNX/Scaler 可通过 `tools/model_package/create_legacy_package.py` 转换为模型包；
+列选择、包数过滤和标准化规则均由模型包定义。
 
-### 8.3 旧推理 API（kdadk_inference.h）
+### 8.4 版本查询（ktag_core.h）
 
-返回值约定：`INFERENCE_SUCCESS`（`0`）/ `INFERENCE_ERROR`（`-1`）。
+查询产品元数据及库版本，实现位于 `src/core/version.c`。执行 `sh build.sh -lib`，或在已有构建上设置 `ENABLE_BUILD_LIB=ON`，生成独立的 `libktag_appidlib.so`；调用方链接 `-lktag_appidlib`；该库目前不随 `KTAGTargets` 导出。库版本指针指向库内只读存储，调用方无需释放。
 
 ```c
-inference_engine *inference_init(const inference_config *config);
-void inference_destroy(inference_engine *engine);
-int inference_predict(inference_engine *engine,
-                      const feature_vector_list *features,
-                      inference_result *result);
-```
-
-| API | 说明 |
-|---|---|
-| `inference_init` | 按 `config.config_file`（YAML 路径）创建旧推理引擎。 |
-| `inference_destroy` | 销毁引擎。 |
-| `inference_predict` | 对旧向量列表批量推理。`inference_result.predictions` 数组由调用方预先分配，容量必须覆盖结果数量；`count` 返回实际数量。 |
-
-### 8.4 `KDADK_GetProductVersion`（kdadk_core.h）
-
-查询历史产品元数据。
-
-```c
-KDADKResult KDADK_GetProductVersion(KDADKProVersion *packageInfo);
+KTAGResult KTAG_GetProductVersion(KTAGProVersion *packageInfo);
+const KTAGLibraryVersion *KTAG_GetLibVersion(void);
 ```
 
 | 参数 | 说明 |
 |---|---|
-| `packageInfo` | 输出参数。调用方提供的 `KDADKProVersion` 存储，包含产品、组件与软件的名称、版本和附加信息字段，均为固定长度 `KDADK_VERSION_INFO_LEN` 字符数组。 |
+| `packageInfo` | 输出参数。调用方提供的 `KTAGProVersion` 存储，包含产品、组件与软件的名称、版本和附加信息字段，均为固定长度 `KTAG_VERSION_INFO_LEN` 字符数组。 |
 
-返回值：
+`KTAG_GetProductVersion` 返回值：
 
 | 返回值 | 说明 |
 |---|---|
-| `KDADK_STS_NO_ERR` | 查询成功。 |
-| `KDADK_STS_NULL_PTR_ERR` | 指针为空。 |
+| `KTAG_STS_NO_ERR` | 查询成功。 |
+| `KTAG_STS_NULL_PTR_ERR` | 指针为空。 |
 
-### 8.5 迁移对照表
+### 8.5 接入方式
 
-| 历史接口 | 现代替代 |
+| 能力 | 接口 |
 |---|---|
-| `extractor_init` / `extractor_init_with_domain_store` | `ktag_feature_create`（含 `shared_domain_store` 配置） |
-| `process_packet` | `ktag_feature_process_packet` |
-| `process_packet_with_rawbow` | Provider 回调 + `ktag_flow_view_get_rawbow_*` |
-| `extractor_finalize` / `_with_rawbow` | `ktag_feature_flush` |
-| `extractor_get_statistics` | `ktag_feature_get_statistics` |
-| `extractor_reset_statistics` | 重建 Feature Context |
-| `inference_init` / `inference_predict` / `inference_destroy` | `ktag_inference_create` / `ktag_inference_predict` / `ktag_inference_destroy` + 模型包 |
-| `KDADK_GetProductVersion` | 无对应现代运行时接口 |
+| 创建特征运行上下文 | `ktag_feature_create` |
+| 处理报文、读取结果 | `ktag_feature_process_packet` 与 Feature Batch API |
+| 输出剩余流 | `ktag_feature_flush` |
+| 查询特征运行统计 | `ktag_feature_get_statistics` |
+| 模型推理 | `ktag_inference_create` / `ktag_inference_predict` / `ktag_inference_destroy` |
+| 产品元数据 / 库版本 | `KTAG_GetProductVersion` / `KTAG_GetLibVersion` |
 
 ## 9 协议边界与限制
 
