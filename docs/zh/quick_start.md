@@ -7,7 +7,8 @@
 已完成 KTAG 编译（见《[编译指南](installation_guide.md)》），并确认产物存在：
 
 ```bash
-ls -l /opt/KTAG/output/ktag_demo
+ls -l /opt/KTAG/output/ktag_demo \
+  /opt/KTAG/output/plugins/libktag_traffic_features.so
 ```
 
 仅使用已有模型推理时不需要 Python；要训练自己的模型（第四、五步），先安装依赖：
@@ -23,13 +24,15 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 ```bash
 mkdir -p /opt/KTAG/work/{pcap,csv,model,result}
 cp /opt/KTAG/tools/demo/config.yaml /opt/KTAG/work/app.yaml
+sed -i 's|../../output/plugins/|/opt/KTAG/output/plugins/|g; s|../../result|/opt/KTAG/result|g' \
+  /opt/KTAG/work/app.yaml
 ```
 
-把待处理的 PCAP 文件放入 `/opt/KTAG/work/pcap/`。
+上述替换将示例中的插件和结果路径改为绝对路径，避免配置复制到 `work/` 后解析到其他目录。代理配置也应加载 Traffic 和 Proxy 两个插件，完整配置见《[用户指南](user_guide.md)》。把待处理的 PCAP 文件放入 `/opt/KTAG/work/pcap/`。
 
 ## 第二步：PCAP 离线推理
 
-确认 `/opt/KTAG/work/app.yaml` 中的 `pipeline.model_package_path` 指向已收到的模型包目录（配置修改方法见《[用户指南](user_guide.md)》），然后执行推理，输出 CSV：
+确认 `/opt/KTAG/work/app.yaml` 中的 `pipeline.model_package_path` 指向已准备好的应用模型包目录（建议使用绝对路径，配置修改方法见《[用户指南](user_guide.md)》），然后执行推理，输出 CSV：
 
 ```bash
 /opt/KTAG/output/ktag_demo -r /opt/KTAG/work/app.yaml \

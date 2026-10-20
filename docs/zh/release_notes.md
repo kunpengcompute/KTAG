@@ -50,11 +50,13 @@
 
 |特性名称|更新说明|
 |--|--|
-|三层公共 API|增加 Capture、Feature、Inference 三层公共 API，旧固定向量接口作为兼容层保留。|
+|三层公共 API|Capture、Feature、Inference 三层公共 API 统一承载提取与推理；旧固定向量提取、推理接口及独立兼容库已移除。|
+|插件化特征提取|冻结算法位于 `plugins/traffic_features/legacy/`，由 `libktag_traffic_features.so` 提供；Traffic 与 Proxy 插件默认构建。|
 |IPv4/IPv6 双栈|Capture/Feature 支持 IPv4/IPv6 TCP、UDP、规范化 Flow Key 和 DNS A/AAAA 关联。|
 |Schema Pipeline|增加 Schema 化特征 CSV、Schema Hash 和模型包输入契约校验；保留 `ktag_legacy_v1` 应用 Schema：53 个 Feature Descriptor、354 个数值，训练排除 Flow ID 和源/目的 IP 后输入 351 个数值。|
 |代理分类|增加 `ktag_proxy_v1` 代理 Schema：118 个 Feature Descriptor、619 个数值；增加 `libktag_proxy_features.so`，提供 Sequence/Burst、TCP/TLS/Carrier 和轻量级 QUIC 特征。|
-|并行模式|demo 支持 `single_thread`、`staged`、`feature_parallel`、`full_parallel` 四种 Pipeline Mode，并保留 `legacy` 路径。|
+|并行模式|demo 支持 `single_thread`、`staged`、`feature_parallel`、`full_parallel` 四种 Pipeline Mode，`legacy` 仅保留历史调度和输出格式，推理同样使用公共 Inference API 和模型包。|
+|版本查询|版本查询实现位于 `src/core/`，通过 `ENABLE_BUILD_LIB=ON` 或 `sh build.sh -lib` 生成独立的 `libktag_appidlib.so`。|
 |双栈训练评估|训练/评估支持 IPv4-only、IPv6-only 或混合数据；评估输出整体及可用地址族分层报告、混淆矩阵和逐流 confidence。|
 
 ## V1.0.0

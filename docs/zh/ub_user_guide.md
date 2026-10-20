@@ -92,12 +92,15 @@ export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:/path/to/KTAG/output:${
 ### 3.4 检查 KTAG 可执行文件
 
 ```bash
-# 使用以下命令检查 KTAG 可执行文件
+# 在仓库根目录启用 UB 传输并构建
+KTAG_ENABLE_DPDK_UB=ON sh build.sh
+# 使用以下命令检查 KTAG 可执行文件和必需插件
+ls -l output/plugins/libktag_traffic_features.so
 ldd output/ktag_demo | grep -E 'rte_ub_ring|ubsm_sdk|not found'
 output/ktag_demo -h | grep -E 'distributed-role|node-id'
 ```
 
-应能看到 `librte_ub_ring`、`libubsm_sdk`，且不能有 `not found`。帮助信息中应包含 `--distributed-role` 和 `--node-id`。
+应能看到 `librte_ub_ring`，且不能有 `not found`；其 UB 依赖还应结合第 3.3 节检查。帮助信息中应包含 `--distributed-role` 和 `--node-id`，但帮助参数本身不能证明已启用 UB。`sh build.sh dpdk` 只启用 DPDK 收包后端，UB 传输需独立设置 `KTAG_ENABLE_DPDK_UB=ON`。
 
 ## 4. 四节点配置
 
@@ -122,7 +125,7 @@ sha256sum tools/demo/config.yaml
 
 ```yaml
 pipeline:
-  enabled: false
+  enabled: true
   mode: feature_parallel
   model_package_path: ../../result/legacy_model_package
 
@@ -157,6 +160,8 @@ pipeline:
       poll_us: 50
       eal_arguments: [ktag_demo, --no-huge, -l, "0"]
 
+  plugins:
+    - ../../output/plugins/libktag_traffic_features.so
   schema:
     name: ktag_legacy_v1
     version: 1
@@ -164,7 +169,7 @@ pipeline:
     add_features: []
 ```
 
-`--distributed-role frontend/backend` 会强制启用对应的分布式 Pipeline，因此测试命令必须带上该参数；配置中的 `enabled: false` 是为了保持普通 Pipeline 默认关闭，不代表本次命令会退回普通单机模式。
+`pipeline.enabled: true` 表示普通单机 Pipeline 默认启用；`distributed.ub_ring.enabled: false` 表示 UB 默认关闭。`--distributed-role frontend/backend` 会为本次运行启用对应的 UB 角色，因此测试命令必须同时指定该参数与 `--node-id`。Frontend 当前要求 `feature_parallel`，Backend 要求一个推理线程。
 
 `tools/demo/proxy_config.yaml` 当前用于代理特征、训练和单机推理，文件中没有 `pipeline.distributed.ub_ring` 配置，因此本次 UB 3:1 验证直接使用 `config.yaml`。如果后续要验证代理模型通过 UB 传输，需要在代理配置中补充同一套 `distributed.ub_ring` 配置，并同时保证 Backend 的代理模型包和四台机器的 Schema 配置一致。
 
@@ -178,7 +183,7 @@ pipeline:
 | `provider_shm_size` | 每个 Provider 创建的共享内存大小，四台配置保持一致 |
 | `queues_per_provider` | 当前实现固定为 `1` |
 | `queue_depth` | Ring 深度，必须为 2 的幂；当前建议 `1024` |
-| `data_element_size` | 应用可见 Feature Frame 最大载荷 |
+| `data_element_size` | 应用可见 Feature Frame 最大载荷，需容纳当前 Schema 的编码帧（含元数据） |
 | `credits_per_provider` | Backend 为每个 Provider 预投递的空 buffer 数量，必须小于 `queue_depth`；当前建议 `256` |
 | `backpressure.policy` | 必须为 `block`，过载时阻塞，不主动丢弃 Feature |
 | `inference.threads` | 当前 Backend 实现固定为 `1` |
@@ -186,9 +191,9 @@ pipeline:
 
 ### 4.3 是否需要 `ground_truth_labels`
 
-如果只是验证特征传输和基于已有模型的推理，不需要训练，也可以不配置 `ground_truth_labels`。此时每个 `-p` 文件使用默认的 source index，Backend 仍会正常推理并落地结果。
+如果只是验证特征传输和基于已有模型的推理，不需要训练，也可以不配置 `ground_truth_labels`。此时每个 `-p` 文件仍携带 source index 用于来源关联，但不会被当作真实类别参与监督统计；Backend 会正常推理并落地结果。
 
-只有在需要给 PCAP 指定真实类别、生成带监督统计的结果时才配置它。每个 Provider 的数组长度必须等于该 Provider 启动命令中的 `-p` 数量，例如：
+只有在需要给 PCAP 指定真实类别、生成带监督统计的结果时才配置它。该字段放在 `pipeline.distributed.ub_ring` 下，必须覆盖全部 Provider；每个 Provider 的数组长度必须等于该 Provider 启动命令中的 `-p` 数量，例如：
 
 ```yaml
 ground_truth_labels:
@@ -203,7 +208,7 @@ ground_truth_labels:
 
 ### 5.1 测试前准备
 
-1. 四台机器部署相同版本的 `output/ktag_demo`、配置文件和必要运行库。
+1. 四台机器部署相同版本的 `output/ktag_demo`、三层公共库、`output/plugins/libktag_traffic_features.so` 和配置文件；保留相对布局，复制配置后调整插件和模型包路径。
 2. 三台 Frontend 各自准备 PCAP；PCAP 不要求内容相同，建议先使用已经通过单机基线验证的数据。
 3. Backend 准备与 YAML Schema 匹配的模型包。
 4. 停止上一轮遗留的 `ktag_demo` 进程。不要在进程仍运行时重复启动同一套 `region`/`shm_prefix`。
@@ -340,12 +345,12 @@ head -n 5 /data/result/ub-3to1.csv
 | 只启动一个或两个 Provider | Backend 会等待所有三个 Provider；检查三台 Frontend 的日志和进程状态 |
 | 过载时吞吐下降、Frontend 等待 | 属于 `block` 背压的预期表现；应确认没有主动丢弃和最终计数不一致 |
 
-如果怀疑仍在运行旧二进制，先检查构建产物和依赖，再重新部署四台机器
+如果怀疑仍在运行旧二进制，先检查构建产物、插件和依赖，再重新部署四台机器。
 
 ## 8. 测试边界
 
 - 本测试验证的是“Frontend 特征提取 → UB 共享内存 → Backend 接收 → 推理 → Backend 落地”的链路，不验证模型训练过程。
 - 默认使用已有模型包；不配置 `ground_truth_labels` 也可以完成链路验证。
-- 本实现当前固定为 3 个 Provider、1 个 User 的拓扑扩展方式，且每个 Provider 1 个队列、Backend 1 个推理线程。
+- 本指南使用 3 个 Provider、1 个 User；代码支持多个 Provider 与唯一 User，节点总数不超过 256。当前每个 Provider 固定 1 个队列、Backend 固定 1 个推理线程。
 - Backend 不把推理结果发送回 Frontend。
 - 过载时允许阻塞，本文不把“处理速度下降”判定为 UB 丢包；需要重点区分主动丢弃、底层网卡丢包和正常背压等待。

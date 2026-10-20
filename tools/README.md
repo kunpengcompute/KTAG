@@ -84,8 +84,8 @@ python3 /opt/KTAG/tools/model_package/create_legacy_package.py \
   --output /opt/KTAG/result/legacy_model_package
 ```
 
-Demo 不再依赖旧推理库。没有外部旧 C 接口调用者时，可同时设置
-`-DKTAG_BUILD_LEGACY_COMPAT=OFF -DKTAG_INSTALL_LEGACY_COMPAT=OFF`，仍可构建并安装 Demo。
+模型推理统一使用公共 `libktag_inference.so`，旧固定向量推理接口与独立兼容库已移除。
+`ktag_legacy_types.h` 仅保留历史文件格式的数据类型；版本查询由独立的版本库目标提供。
 
 同一份完整 YAML 可保持 `pipeline.enabled: false` 以默认走旧路径，并在某次调用时
 临时启用某种拓扑：

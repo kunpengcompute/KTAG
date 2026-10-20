@@ -13,11 +13,11 @@ KTAG是鲲鹏数据分析开发套件的网络流分类库，包含流汇聚、�
 
 当前公共库按 Capture、Feature、Inference 三层交付。新架构支持 callbacks
 自定义特征、Schema 化模型契约和由 demo 组织的单线程/多线程流水线。冻结的 `ktag_legacy_v1` 特征由 Traffic Feature Plugin 提供；旧提取接口已移除，
-Demo 推理统一使用公共 Inference API；旧推理与版本查询接口暂时作为可选兼容能力保留。
+模型推理统一使用公共 Inference API，旧固定向量推理接口和独立兼容库已移除；产品版本查询独立保留。
 
 项目命名已统一为 KTAG。使用早期版本的项目需要同步更新头文件、库名、
 接口名称、构建参数和安装路径，并重新编译；命令行程序统一为 `ktag_demo`。
-冻结特征计算统一由插件执行；旧推理的数据布局仍保留，但旧提取接口已经移除。
+冻结特征计算统一由插件执行；历史文件格式的数据布局继续保留，提取和推理统一使用公共 API。
 
 当前仓库还提供 IPv4/IPv6 双栈 Schema 特征提取和独立的应用/代理分类配置。代理
 分类使用可选的 `libktag_proxy_features.so` 插件和 619 维 `ktag_proxy_v1` Schema。
@@ -42,8 +42,7 @@ Demo 推理统一使用公共 Inference API；旧推理与版本查询接口暂�
 │   ├── core                                                  # 库级基础能力与版本查询
 │   ├── capture                                               # 报文读取与流标识
 │   ├── feature                                               # 组流与特征计算
-│   ├── inference                                             # 模型加载与批量推理
-│   └── legacy                                                # 可选旧模型推理兼容接口
+│   └── inference                                             # 模型加载与批量推理
 |—— test                                                      # 测试框架
 |—— tools                                                     # 工具集
 │   ├── demo                                                  # 训练/评估/推理命令行工具
