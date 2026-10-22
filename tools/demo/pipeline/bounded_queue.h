@@ -118,6 +118,21 @@ public:
         return true;
     }
 
+    // False means either deadline expiry or a closed, drained queue.
+    bool pop_until(T *value, std::chrono::steady_clock::time_point deadline)
+    {
+        if (value == nullptr) return false;
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (!not_empty_.wait_until(lock, deadline, [this]() {
+                return closed_ || !queue_.empty();
+            }) || queue_.empty()) return false;
+        *value = std::move(queue_.front());
+        queue_.pop_front();
+        ++statistics_.popped;
+        not_full_.notify_one();
+        return true;
+    }
+
     bool try_pop(T *value)
     {
         if (value == nullptr) {

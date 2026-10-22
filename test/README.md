@@ -52,6 +52,8 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 | `func_feature_schema.cpp` | Schema 组合与维度展开 |
 | `func_inference.cpp` | 公共 Inference 配置校验、线程数边界和 Prediction Batch 生命周期 |
 | `func_inference_contract.cpp` | 模型包与 Schema 契约校验 |
+| `func_latency.cpp` | 逐包关联、流代际隔离、精确分位数、定时队列和计时参数校验 |
+| `func_latency_pipeline.cpp` | 真实 ONNX/PCAP 的单/多线程、逐流/逐包、尾批、过滤及失败清理 |
 | `func_demo_inference_session.cpp` | 历史 Demo 调度的公共推理桥接：真实 ONNX 推理、过滤后源记录对齐、标准化及错误处理 |
 | `func_proxy_features.cpp` | 代理特征插件：Sequence/Burst、TCP Signature、QUIC |
 | `func_demo_pipeline.cpp` | demo Pipeline：配置解析、队列容量与背压、Schema CSV/预测输出契约、插件加载与卸载、冻结 Schema 保护 |
@@ -88,7 +90,8 @@ make rfunc func=KTAGFeatureProvider
 
 ## 4. 性能测试
 
-性能测试包含 `perf_calculate.cpp`（特征计算）和 `perf_e2e.cpp`（端到端耗时）。
+原性能测试 `perf_calculate.cpp` 与 `perf_e2e.cpp` 测量统计函数微基准，后者并未执行完整推理链路。
+单机纯推理、逐流/逐包端到端时延及单/多线程批次对比，使用《[时延测试说明](latency/README.md)》中的 Demo 测试入口与脚本。
 
 ```bash
 # 构建性能测试（生成 ktag_appid_perftest）

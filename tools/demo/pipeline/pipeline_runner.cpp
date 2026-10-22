@@ -2,6 +2,7 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "pipeline_runner.h"
+#include "latency_benchmark.h"
 
 #include "../utils.h"
 #include "bounded_queue.h"
@@ -2648,6 +2649,19 @@ int ktag_demo_run_pipeline_internal(
                 plugin_loader.size());
     if (!config.feature_only) {
         std::printf("模型输入值数量: %u\n", model_input_value_count);
+    }
+
+    if (!config.latency.mode.empty()) {
+      if (interface_name || output_file || config.feature_only || config.ub.enabled) {
+        std::fprintf(stderr, "latency benchmark requires offline -p input and --latency-output only\n");
+        return -1;
+      }
+      const auto make_feature = [&](ktag_domain_store *store) {
+        return create_feature_context(config, schema.get(), registry.get(), store).release();
+      };
+      const auto make_inference = [&] { return create_inference_context(config, schema.get()).release(); };
+      return ktag_demo_run_latency_benchmark(config, schema.get(), pcap_files, pcap_file_count,
+          make_feature, make_inference, &pipeline_interrupted);
     }
 
     std::vector<pipeline_prediction> predictions;

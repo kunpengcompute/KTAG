@@ -37,7 +37,13 @@ enum {
   KTAG_DEMO_OPT_DISTRIBUTED_ROLE,
   KTAG_DEMO_OPT_NODE_ID,
   KTAG_DEMO_OPT_DPDK,
-  KTAG_DEMO_OPT_DPDK_EAL_ARGS
+  KTAG_DEMO_OPT_DPDK_EAL_ARGS,
+  KTAG_DEMO_OPT_LATENCY_MODE,
+  KTAG_DEMO_OPT_LATENCY_OUTPUT,
+  KTAG_DEMO_OPT_LATENCY_BATCH,
+  KTAG_DEMO_OPT_LATENCY_WARMUP,
+  KTAG_DEMO_OPT_LATENCY_ITERATIONS,
+  KTAG_DEMO_OPT_LATENCY_PACKET_DETAILS
 };
 
 typedef struct {
@@ -59,6 +65,10 @@ typedef struct {
   char *node_id;              // UB 拓扑中的本机 hostname
   int use_dpdk;               // --dpdk: 用 DPDK PMD 收网卡报文
   char *dpdk_eal_args; // --dpdk-eal-args: EAL 参数(空格分隔字符串)
+  char *latency_mode;
+  char *latency_output;
+  uint32_t latency_batch, latency_warmup, latency_iterations;
+  int latency_packet_details, latency_options_set;
 } CommandLineArgs;
 
 int feature_extraction_mode(const char *pcap_file, const char *output_file,
@@ -453,6 +463,12 @@ void print_usage(const char *prog_name) {
          "legacy/single_thread/staged/feature_parallel/full_parallel\n");
   printf("  -n, --feature-threads N Feature Worker 数量（仅新 pipeline）\n");
   printf("  --inference-threads N   Inference Worker 数量（仅新 pipeline）\n");
+  printf("  --latency-mode MODE    单机离线时延测试: inference/e2e（single_thread/full_parallel）\n");
+  printf("  --latency-output PATH  时延 CSV 报表前缀（不与 -c/-j 同用）\n");
+  printf("  --latency-batch-size N 每次输入流数上限，默认 1（严格不组批）\n");
+  printf("  --latency-warmup N     纯推理每 Worker 预热次数，默认 1000，允许 0\n");
+  printf("  --latency-iterations N 纯推理每 Worker 测量次数，默认 10000\n");
+  printf("  --latency-packet-details 额外输出逐包 CSV（始终统计逐包分位数）\n");
   printf("  --distributed-role R    UB 节点角色: frontend/backend\n");
   printf("  --node-id HOSTNAME      本机在 UB 拓扑中的 hostname\n");
   printf(
@@ -548,6 +564,9 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
   memset(args, 0, sizeof(CommandLineArgs));
   args->mode = 1; // 默认批处理模式
   args->operation = -1;
+  args->latency_batch = 1U;
+  args->latency_warmup = 1000U;
+  args->latency_iterations = 10000U;
   args->with_rawbow = 0; // 默认不输出raw payload
   int opt;
   int pcap_capacity = 20; // 默认最大支持20个pcap
@@ -573,6 +592,12 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       {"dpdk", no_argument, nullptr, KTAG_DEMO_OPT_DPDK},
       {"dpdk-eal-args", required_argument, nullptr,
        KTAG_DEMO_OPT_DPDK_EAL_ARGS},
+      {"latency-mode", required_argument, nullptr, KTAG_DEMO_OPT_LATENCY_MODE},
+      {"latency-output", required_argument, nullptr, KTAG_DEMO_OPT_LATENCY_OUTPUT},
+      {"latency-batch-size", required_argument, nullptr, KTAG_DEMO_OPT_LATENCY_BATCH},
+      {"latency-warmup", required_argument, nullptr, KTAG_DEMO_OPT_LATENCY_WARMUP},
+      {"latency-iterations", required_argument, nullptr, KTAG_DEMO_OPT_LATENCY_ITERATIONS},
+      {"latency-packet-details", no_argument, nullptr, KTAG_DEMO_OPT_LATENCY_PACKET_DETAILS},
       {nullptr, 0, nullptr, 0}};
   while ((opt = getopt_long(argc, argv, "t:e:f:r:p:i:m:c:j:n:wlh", long_options,
                             nullptr)) != -1) {
@@ -637,6 +662,26 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
         return -1;
       }
       break;
+    case KTAG_DEMO_OPT_LATENCY_MODE:
+      if (strcmp(optarg, "inference") != 0 && strcmp(optarg, "e2e") != 0) {
+        fprintf(stderr, "错误: --latency-mode 必须为 inference 或 e2e\n"); return -1;
+      }
+      args->latency_mode = optarg;
+      break;
+    case KTAG_DEMO_OPT_LATENCY_OUTPUT:
+      args->latency_output = optarg; args->latency_options_set = 1; break;
+    case KTAG_DEMO_OPT_LATENCY_BATCH:
+      if (parse_positive_u32(optarg, "--latency-batch-size", &args->latency_batch) != 0) return -1;
+      args->latency_options_set = 1; break;
+    case KTAG_DEMO_OPT_LATENCY_WARMUP:
+      if (strcmp(optarg, "0") == 0) args->latency_warmup = 0;
+      else if (parse_positive_u32(optarg, "--latency-warmup", &args->latency_warmup) != 0) return -1;
+      args->latency_options_set = 1; break;
+    case KTAG_DEMO_OPT_LATENCY_ITERATIONS:
+      if (parse_positive_u32(optarg, "--latency-iterations", &args->latency_iterations) != 0) return -1;
+      args->latency_options_set = 1; break;
+    case KTAG_DEMO_OPT_LATENCY_PACKET_DETAILS:
+      args->latency_packet_details = 1; args->latency_options_set = 1; break;
     case KTAG_DEMO_OPT_FEATURE_CONFIG:
       args->feature_config_file = optarg;
       break;
@@ -724,6 +769,17 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       args->inference_threads != 0U || args->distributed_role != nullptr ||
       args->node_id != nullptr || args->use_dpdk != 0 ||
       args->dpdk_eal_args != nullptr;
+  if ((args->latency_options_set && !args->latency_mode) ||
+      (args->latency_mode && (args->operation != 3 || args->num_pcap_files == 0 ||
+       args->interface || args->distributed_role || args->use_dpdk || args->dpdk_eal_args ||
+       args->output_file || !args->latency_output || !args->latency_output[0] ||
+       args->latency_batch > 65536 ||
+       (args->pipeline_mode && strcmp(args->pipeline_mode, "legacy") == 0) ||
+       (args->latency_packet_details && strcmp(args->latency_mode, "inference") == 0)))) {
+    fprintf(stderr, "错误: 时延测试仅支持 -r/-p 单机离线输入，需 --latency-mode 和 --latency-output；"
+                    "不支持 -c/-j、legacy、UB、DPDK；逐包明细仅用于 e2e\n");
+    return -1;
+  }
   if (args->feature_config_file != nullptr && args->operation != 2) {
     fprintf(stderr, "错误: --config 只能与 Schema 特征提取模式 -f 一起使用\n");
     return -1;
@@ -859,7 +915,7 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
 
     // 如果是PCAP文件输入，必须有输出文件
     if (!distributed_frontend && args->num_pcap_files > 0 &&
-        !args->output_file) {
+        !args->output_file && !args->latency_mode) {
       fprintf(stderr, "错误: 在线推理模式（PCAP文件输入）需要指定输出文件 (-c "
                       "<output.csv> 或 -j <output.json>)\n");
       fprintf(stderr, "提示: 使用 -c 参数指定CSV格式输出，或使用 -j "
@@ -975,7 +1031,7 @@ int main(int argc, char *argv[]) {
       overrides.force_enable =
           args.pipeline_mode != nullptr || args.feature_threads != 0U ||
           args.inference_threads != 0U || args.distributed_role != nullptr ||
-          args.use_dpdk != 0 || args.dpdk_eal_args != nullptr;
+          args.use_dpdk != 0 || args.dpdk_eal_args != nullptr || args.latency_mode != nullptr;
       overrides.feature_threads = args.feature_threads;
       overrides.inference_threads = args.inference_threads;
       if (args.distributed_role != nullptr) {
@@ -1000,6 +1056,23 @@ int main(int argc, char *argv[]) {
                 pipeline_error.c_str());
         ret = -1;
       } else if (pipeline_result == ktag_demo_pipeline_config_result::enabled) {
+        if (args.latency_mode) {
+          if (pipeline_config.capture_backend != ktag_demo_capture_backend::pcap || pipeline_config.ub.enabled ||
+              (pipeline_config.mode != ktag_demo_pipeline_mode::single_thread &&
+               pipeline_config.mode != ktag_demo_pipeline_mode::full_parallel)) {
+            fprintf(stderr, "错误: 时延测试要求 PCAP 后端、关闭 UB，并选择 single_thread 或 full_parallel\n");
+            ret = -1; break;
+          }
+          pipeline_config.latency.mode = args.latency_mode;
+          pipeline_config.latency.output_prefix = args.latency_output;
+          pipeline_config.latency.batch_size = args.latency_batch;
+          pipeline_config.latency.warmup = args.latency_warmup;
+          pipeline_config.latency.iterations = args.latency_iterations;
+          pipeline_config.latency.packet_details = args.latency_packet_details != 0;
+          // Compare KTAG Worker parallelism independently of ONNX internal pools.
+          pipeline_config.inference_intra_op_threads = 1U;
+          pipeline_config.inference_inter_op_threads = 1U;
+        }
         if (pipeline_config.capture_backend ==
             ktag_demo_capture_backend::dpdk) {
 #ifdef KTAG_DEMO_HAVE_DPDK

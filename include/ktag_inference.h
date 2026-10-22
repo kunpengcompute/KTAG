@@ -86,6 +86,22 @@ KTAG_API ktag_status ktag_inference_predict(ktag_inference_context *context,
                                             const ktag_feature_batch *features,
                                             ktag_prediction_batch *predictions);
 
+/* Optional diagnostic timing. Only synchronous ONNX Session::Run is timed;
+ * preprocessing, tensor construction and result conversion are excluded.
+ * Zero model_record_count means preprocessing skipped all records. */
+typedef struct {
+  uint32_t struct_size;
+  uint32_t api_version;
+  uint32_t input_record_count;
+  uint32_t model_record_count;
+  uint64_t model_nanoseconds;
+} ktag_inference_timing;
+
+KTAG_API ktag_status ktag_inference_predict_with_timing(
+    ktag_inference_context *context, const ktag_feature_batch *features,
+    ktag_prediction_batch *predictions, ktag_inference_timing *timing);
+
+
 KTAG_API uint64_t
 ktag_inference_get_schema_hash(const ktag_inference_context *context);
 

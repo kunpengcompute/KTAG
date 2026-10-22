@@ -27,6 +27,7 @@ add_executable(
     utils.cpp
     pipeline/pipeline_config.cpp
     pipeline/pipeline_runner.cpp
+    pipeline/latency_benchmark.cpp
     pipeline/schema_feature_writer.cpp
     pipeline/ub_feature_wire.cpp
     pipeline/demo_capture_source.cpp

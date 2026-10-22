@@ -45,7 +45,17 @@ struct ktag_demo_ub_config {
   std::map<std::string, std::vector<uint32_t>> ground_truth_labels;
 };
 
+struct ktag_demo_latency_options {
+  std::string mode; // Empty disables the benchmark; inference or e2e enables it.
+  std::string output_prefix;
+  uint32_t batch_size = 1U;
+  uint32_t warmup = 1000U; // Pure-inference mode only, per inference worker.
+  uint32_t iterations = 10000U; // Measured calls per inference worker.
+  bool packet_details = false;
+};
+
 struct ktag_demo_pipeline_config {
+  ktag_demo_latency_options latency;
   bool enabled = false;
   bool feature_only = false;
   ktag_demo_pipeline_mode mode = ktag_demo_pipeline_mode::single_thread;
