@@ -2,7 +2,7 @@
 
 本文以 `include/` 下发布的头文件为准，按模块分章介绍 KTAG 的公开 C API。每章先给出 API 清单，再逐个说明 API 的功能、签名、参数和返回值；关键流程在章末补充最小用例。所有推理入口统一使用 Capture、Feature、Inference 三层 API；历史文件格式的数据桥接见[第 8 章](#8-冻结特征契约与数据桥接)。
 
-应用/代理分类配置和命令行操作见《[用户指南](user_guide.md)》；快速执行 demo 见《[快速上手指南](quick_start.md)》。
+应用/代理分类配置和命令行操作见《[用户指南](user_guide.md)》；快速执行 demo 见《[快速入门](quick_start.md)》。
 
 ## 1 文档范围与公共约定
 
@@ -2311,7 +2311,7 @@ Capture open → Registry/插件加载/Schema freeze → Feature Context/Batch
       → 依赖对象的反向销毁
 ```
 
-处理 EOF 时，先 `ktag_feature_flush()`，再按依赖反向销毁：Prediction Batch → Inference Context → Capture → Feature Context → Feature Batch → Schema → Registry → 插件卸载。生产系统还应定期调用 `ktag_feature_expire()`、处理 `KTAG_STATUS_TIMEOUT`、检查状态码并落实队列背压与资源监控。
+处理 EOF 时，先 `ktag_feature_flush()`，再按依赖反向销毁：Prediction Batch → Inference Context → Capture → Feature Context → Feature Batch → Schema → Registry → 插件卸载。生产系统还应定期调用 `ktag_feature_expire()`、处理 `KTAG_STATUS_TIMEOUT`、检查状态码并落实队列背压与资源记录。
 
 ## 8 冻结特征契约与数据桥接
 
