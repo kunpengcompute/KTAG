@@ -138,6 +138,14 @@ bool is_delimiter(unsigned char c)
 }
 bool is_ascii_digit(unsigned char c) { return c >= '0' && c <= '9'; }
 bool is_ascii_alpha(unsigned char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+// ISO-8859-1 letters in the high range (matches std::isalpha under en_US.ISO-8859-1).
+// 0xAA, 0xB5, 0xBA, 0xC0-0xD6, 0xD8-0xF6, 0xF8-0xFF (0xD7 x and 0xF7 / are NOT letters).
+bool is_iso8859_1_alpha(unsigned char c)
+{
+    return c == 0xAA || c == 0xB5 || c == 0xBA ||
+           (c >= 0xC0 && c <= 0xD6) || (c >= 0xD8 && c <= 0xF6) || (c >= 0xF8 && c <= 0xFF);
+}
+
 unsigned char to_ascii_lower(unsigned char c) { return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c; }
 
 void update_stopword_state(TokenState &state, unsigned char c)
@@ -156,7 +164,7 @@ void update_token_state(TokenState &state, std::size_t index, unsigned char c)
     ++state.len;
     state.overflow_len |= state.len > kMaxTokenLength;
     state.all_digits &= is_ascii_digit(c);
-    if (is_ascii_alpha(c)) {
+    if (is_ascii_alpha(c) || is_iso8859_1_alpha(c)) {
         if (state.alpha_count_state < 2) ++state.alpha_count_state;
         if (state.alpha_count_state > 1) state.single_alpha_candidate = false;
     } else if (!(is_ascii_digit(c) || c == '_' || c == '-')) {
