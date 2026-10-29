@@ -155,35 +155,3 @@ TEST_F(DemoInferenceSessionTest, RejectsWrongSchemaPackage) {
     EXPECT_NE(std::string::npos, error.find("schema"));
 }
 }
-
-TEST_F(DemoInferenceSessionTest, TimedPublicApiMeasuresModelAndDistinguishesFilteredCalls) {
-    auto *schema = ktag_feature_schema_create_legacy_v1();
-    ASSERT_NE(nullptr, schema);
-    std::unique_ptr<ktag_feature_schema, decltype(&ktag_feature_schema_destroy)> owned_schema(schema, ktag_feature_schema_destroy);
-    ktag_inference_config config{}; config.struct_size = sizeof(config); config.api_version = KTAG_API_VERSION;
-    const auto path = (directory / "package").string();
-    config.feature_schema = schema; config.model_package_path = path.c_str();
-    config.intra_op_threads = config.inter_op_threads = 1;
-    std::unique_ptr<ktag_inference_context, decltype(&ktag_inference_destroy)> context(
-        ktag_inference_create(&config), ktag_inference_destroy);
-    ASSERT_NE(nullptr, context) << ktag_inference_get_last_error();
-    std::unique_ptr<ktag_feature_batch, decltype(&ktag_feature_batch_destroy)> input(
-        ktag_feature_batch_create(schema, 2), ktag_feature_batch_destroy);
-    std::unique_ptr<ktag_prediction_batch, decltype(&ktag_prediction_batch_destroy)> output(
-        ktag_prediction_batch_create(2), ktag_prediction_batch_destroy);
-    ASSERT_NE(nullptr, input); ASSERT_NE(nullptr, output);
-    ktag_feature_record_metadata metadata{}; metadata.struct_size = sizeof(metadata); metadata.api_version = KTAG_API_VERSION;
-    float values[KTAG_LEGACY_V1_VALUE_COUNT]{}; values[3] = 9; values[7] = 10;
-    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_batch_append(input.get(), &metadata, values, KTAG_LEGACY_V1_VALUE_COUNT));
-    values[7] = 0;
-    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_batch_append(input.get(), &metadata, values, KTAG_LEGACY_V1_VALUE_COUNT));
-    ktag_inference_timing timing{}; timing.struct_size = sizeof(timing); timing.api_version = KTAG_API_VERSION;
-    ASSERT_EQ(KTAG_SUCCESS, ktag_inference_predict_with_timing(context.get(), input.get(), output.get(), &timing));
-    EXPECT_EQ(2U, timing.input_record_count); EXPECT_EQ(1U, timing.model_record_count);
-    EXPECT_GT(timing.model_nanoseconds, 0U); EXPECT_EQ(1U, ktag_prediction_batch_get_count(output.get()));
-    ktag_feature_batch_clear(input.get());
-    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_batch_append(input.get(), &metadata, values, KTAG_LEGACY_V1_VALUE_COUNT));
-    ASSERT_EQ(KTAG_SUCCESS, ktag_inference_predict_with_timing(context.get(), input.get(), output.get(), &timing));
-    EXPECT_EQ(1U, timing.input_record_count); EXPECT_EQ(0U, timing.model_record_count);
-    EXPECT_EQ(0U, timing.model_nanoseconds); EXPECT_EQ(0U, ktag_prediction_batch_get_count(output.get()));
-}

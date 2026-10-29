@@ -7,7 +7,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
-#include <chrono>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -246,8 +245,7 @@ bool check_and_bind_owner(ktag_inference_context *context) {
 
 ktag_status run_prediction(ktag_inference_context *context,
                            const ktag_feature_batch *features,
-                           ktag_prediction_batch *predictions,
-                           ktag_inference_timing *timing = nullptr) {
+                           ktag_prediction_batch *predictions) {
   if (context == nullptr || features == nullptr || predictions == nullptr) {
     set_last_error("invalid inference context, features or predictions");
     return KTAG_ERROR_INVALID_ARGUMENT;
@@ -257,9 +255,6 @@ ktag_status run_prediction(ktag_inference_context *context,
     return KTAG_ERROR_INVALID_STATE;
   }
   predictions->records.clear();
-  if (timing) {
-    timing->input_record_count = ktag_feature_batch_get_count(features);
-  }
 
   std::vector<float> scaled_values;
   std::vector<uint32_t> source_indexes;
@@ -291,19 +286,9 @@ ktag_status run_prediction(ktag_inference_context *context,
     for (const auto &name : context->output_names) {
       output_name_pointers.push_back(name.c_str());
     }
-    std::chrono::steady_clock::time_point model_start;
-    if (timing) {
-      timing->model_record_count = static_cast<uint32_t>(source_indexes.size());
-      model_start = std::chrono::steady_clock::now();
-    }
     std::vector<Ort::Value> outputs = context->session->Run(
         Ort::RunOptions{nullptr}, &input_name, &input, 1U,
         output_name_pointers.data(), output_name_pointers.size());
-    if (timing) {
-      timing->model_nanoseconds = static_cast<uint64_t>(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(
-              std::chrono::steady_clock::now() - model_start).count());
-    }
 
     std::vector<int64_t> labels;
     status = extract_labels(outputs, source_indexes.size(), &labels, &error);
@@ -481,25 +466,6 @@ KTAG_API ktag_status ktag_inference_predict(
     ktag_inference_context *context, const ktag_feature_batch *features,
     ktag_prediction_batch *predictions) {
   return run_prediction(context, features, predictions);
-}
-
-KTAG_API ktag_status ktag_inference_predict_with_timing(
-    ktag_inference_context *context, const ktag_feature_batch *features,
-    ktag_prediction_batch *predictions, ktag_inference_timing *timing) {
-  if (!timing || timing->struct_size < sizeof(*timing) ||
-      timing->api_version != KTAG_API_VERSION) {
-    set_last_error("invalid Inference timing output");
-    return KTAG_ERROR_INVALID_ARGUMENT;
-  }
-  timing->input_record_count = 0U;
-  timing->model_record_count = 0U;
-  timing->model_nanoseconds = 0U;
-  const ktag_status status = run_prediction(context, features, predictions, timing);
-  if (status != KTAG_SUCCESS) {
-    timing->model_record_count = 0U;
-    timing->model_nanoseconds = 0U;
-  }
-  return status;
 }
 
 KTAG_API uint64_t

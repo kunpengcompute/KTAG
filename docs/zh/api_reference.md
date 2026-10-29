@@ -1972,7 +1972,6 @@ Inference 层加载 Schema-bound 模型包，对 Feature Batch 执行批量推�
 | 生命周期 | `ktag_inference_create` | 创建 Inference Context。 |
 | 生命周期 | `ktag_inference_destroy` | 销毁 Inference Context。 |
 | 推理 | `ktag_inference_predict` | 批量推理。 |
-| 推理计时 | `ktag_inference_predict_with_timing` | 在同一推理流程中额外返回纯模型执行耗时。 |
 | 查询 | `ktag_inference_get_schema_hash` | Context 的 Schema Hash。 |
 | 查询 | `ktag_inference_get_input_value_count` | 输入值数量。 |
 | 查询 | `ktag_inference_get_model_name` | 模型名。 |
@@ -2076,22 +2075,6 @@ KTAG_API ktag_status ktag_inference_predict(ktag_inference_context *context,
 | 其他负数 | 推理失败，调用 `ktag_inference_get_last_error()` 获取详情。 |
 
 使用约束：若 Manifest 设置 `minimum_total_packets`，低于阈值的记录在预处理阶段被跳过；用结果的 `source_record_index` 回查输入 Batch（见 6.8）。
-
-需要诊断纯模型耗时时，可使用以下附加接口；普通 `predict` 调用不启用该计时：
-
-```c
-KTAG_API ktag_status ktag_inference_predict_with_timing(
-    ktag_inference_context *context, const ktag_feature_batch *features,
-    ktag_prediction_batch *predictions, ktag_inference_timing *timing);
-```
-
-`timing` 是版本化输出结构体，需设置 `struct_size` 和 `api_version`。
-`input_record_count` 为输入流数，`model_record_count` 为通过预处理、实际进入模型的流数；
-`model_nanoseconds` 只覆盖同步 ONNX `Session::Run`，不含预处理、张量构造及结果转换。
-全部记录被过滤时，实际模型流数和耗时均为零，不代表执行了一次零耗时推理。
-合法计时结构体在调用时清空；推理失败时模型计数和耗时归零，仍按原状态码报告错误。
-其余所有权和线程约束与 `predict` 一致。单机完整测试流程见《[时延测试说明](../../test/latency/README.md)》。
-
 
 ### 6.6 Inference Context 查询 API
 

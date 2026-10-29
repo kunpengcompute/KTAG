@@ -75,7 +75,6 @@ SRCEXTS   := .c .cc .cpp
 SOURCES_MUD = $(foreach d,$(SRC_FILES_DIRS),$(wildcard $(addprefix $(d)/*,$(SRCEXTS))))
 SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/pipeline_config.cpp
 SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/pipeline_runner.cpp
-SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/latency_benchmark.cpp
 SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/schema_feature_writer.cpp
 SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/ub_feature_wire.cpp
 # pipeline_runner.cpp drives capture through the demo_capture_source factory,
