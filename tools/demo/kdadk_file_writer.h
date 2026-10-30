@@ -84,8 +84,9 @@ int writer_flush(file_writer *writer);
 /**
  * @brief 销毁文件写入器
  * @param writer 文件写入器句柄
+ * @return WRITER_SUCCESS表示成功，WRITER_ERROR表示写入或关闭失败；句柄始终释放
  */
-void writer_destroy(file_writer *writer);
+int writer_destroy(file_writer *writer);
 
 #ifdef __cplusplus
 }

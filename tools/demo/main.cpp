@@ -291,13 +291,26 @@ int feature_extraction_mode(const char *pcap_file, const char *output_file,
     if (writer_write_features_with_rawbow(writer, &all_features,
                                           &all_rawbows) != WRITER_SUCCESS) {
       fprintf(stderr, "错误: 写入特征和rawbow失败\n");
+      ret_code = -1;
+      goto cleanup;
     }
   } else {
     if (writer_write_features(writer, &all_features) != WRITER_SUCCESS) {
       fprintf(stderr, "错误: 写入特征失败\n");
+      ret_code = -1;
+      goto cleanup;
     }
   }
-  writer_flush(writer);
+  if (writer_flush(writer) != WRITER_SUCCESS) {
+    ret_code = -1;
+    goto cleanup;
+  }
+  if (writer_destroy(writer) != WRITER_SUCCESS) {
+    writer = nullptr;
+    ret_code = -1;
+    goto cleanup;
+  }
+  writer = nullptr;
 
   printf("处理完成:\n");
   printf("  - 总包数: %d\n", packet_count);
@@ -317,7 +330,9 @@ cleanup:
   if (with_rawbow && all_rawbows.rawbows) {
     free(all_rawbows.rawbows);
   }
-  writer_destroy(writer);
+  if (writer_destroy(writer) != WRITER_SUCCESS) {
+    ret_code = -1;
+  }
   ktag_packet_release(&packet);
   ktag_capture_close(capture);
   extractor_destroy(extractor);

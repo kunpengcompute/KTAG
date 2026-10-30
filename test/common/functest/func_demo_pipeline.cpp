@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -1243,6 +1244,46 @@ TEST(KTAGDemoSchemaFeatureWriter, ExpandsSchemaAndQuotesIpv6Metadata)
     EXPECT_NE(std::string::npos, row.find(",2,1,11,19,1.25,2,3"));
 
     std::remove(output_path.c_str());
+    ktag_feature_schema_destroy(schema);
+}
+
+TEST(KTAGDemoSchemaFeatureWriter, ReportsDiskFullDuringWriteAndFlush)
+{
+    ktag_feature_schema *schema =
+        ktag_feature_schema_create("disk_full_test_v1", 1U);
+    ASSERT_NE(nullptr, schema);
+    ktag_feature_descriptor scalar{};
+    scalar.struct_size = sizeof(scalar);
+    scalar.api_version = KTAG_API_VERSION;
+    scalar.feature_id = "test.scalar";
+    scalar.display_name = "Scalar";
+    scalar.provider_id = "test.writer";
+    scalar.provider_version = 1U;
+    scalar.value_type = KTAG_FEATURE_FLOAT32;
+    scalar.dimension = 1U;
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_add(schema, &scalar));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(schema));
+
+    ktag_demo_schema_feature_record record;
+    record.details.source_address.version = 4U;
+    record.details.destination_address.version = 4U;
+    record.details.metadata.flow_key.address_a = record.details.source_address;
+    record.details.metadata.flow_key.address_b = record.details.destination_address;
+    record.details.metadata.flow_key.protocol = 6U;
+    record.values = {1.0F};
+
+    // A small header fails only on flush; many records fail during writing.
+    for (size_t count : {0U, 1024U}) {
+        SCOPED_TRACE(count);
+        std::string error;
+        EXPECT_FALSE(ktag_demo_write_schema_feature_csv(
+            "/dev/full", schema,
+            std::vector<ktag_demo_schema_feature_record>(count, record), &error));
+        EXPECT_NE(std::string::npos, error.find(
+            count == 0U ? "failed to flush" : "failed to write"));
+        EXPECT_NE(std::string::npos, error.find("/dev/full"));
+        EXPECT_NE(std::string::npos, error.find(std::strerror(ENOSPC)));
+    }
     ktag_feature_schema_destroy(schema);
 }
 
