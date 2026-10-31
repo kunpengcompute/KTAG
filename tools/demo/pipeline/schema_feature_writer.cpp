@@ -5,7 +5,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 #include <arpa/inet.h>
 
-#include <cerrno>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -211,39 +210,24 @@ bool ktag_demo_write_schema_feature_csv(
     set_error(error, "a frozen Feature Schema and output path are required");
     return false;
   }
-  const auto io_failure = [&](const char *operation) {
-    const int saved_errno = errno;
-    set_error(error, std::string("failed to ") + operation + " Schema CSV '" +
-                         path + "': " +
-                         std::strerror(saved_errno != 0 ? saved_errno : EIO));
-    return false;
-  };
-  errno = 0;
   std::ofstream output(path);
   if (!output) {
-    return io_failure("open");
+    set_error(error, std::string("failed to open Schema CSV: ") + path);
+    return false;
   }
   output << std::setprecision(9);
-  errno = 0;
   if (!write_header(output, schema, error)) {
-    return !output ? io_failure("write") : false;
+    return false;
   }
   const uint32_t value_count = ktag_feature_schema_get_value_count(schema);
   for (const auto &record : records) {
-    errno = 0;
     if (!write_record(output, value_count, record, error)) {
-      return !output ? io_failure("write") : false;
+      return false;
     }
   }
-  errno = 0;
-  output.flush();
   if (!output) {
-    return io_failure("flush");
-  }
-  errno = 0;
-  output.close();
-  if (!output) {
-    return io_failure("close");
+    set_error(error, "failed while writing Schema CSV");
+    return false;
   }
   return true;
 }

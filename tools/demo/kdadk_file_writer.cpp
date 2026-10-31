@@ -2,7 +2,6 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 #include "kdadk_file_writer.h"
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,14 +26,6 @@ struct file_writer {
     // JSON相关
     bool first_record;
 };
-
-static int report_file_error(const file_writer *writer, const char *operation)
-{
-    const int saved_errno = errno;
-    fprintf(stderr, "Error: Failed to %s file '%s': %s\n", operation,
-            writer->file_path.c_str(), strerror(saved_errno != 0 ? saved_errno : EIO));
-    return WRITER_ERROR;
-}
 
 /* ========== CSV写入相关函数 ========== */
 
@@ -306,7 +297,7 @@ file_writer *writer_create(const file_writer_config *config)
     const char *mode_str = config->append ? "a" : "w";
     writer->fp = fopen(config->file_path, mode_str);
     if (!writer->fp) {
-        report_file_error(writer, "open");
+        fprintf(stderr, "Error: Failed to open file: %s\n", config->file_path);
         delete writer;
         return NULL;
     }
@@ -326,13 +317,6 @@ file_writer *writer_create(const file_writer_config *config)
     } else {
         writer->header_written = 1;
         writer->first_record = false;
-    }
-
-    if (ferror(writer->fp)) {
-        report_file_error(writer, "write");
-        fclose(writer->fp);
-        delete writer;
-        return NULL;
     }
 
     const char *mode_name;
@@ -374,7 +358,6 @@ int writer_write_features(file_writer *writer, const feature_vector_list *featur
         return WRITER_ERROR;
     }
 
-    errno = 0;
     // 写入每个特征向量
     for (uint32_t i = 0; i < features->count; i++) {
         if (writer->format == FILE_FORMAT_CSV) {
@@ -390,7 +373,7 @@ int writer_write_features(file_writer *writer, const feature_vector_list *featur
         }
     }
 
-    return ferror(writer->fp) ? report_file_error(writer, "write") : WRITER_SUCCESS;
+    return WRITER_SUCCESS;
 }
 
 static int write_csv_feature_row_with_rawbow(FILE *fp, const feature_vector *fv, const rawbow *rb)
@@ -527,7 +510,6 @@ int writer_write_features_with_rawbow(file_writer *writer, const feature_vector_
         return WRITER_ERROR;
     }
 
-    errno = 0;
     // 如果还没有写入头部，先写入头部
     if (!writer->header_written) {
         if (writer->format == FILE_FORMAT_CSV) {
@@ -563,9 +545,6 @@ int writer_write_features_with_rawbow(file_writer *writer, const feature_vector_
         }
     }
 
-    if (ferror(writer->fp)) {
-        return report_file_error(writer, "write");
-    }
     printf("Successfully wrote %u features with rawbow\n", features->count);
     return WRITER_SUCCESS;
 }
@@ -593,7 +572,6 @@ int writer_write_features_with_predictions(file_writer *writer, const feature_ve
         return WRITER_ERROR;
     }
 
-    errno = 0;
     // 写入每个特征向量和预测结果
     for (uint32_t i = 0; i < count; i++) {
         if (writer->format == FILE_FORMAT_CSV) {
@@ -610,7 +588,7 @@ int writer_write_features_with_predictions(file_writer *writer, const feature_ve
         }
     }
 
-    return ferror(writer->fp) ? report_file_error(writer, "write") : WRITER_SUCCESS;
+    return WRITER_SUCCESS;
 }
 
 int writer_flush(file_writer *writer)
@@ -620,39 +598,25 @@ int writer_flush(file_writer *writer)
         return WRITER_ERROR;
     }
 
-    errno = 0;
-    if (fflush(writer->fp) != 0 || ferror(writer->fp)) {
-        return report_file_error(writer, "flush");
-    }
+    fflush(writer->fp);
     return WRITER_SUCCESS;
 }
 
-int writer_destroy(file_writer *writer)
+void writer_destroy(file_writer *writer)
 {
     if (!writer) {
-        return WRITER_SUCCESS;
+        return;
     }
 
-    int result = WRITER_SUCCESS;
     if (writer->fp) {
-        errno = 0;
         // 如果是JSON格式，写入结束标记
         if (writer->format == FILE_FORMAT_JSON && writer->header_written) {
             write_json_footer(writer->fp);
         }
 
-        const bool write_failed = ferror(writer->fp) != 0;
-        const int write_errno = errno;
-        errno = 0;
-        if (fclose(writer->fp) != 0) {
-            result = report_file_error(writer, "close");
-        } else if (write_failed) {
-            errno = write_errno;
-            result = report_file_error(writer, "write");
-        }
+        fclose(writer->fp);
     }
 
     printf("File writer destroyed\n");
     delete writer;
-    return result;
 }
