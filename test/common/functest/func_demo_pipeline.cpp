@@ -733,6 +733,37 @@ TEST(KTAGDemoFeaturePlugin, RejectsInvalidPluginsAndUnloadsValidPlugin)
     EXPECT_EQ(0U, loader.size());
 }
 
+TEST(KTAGDemoFeaturePlugin, RejectsTruncatedFilesBeforeLoading)
+{
+    const auto original_size = fs::file_size(EXAMPLE_PLUGIN);
+    ASSERT_GT(original_size, 2048U);
+    const auto path = fs::temp_directory_path() /
+        ("ktag_truncated_plugin_" + std::to_string(getpid()) + ".so");
+    // Cover both "keep the first 1 KiB" and "remove the last 1 KiB".
+    for (uintmax_t size : std::array<uintmax_t, 3U>{8U, 1024U, original_size - 1024U}) {
+        fs::copy_file(EXAMPLE_PLUGIN, path, fs::copy_options::overwrite_existing);
+        fs::resize_file(path, size);
+        ktag_feature_registry *registry = ktag_feature_registry_create();
+        ASSERT_NE(nullptr, registry);
+        ktag_demo_feature_plugin_loader loader;
+        std::string error;
+        EXPECT_FALSE(loader.load(path.string(), registry, &error));
+        EXPECT_NE(std::string::npos, error.find(path.string())) << error;
+        EXPECT_NE(std::string::npos, error.find("truncated")) << error;
+        EXPECT_EQ(0U, loader.size());
+
+        auto *plugin = ktag_feature_plugin_load(path.c_str(), registry);
+        EXPECT_EQ(nullptr, plugin);
+        const std::string public_error = ktag_feature_plugin_get_last_error();
+        EXPECT_NE(std::string::npos, public_error.find(path.string())) << public_error;
+        EXPECT_NE(std::string::npos, public_error.find("truncated")) << public_error;
+        ktag_feature_registry_destroy(registry);
+        ktag_feature_plugin_unload(plugin);
+        loader.unload_all();
+    }
+    fs::remove(path);
+}
+
 TEST(KTAGDemoPipelineConfig, FeatureOnlyDoesNotRequireModelOrInference)
 {
     const std::string path = write_config(

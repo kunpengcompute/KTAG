@@ -2,6 +2,7 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "ktag_feature_plugin.h"
+#include "feature_plugin_validation.h"
 
 #include <dlfcn.h>
 
@@ -69,6 +70,10 @@ ktag_feature_plugin_load(const char *path, ktag_feature_registry *registry) {
     set_last_error(std::string());
     if (path == nullptr || path[0] == '\0' || registry == nullptr) {
         set_last_error("plugin path and Feature Registry are required");
+        return nullptr;
+    }
+
+    if (!ktag_feature_plugin_internal::validate_file(path, &plugin_last_error)) {
         return nullptr;
     }
 
