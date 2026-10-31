@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -1248,6 +1249,54 @@ TEST(KTAGDemoSchemaFeatureWriter, ExpandsSchemaAndQuotesIpv6Metadata)
 
     std::remove(output_path.c_str());
     ktag_feature_schema_destroy(schema);
+}
+
+TEST(KTAGDemoSchemaFeatureWriter, ReportsDiskFullDuringHeaderRecordAndFlush)
+{
+    struct failure_case {
+        uint32_t dimension;
+        size_t records;
+        const char *operation;
+    };
+    // /dev/full accepts open(), but every write fails with ENOSPC.
+    for (const auto &item : {failure_case{4096U, 0U, "write header to"},
+                             failure_case{1U, 256U, "write record to"},
+                             failure_case{1U, 0U, "flush"}}) {
+        ktag_feature_schema *schema =
+            ktag_feature_schema_create("writer_full_test", 1U);
+        ASSERT_NE(nullptr, schema);
+        ktag_feature_descriptor descriptor{};
+        descriptor.struct_size = sizeof(descriptor);
+        descriptor.api_version = KTAG_API_VERSION;
+        descriptor.feature_id = "test.value";
+        descriptor.display_name = "Value";
+        descriptor.provider_id = "test.writer";
+        descriptor.provider_version = 1U;
+        descriptor.value_type = KTAG_FEATURE_FLOAT32;
+        descriptor.dimension = item.dimension;
+        ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_add(schema, &descriptor));
+        ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(schema));
+
+        ktag_demo_schema_feature_record record;
+        record.details.source_address.version = 4U;
+        record.details.destination_address.version = 4U;
+        auto &key = record.details.metadata.flow_key;
+        key.address_a = record.details.source_address;
+        key.address_b = record.details.destination_address;
+        key.protocol = 17U;
+        record.values.assign(item.dimension, 1.0F);
+        std::string error;
+        EXPECT_FALSE(ktag_demo_write_schema_feature_csv(
+            "/dev/full", schema,
+            std::vector<ktag_demo_schema_feature_record>(item.records, record),
+            &error));
+        EXPECT_NE(std::string::npos, error.find("/dev/full")) << error;
+        EXPECT_NE(std::string::npos, error.find(item.operation)) << error;
+        EXPECT_NE(std::string::npos, error.find(std::strerror(ENOSPC))) << error;
+        EXPECT_NE(std::string::npos,
+                  error.find("errno=" + std::to_string(ENOSPC))) << error;
+        ktag_feature_schema_destroy(schema);
+    }
 }
 
 TEST(KTAGDemoUbFeatureWire, RoundTripsFeatureRecordAndContract)

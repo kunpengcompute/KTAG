@@ -2,6 +2,7 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 #include "ktag_file_writer.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,14 @@ struct file_writer {
     // JSON相关
     bool first_record;
 };
+
+static int report_io_error(const file_writer *writer, const char *operation)
+{
+    const int code = errno == 0 ? EIO : errno;
+    fprintf(stderr, "Error: Failed to %s file '%s': %s (errno=%d)\n",
+            operation, writer->file_path.c_str(), strerror(code), code);
+    return WRITER_ERROR;
+}
 
 /* ========== CSV写入相关函数 ========== */
 
@@ -295,13 +304,15 @@ file_writer *writer_create(const file_writer_config *config)
     writer->file_path = config->file_path;
 
     const char *mode_str = config->append ? "a" : "w";
+    errno = 0;
     writer->fp = fopen(config->file_path, mode_str);
     if (!writer->fp) {
-        fprintf(stderr, "Error: Failed to open file: %s\n", config->file_path);
+        report_io_error(writer, "open");
         delete writer;
         return NULL;
     }
 
+    errno = 0;
     if (!config->append) {
         if (config->format == FILE_FORMAT_CSV) {
             if (config->mode == WRITE_MODE_FEATURES_WITH_RAWBOW) {
@@ -317,6 +328,13 @@ file_writer *writer_create(const file_writer_config *config)
     } else {
         writer->header_written = 1;
         writer->first_record = false;
+    }
+
+    if (ferror(writer->fp)) {
+        report_io_error(writer, "write header to");
+        fclose(writer->fp);
+        delete writer;
+        return NULL;
     }
 
     const char *mode_name;
@@ -360,6 +378,7 @@ int writer_write_features(file_writer *writer, const feature_vector_list *featur
 
     // 写入每个特征向量
     for (uint32_t i = 0; i < features->count; i++) {
+        errno = 0;
         if (writer->format == FILE_FORMAT_CSV) {
             if (write_csv_feature_row(writer->fp, &features->vectors[i], 0, writer->mode) != WRITER_SUCCESS) {
                 return WRITER_ERROR;
@@ -370,6 +389,9 @@ int writer_write_features(file_writer *writer, const feature_vector_list *featur
                 return WRITER_ERROR;
             }
             writer->first_record = false;
+        }
+        if (ferror(writer->fp)) {
+            return report_io_error(writer, "write features to");
         }
     }
 
@@ -529,6 +551,7 @@ int writer_write_features_with_rawbow(file_writer *writer, const feature_vector_
 
     // 写入每个特征向量和对应的rawbow
     for (uint32_t i = 0; i < features->count; i++) {
+        errno = 0;
         if (writer->format == FILE_FORMAT_CSV) {
             if (write_csv_feature_row_with_rawbow(writer->fp, &features->vectors[i], &rawbows->rawbows[i]) !=
                 WRITER_SUCCESS) {
@@ -543,9 +566,11 @@ int writer_write_features_with_rawbow(file_writer *writer, const feature_vector_
             }
             writer->first_record = false;
         }
+        if (ferror(writer->fp)) {
+            return report_io_error(writer, "write features/rawbow to");
+        }
     }
 
-    printf("Successfully wrote %u features with rawbow\n", features->count);
     return WRITER_SUCCESS;
 }
 
@@ -574,6 +599,7 @@ int writer_write_features_with_predictions(file_writer *writer, const feature_ve
 
     // 写入每个特征向量和预测结果
     for (uint32_t i = 0; i < count; i++) {
+        errno = 0;
         if (writer->format == FILE_FORMAT_CSV) {
             if (write_csv_feature_row(writer->fp, &features->vectors[i], predictions[i], writer->mode) !=
                 WRITER_SUCCESS) {
@@ -585,6 +611,9 @@ int writer_write_features_with_predictions(file_writer *writer, const feature_ve
                 return WRITER_ERROR;
             }
             writer->first_record = false;
+        }
+        if (ferror(writer->fp)) {
+            return report_io_error(writer, "write predictions to");
         }
     }
 
@@ -598,8 +627,32 @@ int writer_flush(file_writer *writer)
         return WRITER_ERROR;
     }
 
-    fflush(writer->fp);
+    errno = 0;
+    if (fflush(writer->fp) != 0 || ferror(writer->fp)) {
+        return report_io_error(writer, "flush");
+    }
     return WRITER_SUCCESS;
+}
+
+int writer_close(file_writer *writer)
+{
+    if (!writer || !writer->fp) {
+        return WRITER_SUCCESS;
+    }
+    int result = ferror(writer->fp) ? WRITER_ERROR : WRITER_SUCCESS;
+    errno = 0;
+    if (result == WRITER_SUCCESS && writer->format == FILE_FORMAT_JSON && writer->header_written) {
+        write_json_footer(writer->fp);
+        if (ferror(writer->fp)) {
+            result = report_io_error(writer, "write JSON footer to");
+        }
+    }
+    errno = 0;
+    if (fclose(writer->fp) != 0) {
+        result = report_io_error(writer, "close");
+    }
+    writer->fp = nullptr;
+    return result;
 }
 
 void writer_destroy(file_writer *writer)
@@ -608,14 +661,7 @@ void writer_destroy(file_writer *writer)
         return;
     }
 
-    if (writer->fp) {
-        // 如果是JSON格式，写入结束标记
-        if (writer->format == FILE_FORMAT_JSON && writer->header_written) {
-            write_json_footer(writer->fp);
-        }
-
-        fclose(writer->fp);
-    }
+    writer_close(writer);
 
     printf("File writer destroyed\n");
     delete writer;
