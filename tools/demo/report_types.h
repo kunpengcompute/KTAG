@@ -9,6 +9,8 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 typedef struct {
     int *classes;
     int num_classes;
+    char *context;
+    int outside_report_predictions;
     double *precision;
     double *recall;
     double *f1_score;

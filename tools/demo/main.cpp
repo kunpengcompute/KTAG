@@ -37,7 +37,8 @@ enum {
   KTAG_DEMO_OPT_DISTRIBUTED_ROLE,
   KTAG_DEMO_OPT_NODE_ID,
   KTAG_DEMO_OPT_DPDK,
-  KTAG_DEMO_OPT_DPDK_EAL_ARGS
+  KTAG_DEMO_OPT_DPDK_EAL_ARGS,
+  KTAG_DEMO_OPT_PCAP_LABELS
 };
 
 typedef struct {
@@ -59,6 +60,7 @@ typedef struct {
   char *node_id;              // UB 拓扑中的本机 hostname
   int use_dpdk;               // --dpdk: 用 DPDK PMD 收网卡报文
   char *dpdk_eal_args; // --dpdk-eal-args: EAL 参数(空格分隔字符串)
+  char *pcap_labels;
 } CommandLineArgs;
 
 int feature_extraction_mode(const char *pcap_file, const char *output_file,
@@ -453,6 +455,8 @@ void print_usage(const char *prog_name) {
   printf("  --config <config.yaml>  -f 可选：按现有 Pipeline/Schema 输出训练 "
          "CSV\n");
   printf("  -r <config.yaml>        在线推理模式 (需要配合 -c 或 -j 使用)\n");
+  printf("  --pcap-labels LIST      各 -p 的真实标签，如 2,2,3；数量必须与 PCAP 一致\n");
+  printf("                         未指定时按 0,1,2... 假定；报告仅显示本次标签的升序去重集合\n");
   printf("  -p <file.pcap>          输入PCAP文件 (可多个)\n");
   printf("  -i <interface>          网口实时抓包\n");
   printf("  -m <mode>               推理模式: 0=单flow, 1=批处理, 2=文件 "
@@ -495,6 +499,8 @@ void print_usage(const char *prog_name) {
          prog_name);
   printf("  %s -r config.yaml -p file1.pcap --pipeline-mode feature_parallel "
          "-n 4 -c result.csv\n",
+         prog_name);
+  printf("  %s -r config.yaml -p class2.pcap --pcap-labels 2 -c result.csv\n",
          prog_name);
   printf("  %s -r config.yaml -p file1.pcap --pipeline-mode full_parallel -n 4 "
          "--inference-threads 2 -c result.csv\n",
@@ -581,6 +587,7 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       {"dpdk", no_argument, nullptr, KTAG_DEMO_OPT_DPDK},
       {"dpdk-eal-args", required_argument, nullptr,
        KTAG_DEMO_OPT_DPDK_EAL_ARGS},
+      {"pcap-labels", required_argument, nullptr, KTAG_DEMO_OPT_PCAP_LABELS},
       {nullptr, 0, nullptr, 0}};
   while ((opt = getopt_long(argc, argv, "t:e:f:r:p:i:m:c:j:n:wlh", long_options,
                             nullptr)) != -1) {
@@ -603,6 +610,13 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       break;
     case 'p':
       args->pcap_files[args->num_pcap_files++] = optarg;
+      break;
+    case KTAG_DEMO_OPT_PCAP_LABELS:
+      if (args->pcap_labels != nullptr) {
+        fprintf(stderr, "错误: --pcap-labels 只能指定一次\n");
+        return -1;
+      }
+      args->pcap_labels = optarg;
       break;
     case 'i':
       args->interface = optarg;
@@ -732,6 +746,12 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       args->inference_threads != 0U || args->distributed_role != nullptr ||
       args->node_id != nullptr || args->use_dpdk != 0 ||
       args->dpdk_eal_args != nullptr;
+  if (args->pcap_labels != nullptr &&
+      (args->operation != 3 || args->num_pcap_files == 0 ||
+       args->interface != nullptr || args->distributed_role != nullptr)) {
+    fprintf(stderr, "错误: --pcap-labels 仅支持单机 -r/-p，不支持 -i 或 UB 分布式模式\n");
+    return -1;
+  }
   if (args->feature_config_file != nullptr && args->operation != 2) {
     fprintf(stderr, "错误: --config 只能与 Schema 特征提取模式 -f 一起使用\n");
     return -1;
@@ -974,7 +994,7 @@ int main(int argc, char *argv[]) {
         ret = online_inference_mode(
             args.config_file, (const char **)args.pcap_files,
             args.num_pcap_files, args.interface, args.mode, args.output_file,
-            args.output_format);
+            args.output_format, args.pcap_labels);
         break;
       }
 
@@ -1008,6 +1028,10 @@ int main(int argc, char *argv[]) {
                 pipeline_error.c_str());
         ret = -1;
       } else if (pipeline_result == ktag_demo_pipeline_config_result::enabled) {
+        if (args.pcap_labels != nullptr) {
+          pipeline_config.pcap_labels_specified = true;
+          pipeline_config.pcap_labels = args.pcap_labels;
+        }
         if (pipeline_config.capture_backend ==
             ktag_demo_capture_backend::dpdk) {
 #ifdef KTAG_DEMO_HAVE_DPDK
@@ -1037,7 +1061,7 @@ int main(int argc, char *argv[]) {
         ret = online_inference_mode(
             args.config_file, (const char **)args.pcap_files,
             args.num_pcap_files, args.interface, args.mode, args.output_file,
-            args.output_format);
+            args.output_format, args.pcap_labels);
       }
     }
     break;

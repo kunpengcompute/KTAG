@@ -173,12 +173,22 @@ def _package_feature_contract(config, prepared):
     )
 
 
-def create_pipeline_package(config, config_path, scaler, prepared):
+def create_pipeline_package(config, config_path, scaler, prepared, class_labels):
     """Create a complete Schema-bound model package for official/custom data."""
     pipeline = config.get('pipeline')
     if not isinstance(pipeline, dict) or not pipeline.get('model_package_path'):
         logging.info('未配置 pipeline.model_package_path，跳过模型包生成')
         return None
+
+    if (not class_labels or
+            any(isinstance(label, (bool, np.bool_)) or
+                not isinstance(label, (int, np.integer)) or
+                not 0 <= label <= 2147483647 for label in class_labels)):
+        raise ValueError('model classes must be nonnegative integers in 0..INT_MAX')
+    class_labels = [int(label) for label in class_labels]
+    if len(set(class_labels)) != len(class_labels):
+        raise ValueError('model classes contain duplicate labels')
+    class_labels.sort()
 
     schema_hash, features = _package_feature_contract(config, prepared)
     input_feature_ids = [feature['feature_id'] for feature in features]
@@ -253,6 +263,7 @@ def create_pipeline_package(config, config_path, scaler, prepared):
     }
     manifest = {
         'model_name': model_name,
+        'class_labels': class_labels,
         'model_version': model_version,
         'schema_hash': schema_hash,
         'onnx_log_level': config.get('onnx_log_level', 'WARNING'),
@@ -371,7 +382,9 @@ def KTAG_Train(config_file):
         _save_feature_importance(
             model, prepared['X'].columns, config, config_dir,
             prepared, scaler)
-        create_pipeline_package(config, config_path, scaler, prepared)
+        create_pipeline_package(
+            config, config_path, scaler, prepared,
+            class_labels=model.classes_.tolist())
         logging.info(
             '训练完成: labels=%d, evaluation_groups=%d, input_values=%d',
             len(training_groups), len(evaluation_groups),
