@@ -244,10 +244,29 @@ ktag_status configure_port(ktag_dpdk_context *context,
   }
 
   const int socket = rte_eth_dev_socket_id(context->port);
-  const uint32_t pool_size =
-      config->mbuf_pool_size == 0U
-          ? config->rx_queue_depth * KTAG_DPDK_DEFAULT_MBUF_POOL_MULTIPLIER
-          : config->mbuf_pool_size;
+
+  const uint32_t rx_queues =
+      config->rx_queue_count == 0U ? 1U : config->rx_queue_count;
+  context->rx_queue_count = static_cast<uint16_t>(rx_queues);
+  context->pending.resize(rx_queues);
+
+  uint16_t nb_rx = config->rx_queue_depth == 0U
+                       ? KTAG_DPDK_DEFAULT_RX_QUEUE_DEPTH
+                       : config->rx_queue_depth;
+  uint16_t nb_tx = 0U;
+  (void)rte_eth_dev_adjust_nb_rx_tx_desc(context->port, &nb_rx, &nb_tx);
+
+  /*
+   * Every RX queue is backed by nb_rx descriptors drawn from the pool, so the
+   * default pool has to scale with the queue count. Sizing it from the depth
+   * alone starves the later queues: with 1024-deep queues the third
+   * rte_eth_rx_queue_setup fails with "Fail to alloc mbuf for Rx queue".
+   * The multiplier leaves headroom for packets in flight.
+   */
+  const uint32_t pool_size = config->mbuf_pool_size == 0U
+                                 ? static_cast<uint32_t>(nb_rx) * rx_queues *
+                                       KTAG_DPDK_DEFAULT_MBUF_POOL_MULTIPLIER
+                                 : config->mbuf_pool_size;
   context->pool =
       rte_pktmbuf_pool_create("ktag_mbuf_pool", pool_size, MBUF_POOL_CACHE_SIZE,
                               0U, RTE_MBUF_DEFAULT_BUF_SIZE, socket);
@@ -256,11 +275,6 @@ ktag_status configure_port(ktag_dpdk_context *context,
                  rte_strerror(rte_errno);
     return KTAG_ERROR_OUT_OF_MEMORY;
   }
-
-  const uint32_t rx_queues =
-      config->rx_queue_count == 0U ? 1U : config->rx_queue_count;
-  context->rx_queue_count = static_cast<uint16_t>(rx_queues);
-  context->pending.resize(rx_queues);
 
   struct rte_eth_conf port_conf;
   std::memset(&port_conf, 0, sizeof(port_conf));
@@ -297,12 +311,6 @@ ktag_status configure_port(ktag_dpdk_context *context,
         std::string("rte_eth_dev_configure failed: ") + rte_strerror(rte_errno);
     return KTAG_ERROR_INTERNAL;
   }
-
-  uint16_t nb_rx = config->rx_queue_depth == 0U
-                       ? KTAG_DPDK_DEFAULT_RX_QUEUE_DEPTH
-                       : config->rx_queue_depth;
-  uint16_t nb_tx = 0U;
-  (void)rte_eth_dev_adjust_nb_rx_tx_desc(context->port, &nb_rx, &nb_tx);
 
   struct rte_eth_rxconf rx_conf;
   std::memset(&rx_conf, 0, sizeof(rx_conf));
