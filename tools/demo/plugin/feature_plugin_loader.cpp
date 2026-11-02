@@ -2,6 +2,7 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "feature_plugin_loader.h"
+#include "../../../src/feature/feature_plugin_validation.h"
 
 #include <dlfcn.h>
 
@@ -74,6 +75,10 @@ bool ktag_demo_feature_plugin_loader::load(
                 return plugin.path == path;
             })) {
         set_error(error, "plugin path is already loaded: " + path);
+        return false;
+    }
+
+    if (!ktag_feature_plugin_internal::validate_file(path.c_str(), error)) {
         return false;
     }
 

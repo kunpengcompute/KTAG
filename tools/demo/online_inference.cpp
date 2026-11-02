@@ -4,6 +4,7 @@
 #include "feature_session.h"
 #include "inference_session.h"
 #include "utils.h"
+#include "pcap_labels.h"
 
 #include <cerrno>
 #include <cctype>
@@ -214,11 +215,18 @@ void write_results(const char *path, file_format format, results &output, Perfor
 }
 
 int online_inference_mode(const char *config_file, const char **pcap_files, int num_pcap_files,
-                          const char *interface, int mode, char *output_file, file_format format) {
+                          const char *interface, int mode, char *output_file, file_format format,
+                          const char *pcap_label_list) {
     try {
         if (mode < 0 || mode > 2 || (!interface && (!pcap_files || num_pcap_files <= 0)))
             throw std::runtime_error("invalid inference mode or missing capture source");
         std::string error;
+        ktag_demo_pcap_labels pcap_labels;
+        if (!interface) {
+            pcap_labels = ktag_demo_load_pcap_labels(
+                ktag_demo_model_package_path(config_file), pcap_label_list,
+                pcap_files, num_pcap_files);
+        }
         auto inference = ktag_demo_inference_session::create(config_file, &error);
         if (!inference) throw std::runtime_error("cannot initialize inference: " + error);
         std::printf("========== 在线推理模式（公共 Inference API） ==========\n");
@@ -229,15 +237,21 @@ int online_inference_mode(const char *config_file, const char **pcap_files, int 
         if (interface) run_source(*inference, interface, true, 0, -1, output, stats);
         else {
             for (int i = 0; i < num_pcap_files && !interrupted; ++i) {
-                std::printf("处理文件 %d/%d: %s (Label=%d)\n", i + 1, num_pcap_files, pcap_files[i], i);
-                run_source(*inference, pcap_files[i], false, mode, i, output, stats);
+                const int label = pcap_labels.label_for(static_cast<uint32_t>(i));
+                std::printf("处理文件 %d/%d: %s (source_index=%d, ground_truth_label=%d)\n",
+                            i + 1, num_pcap_files, pcap_files[i], i, label);
+                run_source(*inference, pcap_files[i], false, mode, label, output, stats);
             }
             if (!output.labels.empty()) {
+                for (int label : output.predictions) pcap_labels.validate_prediction(label);
                 std::unique_ptr<ClassificationReport, decltype(&free_classification_report)> report(
-                    calculate_classification_report(output.labels.data(), output.predictions.data(), static_cast<int>(output.labels.size())),
+                    calculate_classification_report(output.labels.data(), output.predictions.data(),
+                        static_cast<int>(output.labels.size()), pcap_labels.report_labels, pcap_labels.description),
                     free_classification_report);
                 if (!report || print_and_save_classification_report(report.get(), output_file) != 0)
                     throw std::runtime_error("cannot produce classification report");
+            } else {
+                std::printf("无有效推理样本，未生成 Classification Report；accuracy=N/A。\n");
             }
         }
         write_results(output_file, format, output, stats);

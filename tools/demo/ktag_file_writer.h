@@ -84,6 +84,10 @@ int writer_write_features_with_rawbow(file_writer *writer,
  */
 int writer_flush(file_writer *writer);
 
+/* Finish JSON output and close the file. Reports delayed write errors;
+ * the writer remains valid for writer_destroy(). */
+int writer_close(file_writer *writer);
+
 /**
  * @brief 销毁文件写入器
  * @param writer 文件写入器句柄

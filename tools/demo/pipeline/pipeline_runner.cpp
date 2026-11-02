@@ -8,6 +8,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "demo_capture_source.h"
 #include "feature_plugin_loader.h"
 #include "schema_feature_writer.h"
+#include "../pcap_labels.h"
 
 #ifndef KTAG_ENABLE_DPDK_UB
 #define KTAG_ENABLE_DPDK_UB 0
@@ -36,6 +37,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <limits>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -2521,6 +2523,18 @@ int ktag_demo_run_pipeline_internal(
   const bool distributed_backend =
       config.ub.enabled &&
       config.ub.role == ktag_demo_distributed_role::backend;
+  const bool pcap_inference = !config.feature_only && !config.ub.enabled &&
+                              (interface_name == nullptr || interface_name[0] == '\0') &&
+                              pcap_file_count > 0;
+  ktag_demo_pcap_labels pcap_labels;
+  if (pcap_inference) {
+    pcap_labels = ktag_demo_load_pcap_labels(
+        config.model_package_path,
+        config.pcap_labels_specified ? config.pcap_labels.c_str() : nullptr,
+        pcap_files, pcap_file_count);
+  } else if (config.pcap_labels_specified) {
+    throw std::runtime_error("--pcap-labels 仅支持单机 PCAP 推理");
+  }
 #if !KTAG_ENABLE_DPDK_UB
   if (config.ub.enabled) {
     std::fprintf(stderr,
@@ -2704,8 +2718,9 @@ int ktag_demo_run_pipeline_internal(
                 std::printf("\n处理文件 %d/%d: %s\n", index + 1,
                             pcap_file_count, pcap_files[index]);
             } else {
-                std::printf("\n处理文件 %d/%d: %s (Label=%d)\n", index + 1,
-                            pcap_file_count, pcap_files[index], index);
+                std::printf("\n处理文件 %d/%d: %s (source_index=%d, ground_truth_label=%d)\n",
+                            index + 1, pcap_file_count, pcap_files[index], index,
+                            pcap_labels.label_for(static_cast<uint32_t>(index)));
             }
             pipeline_source_statistics source_statistics;
             success =
@@ -2731,6 +2746,12 @@ int ktag_demo_run_pipeline_internal(
         }
     }
 
+  if (success && pcap_inference) {
+    for (const auto &prediction : predictions) {
+      pcap_labels.label_for(prediction.source_index);
+      pcap_labels.validate_prediction(prediction.record.label);
+    }
+  }
   if (success) {
     const auto io_start = std::chrono::steady_clock::now();
     if (distributed_frontend) {
@@ -2855,10 +2876,10 @@ int ktag_demo_run_pipeline_internal(
                     static_cast<unsigned long long>(entry.second));
       }
     }
-    /* 分类报告与 pcap 文件输入模式一致：在线无真值标签，label 用
-     * source_index（单网口恒为 0），accuracy = 预测为类别 0 的流占比，
-     * 用于和 pcap 输入模式做同口径对比。 */
     if (!config.feature_only && !predictions.empty()) {
+      if (predictions.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error("有效样本数超出分类报告支持范围");
+      }
       std::vector<int> labels;
       std::vector<int> predicted_labels;
       labels.reserve(predictions.size());
@@ -2867,20 +2888,27 @@ int ktag_demo_run_pipeline_internal(
         if (!prediction.ground_truth_valid) {
           continue;
         }
-        labels.push_back(static_cast<int>(prediction.source_index));
+        labels.push_back(pcap_inference ? pcap_labels.label_for(prediction.source_index)
+                                       : static_cast<int>(prediction.source_index));
         predicted_labels.push_back(static_cast<int>(prediction.record.label));
       }
       if (labels.empty()) {
         std::printf("无有效 ground truth，不生成 Classification Report。\n");
       } else {
+        auto report_labels = pcap_inference ? pcap_labels.report_labels : labels;
         ClassificationReport *report = calculate_classification_report(
             labels.data(), predicted_labels.data(),
-            static_cast<int>(labels.size()));
+            static_cast<int>(labels.size()), report_labels,
+            pcap_inference ? pcap_labels.description : std::string());
         if (report != nullptr) {
-          (void)print_and_save_classification_report(report, output_file);
+          success = print_and_save_classification_report(report, output_file) == 0;
           free_classification_report(report);
+        } else {
+          success = false;
         }
       }
+    } else if (pcap_inference) {
+      std::printf("无有效推理样本，未生成 Classification Report；accuracy=N/A。\n");
     }
     if (!distributed_frontend && output_file != nullptr) {
       if (config.feature_only) {

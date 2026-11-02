@@ -24,7 +24,7 @@ KTAG UB 适配按以下版本验证：
 - UB 依赖库：`libubsm_sdk.so`；
 - KTAG 可执行文件：`output/ktag_demo`，必须使用启用 DPDK/UB 的构建版本。
 
->![](public_sys-resources/icon-note.gif) **说明：** 
+>![](public_sys-resources/icon-note.gif) **说明：**
 >
 >四台机器必须使用同一套 DPDK/UB 头文件、`librte_ub_ring.so` 和 `libubsm_sdk.so`。
 

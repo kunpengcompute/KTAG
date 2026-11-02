@@ -8,5 +8,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 // 在线推理主函数
 int online_inference_mode(const char *config_file, const char **pcap_files,
                           int num_pcap_files, const char *interface, int mode,
-                          char *output_file, file_format format);
+                          char *output_file, file_format format,
+                          const char *pcap_labels);
 #endif
