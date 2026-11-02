@@ -199,7 +199,21 @@ struct inference_worker_statistics {
   uint64_t work_nanoseconds = 0U;
 };
 
+struct pipeline_capture_queue_statistics {
+    uint32_t queue_id = 0U;
+    uint64_t received = 0U;
+    uint64_t delivered = 0U;
+    uint64_t pending = 0U;
+};
+
 struct pipeline_source_statistics {
+  bool capture_stats_available = false;
+  uint64_t capture_received = 0U;
+  uint64_t capture_delivered = 0U;
+  uint64_t capture_pending = 0U;
+  uint64_t capture_dropped = 0U;
+  uint64_t capture_discarded = 0U;
+  std::vector<pipeline_capture_queue_statistics> capture_queues;
   uint64_t packets = 0U;
   uint64_t bytes = 0U;
   uint64_t unsupported_packets = 0U;
@@ -220,6 +234,13 @@ struct pipeline_source_statistics {
 };
 
 struct pipeline_run_statistics {
+  bool capture_stats_available = false;
+  uint64_t capture_received = 0U;
+  uint64_t capture_delivered = 0U;
+  uint64_t capture_pending = 0U;
+  uint64_t capture_dropped = 0U;
+  uint64_t capture_discarded = 0U;
+  std::vector<pipeline_capture_queue_statistics> capture_queues;
   uint64_t packets = 0U;
   uint64_t bytes = 0U;
   uint64_t unsupported_packets = 0U;
@@ -256,8 +277,62 @@ bool is_recoverable_truncated_capture(bool live, ktag_status status,
          message != nullptr && std::strstr(message, "truncated") != nullptr;
 }
 
+/* Copies backend RX counters, if the backend tracks them (DPDK does). */
+void collect_capture_statistics(const demo_capture_source *capture,
+                                pipeline_source_statistics *statistics) {
+    if (capture == nullptr || statistics == nullptr) {
+        return;
+    }
+    demo_capture_stats capture_stats;
+    capture->get_capture_stats(&capture_stats);
+    if (!capture_stats.available) {
+        return;
+    }
+    statistics->capture_stats_available = true;
+    statistics->capture_received = capture_stats.received;
+    statistics->capture_delivered = capture_stats.delivered;
+    statistics->capture_pending = capture_stats.pending;
+    statistics->capture_dropped = capture_stats.dropped;
+    statistics->capture_discarded = capture_stats.discarded;
+    statistics->capture_queues.clear();
+    statistics->capture_queues.reserve(capture_stats.queues.size());
+    for (const auto &queue : capture_stats.queues) {
+        pipeline_capture_queue_statistics entry;
+        entry.queue_id = queue.queue_id;
+        entry.received = queue.received;
+        entry.delivered = queue.delivered;
+        entry.pending = queue.pending;
+        statistics->capture_queues.push_back(entry);
+    }
+}
+
 void add_source_statistics(pipeline_run_statistics *total,
                            const pipeline_source_statistics &source) {
+  if (source.capture_stats_available) {
+    total->capture_stats_available = true;
+    total->capture_received += source.capture_received;
+    total->capture_delivered += source.capture_delivered;
+    total->capture_pending += source.capture_pending;
+    total->capture_dropped += source.capture_dropped;
+    total->capture_discarded += source.capture_discarded;
+    /* Sources index their queues from 0, so merge by queue id. */
+    for (const auto &queue : source.capture_queues) {
+      bool merged = false;
+      for (auto &existing : total->capture_queues) {
+        if (existing.queue_id == queue.queue_id) {
+          existing.received += queue.received;
+          existing.delivered += queue.delivered;
+          existing.pending += queue.pending;
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) {
+        total->capture_queues.push_back(queue);
+      }
+    }
+  }
+
   if (source.first_feature_at != std::chrono::steady_clock::time_point{} &&
       (total->first_feature_at == std::chrono::steady_clock::time_point{} ||
        source.first_feature_at < total->first_feature_at)) {
@@ -901,6 +976,7 @@ bool run_single_source(
       statistics->unsupported_packets, feature_statistics.rejected_packets);
   statistics->packets = packet_count;
   statistics->elapsed_nanoseconds = elapsed_nanoseconds(execution_start);
+  collect_capture_statistics(capture.get(), statistics);
   return true;
 }
 
@@ -1408,6 +1484,7 @@ private:
       statistics->predictions += worker.predictions;
       statistics->inference_nanoseconds += worker.work_nanoseconds;
     }
+    collect_capture_statistics(capture_.get(), statistics);
   }
 
   const ktag_demo_pipeline_config &config_;
@@ -2971,6 +3048,37 @@ int ktag_demo_run_pipeline_internal(
                 static_cast<unsigned long long>(run_statistics.queue_drops),
                 static_cast<unsigned long long>(run_statistics.queue_failures),
                 pipeline_interrupted != 0 ? "是" : "否");
+    if (run_statistics.capture_stats_available) {
+      std::printf("\n======================= DPDK 收包统计 "
+                  "=======================\n");
+      std::printf("DPDK 总收包数:    %10llu 个\n",
+                  static_cast<unsigned long long>(
+                      run_statistics.capture_received));
+      std::printf("丢包数(网卡):     %10llu 个\n",
+                  static_cast<unsigned long long>(
+                      run_statistics.capture_dropped));
+      std::printf("送往特征提取包数: %10llu 个\n",
+                  static_cast<unsigned long long>(
+                      run_statistics.capture_delivered));
+      std::printf(
+          "缓存未交付:       %10llu 个\n"
+          "关闭时丢弃:       %10llu 个\n",
+          static_cast<unsigned long long>(run_statistics.capture_pending),
+          static_cast<unsigned long long>(run_statistics.capture_discarded));
+      if (!run_statistics.capture_queues.empty()) {
+        std::printf("--------------------------------------------------------\n");
+        std::printf(" 队列    收包数      交付数      缓存\n");
+        for (const auto &queue : run_statistics.capture_queues) {
+          std::printf("  %2u   %10llu  %10llu  %8llu\n",
+                      queue.queue_id,
+                      static_cast<unsigned long long>(queue.received),
+                      static_cast<unsigned long long>(queue.delivered),
+                      static_cast<unsigned long long>(queue.pending));
+        }
+      }
+      std::printf("========================================================\n");
+    }
+
     /* 执行度 = 推理完成率：产生预测的流数 / 进入推理的流数。 */
     if (run_statistics.inference_inputs > 0U) {
       std::printf(

@@ -99,6 +99,43 @@ KTAG_API void ktag_dpdk_capture_interrupt(void *context);
 
 KTAG_API void ktag_dpdk_capture_close(void *context);
 
+/*
+ * Cumulative counters for one capture context. Sampled on demand and monotonic
+ * until the context is closed:
+ *   received  - packets pulled from the PMD, summed over all RX queues;
+ *   delivered - packets returned to the caller by next();
+ *   pending   - packets still sitting in the per-queue burst caches;
+ *   dropped   - packets the device reported as missed or errored (NIC level);
+ *   discarded - packets pulled but freed by close() without being delivered.
+ */
+typedef struct {
+    uint32_t struct_size;
+    uint32_t api_version;
+    uint64_t received;
+    uint64_t delivered;
+    uint64_t pending;
+    uint64_t dropped;
+    uint64_t discarded;
+} ktag_dpdk_capture_stats;
+
+/* Counters for a single RX queue. */
+typedef struct {
+    uint32_t struct_size;
+    uint32_t api_version;
+    uint32_t queue_id;
+    uint32_t reserved;
+    uint64_t received;
+    uint64_t delivered;
+    uint64_t pending;
+} ktag_dpdk_queue_stats;
+
+KTAG_API ktag_status
+ktag_dpdk_capture_get_stats(const void *context, ktag_dpdk_capture_stats *stats);
+
+/* queue_id must be below the rx_queue_count the context was opened with. */
+KTAG_API ktag_status ktag_dpdk_capture_get_queue_stats(
+    const void *context, uint32_t queue_id, ktag_dpdk_queue_stats *stats);
+
 /* Thread-local detail for the most recent DPDK Capture failure. */
 KTAG_API const char *ktag_dpdk_capture_get_last_error(void);
 
