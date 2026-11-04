@@ -15,7 +15,10 @@ namespace {
 
 class dpdk_capture_source : public demo_capture_source {
 public:
-  explicit dpdk_capture_source(void *context) : capture_(context) {}
+  dpdk_capture_source(void *context, uint32_t rx_queue_count)
+      : capture_(context), rx_queue_count_(rx_queue_count == 0U
+                                               ? 1U
+                                               : rx_queue_count) {}
 
   ~dpdk_capture_source() override {
     if (capture_ != nullptr) {
@@ -42,8 +45,45 @@ public:
     return ktag_dpdk_capture_get_last_error();
   }
 
+  void get_capture_stats(demo_capture_stats *stats) const override {
+    *stats = demo_capture_stats{};
+    if (capture_ == nullptr) {
+      return;
+    }
+    ktag_dpdk_capture_stats totals{};
+    totals.struct_size = sizeof(totals);
+    totals.api_version = KTAG_API_VERSION;
+    if (ktag_dpdk_capture_get_stats(capture_, &totals) != KTAG_SUCCESS) {
+      return;
+    }
+    stats->available = true;
+    stats->received = totals.received;
+    stats->delivered = totals.delivered;
+    stats->pending = totals.pending;
+    stats->dropped = totals.dropped;
+    stats->discarded = totals.discarded;
+
+    stats->queues.reserve(rx_queue_count_);
+    for (uint32_t queue = 0U; queue < rx_queue_count_; ++queue) {
+      ktag_dpdk_queue_stats queue_stats{};
+      queue_stats.struct_size = sizeof(queue_stats);
+      queue_stats.api_version = KTAG_API_VERSION;
+      if (ktag_dpdk_capture_get_queue_stats(capture_, queue, &queue_stats) !=
+          KTAG_SUCCESS) {
+        continue;
+      }
+      demo_capture_queue_stats entry{};
+      entry.queue_id = queue_stats.queue_id;
+      entry.received = queue_stats.received;
+      entry.delivered = queue_stats.delivered;
+      entry.pending = queue_stats.pending;
+      stats->queues.push_back(entry);
+    }
+  }
+
 private:
   void *capture_ = nullptr;
+  uint32_t rx_queue_count_ = 1U;
 };
 
 ktag_dpdk_capture_config
@@ -94,8 +134,9 @@ create_dpdk_demo_capture_source(const ktag_demo_pipeline_config &config,
     }
     return nullptr;
   }
-  return std::unique_ptr<demo_capture_source>(new (std::nothrow)
-                                                  dpdk_capture_source(capture));
+  return std::unique_ptr<demo_capture_source>(
+      new (std::nothrow) dpdk_capture_source(capture,
+                                             capture_config.rx_queue_count));
 }
 
 #endif /* KTAG_DEMO_HAVE_DPDK */

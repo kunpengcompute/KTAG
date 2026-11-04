@@ -225,6 +225,7 @@ void release_pending(ktag_dpdk_context *context) {
     context->current = nullptr;
   }
   for (auto &queue : context->pending) {
+    context->discarded_total += queue.size();
     for (rte_mbuf *mbuf : queue) {
       rte_pktmbuf_free(mbuf);
     }
@@ -244,10 +245,30 @@ ktag_status configure_port(ktag_dpdk_context *context,
   }
 
   const int socket = rte_eth_dev_socket_id(context->port);
-  const uint32_t pool_size =
-      config->mbuf_pool_size == 0U
-          ? config->rx_queue_depth * KTAG_DPDK_DEFAULT_MBUF_POOL_MULTIPLIER
-          : config->mbuf_pool_size;
+
+  const uint32_t rx_queues =
+      config->rx_queue_count == 0U ? 1U : config->rx_queue_count;
+  context->rx_queue_count = static_cast<uint16_t>(rx_queues);
+  context->pending.resize(rx_queues);
+  context->counters.resize(rx_queues);
+
+  uint16_t nb_rx = config->rx_queue_depth == 0U
+                       ? KTAG_DPDK_DEFAULT_RX_QUEUE_DEPTH
+                       : config->rx_queue_depth;
+  uint16_t nb_tx = 0U;
+  (void)rte_eth_dev_adjust_nb_rx_tx_desc(context->port, &nb_rx, &nb_tx);
+
+  /*
+   * Every RX queue is backed by nb_rx descriptors drawn from the pool, so the
+   * default pool has to scale with the queue count. Sizing it from the depth
+   * alone starves the later queues: with 1024-deep queues the third
+   * rte_eth_rx_queue_setup fails with "Fail to alloc mbuf for Rx queue".
+   * The multiplier leaves headroom for packets in flight.
+   */
+  const uint32_t pool_size = config->mbuf_pool_size == 0U
+                                 ? static_cast<uint32_t>(nb_rx) * rx_queues *
+                                       KTAG_DPDK_DEFAULT_MBUF_POOL_MULTIPLIER
+                                 : config->mbuf_pool_size;
   context->pool =
       rte_pktmbuf_pool_create("ktag_mbuf_pool", pool_size, MBUF_POOL_CACHE_SIZE,
                               0U, RTE_MBUF_DEFAULT_BUF_SIZE, socket);
@@ -256,11 +277,6 @@ ktag_status configure_port(ktag_dpdk_context *context,
                  rte_strerror(rte_errno);
     return KTAG_ERROR_OUT_OF_MEMORY;
   }
-
-  const uint32_t rx_queues =
-      config->rx_queue_count == 0U ? 1U : config->rx_queue_count;
-  context->rx_queue_count = static_cast<uint16_t>(rx_queues);
-  context->pending.resize(rx_queues);
 
   struct rte_eth_conf port_conf;
   std::memset(&port_conf, 0, sizeof(port_conf));
@@ -298,12 +314,6 @@ ktag_status configure_port(ktag_dpdk_context *context,
     return KTAG_ERROR_INTERNAL;
   }
 
-  uint16_t nb_rx = config->rx_queue_depth == 0U
-                       ? KTAG_DPDK_DEFAULT_RX_QUEUE_DEPTH
-                       : config->rx_queue_depth;
-  uint16_t nb_tx = 0U;
-  (void)rte_eth_dev_adjust_nb_rx_tx_desc(context->port, &nb_rx, &nb_tx);
-
   struct rte_eth_rxconf rx_conf;
   std::memset(&rx_conf, 0, sizeof(rx_conf));
   rx_conf.rx_free_thresh = 32U;
@@ -331,6 +341,11 @@ ktag_status configure_port(ktag_dpdk_context *context,
     return KTAG_ERROR_INTERNAL;
   }
   rte_eth_promiscuous_enable(context->port);
+  /*
+   * Start the device counters from zero so the drop figures reported by
+   * ktag_dpdk_capture_get_stats() describe this run, not the port's lifetime.
+   */
+  rte_eth_stats_reset(context->port);
   return KTAG_SUCCESS;
 }
 
@@ -434,6 +449,8 @@ KTAG_API ktag_status ktag_dpdk_capture_next(void *context,
           rte_eth_rx_burst(capture->port, queue, burst, capture->burst_size);
       if (received != 0U) {
         capture->pending[queue].assign(burst, burst + received);
+        capture->received_total += received;
+        capture->counters[queue].received += received;
         capture->active_queue = queue;
         capture->next_rx_queue =
             static_cast<uint16_t>((queue + 1U) % capture->rx_queue_count);
@@ -471,10 +488,15 @@ KTAG_API ktag_status ktag_dpdk_capture_next(void *context,
     rte_pktmbuf_free(mbuf);
     if (owned_status != KTAG_SUCCESS) {
       dpdk_error = "failed to make captured packet owned";
+      return owned_status;
     }
-    return owned_status;
+    ++capture->delivered_total;
+    ++capture->counters[capture->active_queue].delivered;
+    return KTAG_SUCCESS;
   }
   capture->current = mbuf;
+  ++capture->delivered_total;
+  ++capture->counters[capture->active_queue].delivered;
   return KTAG_SUCCESS;
 }
 
@@ -506,6 +528,55 @@ KTAG_API void ktag_dpdk_capture_close(void *context) {
     capture->pool = nullptr;
   }
   delete capture;
+}
+
+KTAG_API ktag_status
+ktag_dpdk_capture_get_stats(const void *context,
+                            ktag_dpdk_capture_stats *stats) {
+  if (context == nullptr || stats == nullptr ||
+      stats->struct_size < sizeof(*stats) ||
+      stats->api_version != KTAG_API_VERSION) {
+    dpdk_error = "invalid DPDK capture context or stats output";
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
+  const auto *capture = static_cast<const ktag_dpdk_context *>(context);
+
+  uint64_t pending = 0U;
+  for (const auto &queue : capture->pending) {
+    pending += queue.size();
+  }
+  stats->received = capture->received_total;
+  stats->delivered = capture->delivered_total;
+  stats->pending = pending;
+  stats->discarded = capture->discarded_total;
+
+  /* Drops the device itself reports: no descriptor available, or RX errors. */
+  stats->dropped = 0U;
+  struct rte_eth_stats eth{};
+  if (rte_eth_stats_get(capture->port, &eth) == 0) {
+    stats->dropped = eth.imissed + eth.ierrors;
+  }
+  return KTAG_SUCCESS;
+}
+
+KTAG_API ktag_status ktag_dpdk_capture_get_queue_stats(
+    const void *context, uint32_t queue_id, ktag_dpdk_queue_stats *stats) {
+  if (context == nullptr || stats == nullptr ||
+      stats->struct_size < sizeof(*stats) ||
+      stats->api_version != KTAG_API_VERSION) {
+    dpdk_error = "invalid DPDK capture context or queue stats output";
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
+  const auto *capture = static_cast<const ktag_dpdk_context *>(context);
+  if (queue_id >= capture->rx_queue_count) {
+    dpdk_error = "queue_id exceeds the configured rx_queue_count";
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
+  stats->queue_id = queue_id;
+  stats->received = capture->counters[queue_id].received;
+  stats->delivered = capture->counters[queue_id].delivered;
+  stats->pending = capture->pending[queue_id].size();
+  return KTAG_SUCCESS;
 }
 
 KTAG_API const char *ktag_dpdk_capture_get_last_error(void) {
