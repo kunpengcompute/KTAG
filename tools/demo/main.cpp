@@ -591,6 +591,13 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       {nullptr, 0, nullptr, 0}};
   while ((opt = getopt_long(argc, argv, "t:e:f:r:p:i:m:c:j:n:wlh", long_options,
                             nullptr)) != -1) {
+    if ((opt == 'p' || opt == 'f') &&
+        args->num_pcap_files >= pcap_capacity) {
+      fprintf(stderr,
+              "错误: PCAP 文件数量超过上限，最多支持 %d 个（-p/-f 合计）\n",
+              pcap_capacity);
+      return -1;
+    }
     switch (opt) {
     case 't':
       args->operation = 0;
@@ -931,6 +938,7 @@ int main(int argc, char *argv[]) {
   CommandLineArgs args;
 
   if (parse_args(argc, argv, &args) != 0) {
+    free(args.pcap_files);
     return 1;
   }
 
