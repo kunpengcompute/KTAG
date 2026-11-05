@@ -16,12 +16,37 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  * come from libpcap (offline file or live interface) or from a DPDK PMD
  * port, and always yields standard ktag_packet objects.
  */
+/* Counters for one RX queue; only the DPDK backend fills these in. */
+struct demo_capture_queue_stats {
+  uint32_t queue_id = 0U;
+  uint64_t received = 0U;
+  uint64_t delivered = 0U;
+  uint64_t pending = 0U;
+};
+
+/*
+ * Optional capture counters, sampled after the run. available stays false for
+ * backends that do not track them (libpcap), so callers can skip the report.
+ */
+struct demo_capture_stats {
+  bool available = false;
+  uint64_t received = 0U;
+  uint64_t delivered = 0U;
+  uint64_t pending = 0U;
+  uint64_t dropped = 0U;
+  uint64_t discarded = 0U;
+  std::vector<demo_capture_queue_stats> queues;
+};
+
 struct demo_capture_source {
   virtual ~demo_capture_source() = default;
   virtual ktag_status next(ktag_packet *packet) = 0;
   virtual void interrupt() = 0;
   virtual uint32_t link_type() const = 0;
   virtual const char *last_error() const = 0;
+  virtual void get_capture_stats(demo_capture_stats *stats) const {
+    *stats = demo_capture_stats{};
+  }
 };
 
 #ifdef KTAG_DEMO_HAVE_DPDK

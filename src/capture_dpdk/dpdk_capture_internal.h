@@ -24,6 +24,12 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #error "ktag_capture_dpdk requires DPDK 24.11 or later"
 #endif
 
+/* Cumulative per-queue counters, sampled by ktag_dpdk_capture_get_stats(). */
+struct ktag_dpdk_queue_counters {
+    uint64_t received = 0;
+    uint64_t delivered = 0;
+};
+
 struct ktag_dpdk_context {
   uint16_t port = 0;
   ktag_dpdk_packet_mode mode = KTAG_DPDK_PACKET_BORROWED;
@@ -46,6 +52,12 @@ struct ktag_dpdk_context {
    * next() call. Indexed by queue id, so a single-queue port uses [0] only.
    */
   std::vector<std::vector<rte_mbuf *>> pending;
+  /* Per-queue cumulative counters, indexed like pending. */
+  std::vector<ktag_dpdk_queue_counters> counters;
+  uint64_t received_total = 0U;
+  uint64_t delivered_total = 0U;
+  /* Packets freed by close() while still cached, never delivered. */
+  uint64_t discarded_total = 0U;
   /* BORROWED mode: the mbuf backing the most recently returned packet. */
   rte_mbuf *current = nullptr;
 };
