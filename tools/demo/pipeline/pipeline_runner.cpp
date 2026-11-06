@@ -36,6 +36,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <fstream>
 #include <functional>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <memory>
@@ -1563,21 +1564,18 @@ void print_ub_performance_stats(const pipeline_run_statistics &statistics,
                 statistics.feature_work_sum_nanoseconds /
                     nanoseconds_per_second);
   } else {
-    std::printf("推理计算累计耗时: %10.4f 秒\n",
-                statistics.inference_nanoseconds / nanoseconds_per_second);
     std::printf("推理阶段墙钟耗时（首条特征接收到末次推理完成）: %10.4f 秒\n",
                 statistics.distributed_inference_wall_nanoseconds /
                     nanoseconds_per_second);
   }
   std::printf("文件 IO 耗时: %10.4f 秒\n",
               statistics.file_io_nanoseconds / nanoseconds_per_second);
-  const double local_compute_seconds =
-      statistics.feature_nanoseconds / nanoseconds_per_second +
-      statistics.inference_nanoseconds / nanoseconds_per_second +
-      statistics.file_io_nanoseconds / nanoseconds_per_second;
-  std::printf("核心累计耗时: %10.4f 秒 (本节点计算累计，多线程阶段可并行重叠)\n",
-              local_compute_seconds);
   if (frontend) {
+    const double local_compute_seconds =
+        (statistics.feature_nanoseconds + statistics.file_io_nanoseconds) /
+        nanoseconds_per_second;
+    std::printf("核心累计耗时: %10.4f 秒 (本节点计算累计，多线程阶段可并行重叠)\n",
+                local_compute_seconds);
     std::printf("核心链路耗时（特征提取、UB 传输、等待及后端推理）: %10.4f 秒\n",
                 statistics.distributed_core_nanoseconds /
                     nanoseconds_per_second);
@@ -1597,8 +1595,6 @@ void print_ub_performance_stats(const pipeline_run_statistics &statistics,
     print_ub_throughput("核心处理吞吐量（UB 全链路）", statistics.bytes,
                         statistics.distributed_core_nanoseconds);
   } else {
-    print_ub_throughput("推理计算吞吐量", statistics.bytes,
-                        statistics.inference_nanoseconds);
     print_ub_throughput("推理有效吞吐量", statistics.bytes,
                         statistics.distributed_inference_wall_nanoseconds);
   }
@@ -1949,9 +1945,41 @@ struct ub_backend_provider_state {
   void *drain_buffer = nullptr;
 };
 
+struct ub_inference_batch {
+  feature_batch_ptr input;
+  std::vector<ktag_feature_record_details> details;
+  std::vector<uint32_t> source_indices;
+  std::vector<uint64_t> frontend_hashes;
+  std::vector<uint8_t> ground_truth_valid;
+};
+
+struct ub_inference_worker {
+  inference_context_ptr inference;
+  prediction_batch_ptr output;
+  std::vector<pipeline_prediction> predictions;
+  pipeline_run_statistics statistics;
+  uint64_t batches = 0U;
+  std::chrono::steady_clock::time_point completed_at{};
+};
+
+struct ub_parallel_inference_state {
+  explicit ub_parallel_inference_state(size_t capacity)
+      : batch_queue(capacity) {}
+
+  ktag_demo_bounded_queue<ub_inference_batch> batch_queue;
+  std::vector<ub_inference_worker> workers;
+  std::vector<std::thread> threads;
+  std::mutex spare_mutex;
+  std::vector<ub_inference_batch> spare_batches;
+  std::atomic<bool> cancelled{false};
+  std::mutex error_mutex;
+  std::string error;
+};
+
 class ub_backend_executor {
 public:
   ~ub_backend_executor() {
+    stop_workers(true);
     if (transport_ != nullptr) {
       for (auto &provider : providers_) {
         if (provider.drain_buffer != nullptr) {
@@ -1964,6 +1992,7 @@ public:
   bool initialize(const ktag_demo_pipeline_config &config,
                   const ktag_feature_schema *schema, std::string *error) {
     config_ = &config;
+    schema_ = schema;
     schema_hash_ = ktag_feature_schema_get_hash(schema);
     value_count_ = ktag_feature_schema_get_value_count(schema);
     const size_t feature_size = ktag_demo_ub_feature_frame_size(value_count_);
@@ -1977,15 +2006,28 @@ public:
       *error = message.str();
       return false;
     }
-    inference_ = create_inference_context(config, schema);
-    input_.reset(
-        ktag_feature_batch_create(schema, config.inference_batch_size));
-    output_.reset(ktag_prediction_batch_create(config.inference_batch_size));
-    if (!inference_ || !input_ || !output_) {
-      *error = std::string("failed to create distributed Backend Inference "
-                           "contexts: ") +
-               ktag_inference_get_last_error();
-      return false;
+    if (config.inference_threads == 1U) {
+      // Preserve the original context/batch initialization order as well.
+      inference_ = create_inference_context(config, schema);
+      input_.reset(
+          ktag_feature_batch_create(schema, config.inference_batch_size));
+      output_.reset(ktag_prediction_batch_create(config.inference_batch_size));
+      if (!inference_ || !input_ || !output_) {
+        *error = std::string("failed to create distributed Backend Inference "
+                             "contexts: ") +
+                 ktag_inference_get_last_error();
+        return false;
+      }
+    } else {
+      input_.reset(
+          ktag_feature_batch_create(schema, config.inference_batch_size));
+      if (!input_) {
+        *error = "failed to create UB receiver batch";
+        return false;
+      }
+      if (!initialize_parallel_workers(error)) {
+        return false;
+      }
     }
     transport_ = ktag_demo_ub_ring_transport::create(
         make_ub_transport_config(config, ktag_demo_ub_role::user), error);
@@ -2042,10 +2084,11 @@ public:
     }
     std::printf("UB Backend ready: providers=%zu, credits/provider=%u, "
                 "element=%u, epoch=%llu, receive=rte_memcpy_sync, "
-                "copy_bytes=%zu\n",
+                "copy_bytes=%zu, inference_workers=%u\n",
                 providers_.size(), config.ub.credits_per_provider,
                 config.ub.data_element_size,
-                static_cast<unsigned long long>(epoch_), local_frame_.size());
+                static_cast<unsigned long long>(epoch_), local_frame_.size(),
+                config.inference_threads);
     for (const auto &provider : providers_) {
       std::printf("  Provider: hostname=%s, frontend_id_hash=%llu, queue=%u\n",
                   provider.hostname.c_str(),
@@ -2057,6 +2100,82 @@ public:
 
   bool run(std::vector<pipeline_prediction> *predictions,
            pipeline_run_statistics *statistics, std::string *error) {
+    if (config_->inference_threads == 1U) {
+      // Select once. The serial instantiations contain the original receive,
+      // CREDIT and synchronous inference paths, without parallel-state checks.
+      return receive_batches<false>(predictions, statistics, error) &&
+             finish<false>(statistics, error);
+    }
+    return run_parallel(predictions, statistics, error);
+  }
+
+private:
+  bool run_parallel(std::vector<pipeline_prediction> *predictions,
+                    pipeline_run_statistics *statistics, std::string *error) {
+    bool success = false;
+    try {
+      for (size_t index = 0U; index < parallel_->workers.size(); ++index) {
+        parallel_->threads.emplace_back(&ub_backend_executor::inference_worker,
+                                        this, index);
+      }
+      success = receive_batches<true>(predictions, statistics, error);
+    } catch (const std::exception &failure) {
+      *error = std::string("distributed Backend execution failed: ") +
+               failure.what();
+    } catch (...) {
+      *error = "unknown distributed Backend execution failure";
+    }
+    stop_workers(!success);
+    if (!parallel_->error.empty()) {
+      *error = parallel_->error;
+      success = false;
+    }
+    if (pipeline_interrupted != 0) {
+      *error = "Backend interrupted before inference completed";
+      success = false;
+    }
+    if (!success) {
+      abort_best_effort();
+      return false;
+    }
+    try {
+      size_t prediction_count = predictions->size();
+      for (const auto &worker : parallel_->workers) {
+        prediction_count += worker.predictions.size();
+      }
+      predictions->reserve(prediction_count);
+      for (size_t index = 0U; index < parallel_->workers.size(); ++index) {
+        auto &worker = parallel_->workers[index];
+        predictions->insert(
+            predictions->end(),
+            std::make_move_iterator(worker.predictions.begin()),
+            std::make_move_iterator(worker.predictions.end()));
+        std::vector<pipeline_prediction>().swap(worker.predictions);
+        statistics->inference_inputs += worker.statistics.inference_inputs;
+        statistics->predictions += worker.statistics.predictions;
+        inference_batches_ += worker.batches;
+        last_inference_completed_at_ =
+            std::max(last_inference_completed_at_, worker.completed_at);
+        std::printf("  Inference worker %zu: inputs=%llu, batches=%llu\n",
+                    index,
+                    static_cast<unsigned long long>(
+                        worker.statistics.inference_inputs),
+                    static_cast<unsigned long long>(worker.batches));
+      }
+      if (finish<true>(statistics, error)) {
+        return true;
+      }
+    } catch (const std::exception &failure) {
+      *error = std::string("failed to finish UB Backend: ") + failure.what();
+    }
+    abort_best_effort();
+    return false;
+  }
+
+  template <bool Parallel>
+  bool receive_batches(std::vector<pipeline_prediction> *predictions,
+                       pipeline_run_statistics *statistics,
+                       std::string *error) {
     std::vector<ktag_feature_record_details> details;
     std::vector<uint32_t> source_indices;
     std::vector<uint64_t> frontend_hashes;
@@ -2073,7 +2192,12 @@ public:
     auto first_record_at = std::chrono::steady_clock::time_point{};
     uint32_t drained_count = 0U;
     while (drained_count < providers_.size()) {
-      if (pipeline_interrupted != 0) {
+      if constexpr (Parallel) {
+        if (cancelled()) {
+          *error = "Backend stopped before all Frontends sent DRAIN";
+          return false;
+        }
+      } else if (pipeline_interrupted != 0) {
         *error = "Backend interrupted before all Frontends sent DRAIN";
         return false;
       }
@@ -2151,10 +2275,9 @@ public:
           provider.drain_buffer = buffer;
           ++drained_count;
           if (!details.empty() &&
-              !infer_batch(inference_.get(), input_.get(), output_.get(),
-                           &details, &source_indices, &frontend_hashes,
-                           &ground_truth_valid, predictions, statistics,
-                           error)) {
+              !dispatch_batch<Parallel>(
+                  &details, &source_indices, &frontend_hashes,
+                  &ground_truth_valid, predictions, statistics, error)) {
             return false;
           }
           continue;
@@ -2204,13 +2327,13 @@ public:
         if (details.size() == 1U) {
           first_record_at = std::chrono::steady_clock::now();
         }
-        if (!return_credit(provider, buffer, error)) {
+        if (!return_credit<Parallel>(provider, buffer, error)) {
           return false;
         }
         if (details.size() >= config_->inference_batch_size &&
-            !infer_batch(inference_.get(), input_.get(), output_.get(),
-                         &details, &source_indices, &frontend_hashes,
-                         &ground_truth_valid, predictions, statistics, error)) {
+            !dispatch_batch<Parallel>(
+                &details, &source_indices, &frontend_hashes,
+                &ground_truth_valid, predictions, statistics, error)) {
           return false;
         }
       }
@@ -2219,9 +2342,9 @@ public:
           elapsed_nanoseconds(first_record_at) >=
               static_cast<uint64_t>(config_->inference_batch_timeout_us) *
                   1000U &&
-          !infer_batch(inference_.get(), input_.get(), output_.get(), &details,
-                       &source_indices, &frontend_hashes, &ground_truth_valid,
-                       predictions, statistics, error)) {
+          !dispatch_batch<Parallel>(
+              &details, &source_indices, &frontend_hashes,
+              &ground_truth_valid, predictions, statistics, error)) {
         return false;
       }
       if (!received_any) {
@@ -2231,11 +2354,16 @@ public:
     }
 
     if (!details.empty() &&
-        !infer_batch(inference_.get(), input_.get(), output_.get(), &details,
-                     &source_indices, &frontend_hashes, &ground_truth_valid,
-                     predictions, statistics, error)) {
+        !dispatch_batch<Parallel>(
+            &details, &source_indices, &frontend_hashes,
+            &ground_truth_valid, predictions, statistics, error)) {
       return false;
     }
+    return true;
+  }
+
+  template <bool Parallel>
+  bool finish(pipeline_run_statistics *statistics, std::string *error) {
     if (first_feature_received_at_ != std::chrono::steady_clock::time_point{} &&
         last_inference_completed_at_ != std::chrono::steady_clock::time_point{}) {
       statistics->distributed_inference_wall_nanoseconds =
@@ -2259,10 +2387,16 @@ public:
         return false;
       }
       (void)encoded_size;
-      ub_send_one_blocking(transport_.get(), provider.mapping.tx_queue_id,
-                           provider.drain_buffer, config_->ub.poll_us,
-                           &send_retries_);
+      void *buffer = provider.drain_buffer;
       provider.drain_buffer = nullptr;
+      if constexpr (Parallel) {
+        if (!send_control(provider.mapping.tx_queue_id, buffer, error)) {
+          return false;
+        }
+      } else {
+        ub_send_one_blocking(transport_.get(), provider.mapping.tx_queue_id,
+                             buffer, config_->ub.poll_us, &send_retries_);
+      }
     }
     statistics->emitted_flows += received_features_;
     std::printf("UB Backend drained: features=%llu, batches=%llu, "
@@ -2281,7 +2415,199 @@ public:
     return true;
   }
 
-private:
+  bool initialize_parallel_workers(std::string *error) {
+    try {
+      // queue_capacity remains a record budget, rather than a batch count.
+      const size_t capacity = std::max<size_t>(
+          1U, config_->feature_queue_capacity / config_->inference_batch_size);
+      parallel_.reset(new ub_parallel_inference_state(capacity));
+      parallel_->workers.reserve(config_->inference_threads);
+      parallel_->threads.reserve(config_->inference_threads);
+      // Bound the number of reusable batches by queued + running + producer.
+      // Reserve here so workers never grow this vector under the recycle lock.
+      parallel_->spare_batches.reserve(
+          capacity + config_->inference_threads + 1U);
+      for (uint32_t index = 0U; index < config_->inference_threads; ++index) {
+        ub_inference_worker worker;
+        worker.inference = create_inference_context(*config_, schema_);
+        worker.output.reset(
+            ktag_prediction_batch_create(config_->inference_batch_size));
+        if (!worker.inference || !worker.output) {
+          *error = std::string("failed to create UB Inference worker ") +
+                   std::to_string(index) + ": " +
+                   ktag_inference_get_last_error();
+          return false;
+        }
+        parallel_->workers.push_back(std::move(worker));
+      }
+      return true;
+    } catch (const std::exception &failure) {
+      *error = std::string("failed to initialize UB Inference workers: ") +
+               failure.what();
+      return false;
+    }
+  }
+
+  bool cancelled() const {
+    return parallel_->cancelled.load(std::memory_order_relaxed) ||
+           pipeline_interrupted != 0;
+  }
+
+  void stop_workers(bool cancel) {
+    if (!parallel_) {
+      return;
+    }
+    if (cancel) {
+      parallel_->cancelled.store(true, std::memory_order_relaxed);
+    }
+    parallel_->batch_queue.close();
+    for (auto &thread : parallel_->threads) {
+      if (thread.joinable()) {
+        thread.join();
+      }
+    }
+  }
+
+  void fail_worker(const std::string &message) {
+    {
+      std::lock_guard<std::mutex> lock(parallel_->error_mutex);
+      if (parallel_->error.empty()) {
+        parallel_->error = message;
+      }
+    }
+    parallel_->cancelled.store(true, std::memory_order_relaxed);
+    parallel_->batch_queue.close();
+  }
+
+  void inference_worker(size_t index) {
+    try {
+      auto &worker = parallel_->workers[index];
+      ub_inference_batch batch;
+      while (parallel_->batch_queue.pop(&batch)) {
+        if (cancelled()) {
+          break;
+        }
+        std::string error;
+        if (!infer_batch(worker.inference.get(), batch.input.get(),
+                         worker.output.get(), &batch.details,
+                         &batch.source_indices, &batch.frontend_hashes,
+                         &batch.ground_truth_valid, &worker.predictions,
+                         &worker.statistics, &worker.batches,
+                         &worker.completed_at, &error)) {
+          fail_worker("UB Inference worker " + std::to_string(index) +
+                      ": " + error);
+          return;
+        }
+        // Recycle the batch storage instead of allocating it on every submit.
+        std::lock_guard<std::mutex> lock(parallel_->spare_mutex);
+        parallel_->spare_batches.push_back(std::move(batch));
+      }
+    } catch (const std::exception &failure) {
+      fail_worker("UB Inference worker " + std::to_string(index) +
+                  ": " + failure.what());
+    } catch (...) {
+      fail_worker("unknown UB Inference worker failure");
+    }
+  }
+
+  template <bool Parallel>
+  bool dispatch_batch(
+      std::vector<ktag_feature_record_details> *details,
+      std::vector<uint32_t> *source_indices,
+      std::vector<uint64_t> *frontend_hashes,
+      std::vector<uint8_t> *ground_truth_valid,
+      std::vector<pipeline_prediction> *predictions,
+      pipeline_run_statistics *statistics, std::string *error) {
+    if constexpr (!Parallel) {
+      return infer_batch(inference_.get(), input_.get(), output_.get(),
+                          details, source_indices, frontend_hashes,
+                          ground_truth_valid, predictions, statistics,
+                          &inference_batches_, &last_inference_completed_at_,
+                          error);
+    } else {
+      ub_inference_batch batch;
+      batch.input = std::move(input_);
+      batch.details.swap(*details);
+      batch.source_indices.swap(*source_indices);
+      batch.frontend_hashes.swap(*frontend_hashes);
+      batch.ground_truth_valid.swap(*ground_truth_valid);
+      if (parallel_->batch_queue.push_interruptible(
+              std::move(batch), [this]() { return cancelled(); }) !=
+          ktag_demo_queue_push_result::pushed) {
+        *error = "UB Inference batch submission interrupted or workers stopped";
+        return false;
+      }
+      {
+        std::lock_guard<std::mutex> lock(parallel_->spare_mutex);
+        if (!parallel_->spare_batches.empty()) {
+          batch = std::move(parallel_->spare_batches.back());
+          parallel_->spare_batches.pop_back();
+        }
+      }
+      input_ = std::move(batch.input);
+      details->swap(batch.details);
+      source_indices->swap(batch.source_indices);
+      frontend_hashes->swap(batch.frontend_hashes);
+      ground_truth_valid->swap(batch.ground_truth_valid);
+      if (!input_) {
+        input_.reset(ktag_feature_batch_create(schema_,
+                                               config_->inference_batch_size));
+      }
+      if (!input_) {
+        *error = "failed to allocate next UB Inference batch";
+        return false;
+      }
+      details->reserve(config_->inference_batch_size);
+      source_indices->reserve(config_->inference_batch_size);
+      frontend_hashes->reserve(config_->inference_batch_size);
+      ground_truth_valid->reserve(config_->inference_batch_size);
+      return true;
+    }
+  }
+
+  // A failed worker must also unblock a receiver waiting to return CREDIT.
+  // Ownership of buffer is consumed on both success and failure.
+  bool send_control(uint32_t queue, void *buffer, std::string *error) {
+    void *buffers[1] = {buffer};
+    while (true) {
+      if (cancelled()) {
+        transport_->free_buffer(buffer);
+        *error = "UB Backend control send interrupted or workers stopped";
+        return false;
+      }
+      if (transport_->send_burst(queue, buffers, 1U) == 1U) {
+        return true;
+      }
+      ++send_retries_;
+      ub_poll_backoff(config_->ub.poll_us);
+    }
+  }
+
+  void abort_best_effort() {
+    for (auto &provider : providers_) {
+      void *buffer = provider.drain_buffer;
+      provider.drain_buffer = nullptr;
+      if (buffer == nullptr) {
+        buffer = transport_->allocate_buffer(
+            provider.mapping.provider_node_index);
+      }
+      if (buffer == nullptr) {
+        continue;
+      }
+      size_t encoded_size = 0U;
+      std::string ignored;
+      if (ktag_demo_ub_encode_control_frame(
+              buffer, config_->ub.data_element_size,
+              ktag_demo_ub_message_type::error, provider_contract(provider),
+              &encoded_size, &ignored) &&
+          transport_->send_burst(provider.mapping.tx_queue_id, &buffer, 1U) ==
+              1U) {
+        continue;
+      }
+      transport_->free_buffer(buffer);
+    }
+  }
+
   ktag_demo_ub_frame_contract
   provider_contract(const ub_backend_provider_state &provider) const {
     ktag_demo_ub_frame_contract contract;
@@ -2336,6 +2662,7 @@ private:
     return true;
   }
 
+  template <bool Parallel>
   bool return_credit(const ub_backend_provider_state &provider, void *buffer,
                      std::string *error) {
     ktag_demo_ub_frame_contract contract = provider_contract(provider);
@@ -2348,9 +2675,13 @@ private:
       return false;
     }
     (void)encoded_size;
-    ub_send_one_blocking(transport_.get(), provider.mapping.tx_queue_id, buffer,
-                         config_->ub.poll_us, &send_retries_);
-    return true;
+    if constexpr (Parallel) {
+      return send_control(provider.mapping.tx_queue_id, buffer, error);
+    } else {
+      ub_send_one_blocking(transport_.get(), provider.mapping.tx_queue_id,
+                           buffer, config_->ub.poll_us, &send_retries_);
+      return true;
+    }
   }
 
   bool infer_batch(ktag_inference_context *inference, ktag_feature_batch *input,
@@ -2360,18 +2691,15 @@ private:
                    std::vector<uint64_t> *frontend_hashes,
                    std::vector<uint8_t> *ground_truth_valid,
                    std::vector<pipeline_prediction> *predictions,
-                   pipeline_run_statistics *statistics, std::string *error) {
+                   pipeline_run_statistics *statistics, uint64_t *batches,
+                   std::chrono::steady_clock::time_point *completed_at,
+                   std::string *error) {
     const uint32_t input_count = ktag_feature_batch_get_count(input);
     if (input_count == 0U) {
       return true;
     }
-    const auto start = std::chrono::steady_clock::now();
     const ktag_status status = ktag_inference_predict(inference, input, output);
-    last_inference_completed_at_ = std::chrono::steady_clock::now();
-    statistics->inference_nanoseconds += static_cast<uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            last_inference_completed_at_ - start)
-            .count());
+    *completed_at = std::chrono::steady_clock::now();
     if (status != KTAG_SUCCESS) {
       *error = std::string("distributed Backend inference failed: ") +
                ktag_inference_get_last_error();
@@ -2385,7 +2713,7 @@ private:
     }
     statistics->inference_inputs += input_count;
     statistics->predictions += predictions->size() - prediction_start;
-    ++inference_batches_;
+    ++(*batches);
     ktag_feature_batch_clear(input);
     details->clear();
     source_indices->clear();
@@ -2395,9 +2723,11 @@ private:
   }
 
   const ktag_demo_pipeline_config *config_ = nullptr;
+  const ktag_feature_schema *schema_ = nullptr;
   inference_context_ptr inference_;
   feature_batch_ptr input_;
   prediction_batch_ptr output_;
+  std::unique_ptr<ub_parallel_inference_state> parallel_;
   std::unique_ptr<ktag_demo_ub_ring_transport> transport_;
   std::vector<ub_backend_provider_state> providers_;
   std::vector<uint8_t> local_frame_;

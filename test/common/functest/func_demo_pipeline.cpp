@@ -6,11 +6,13 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -509,6 +511,89 @@ TEST(KTAGDemoPipelineQueue, AppliesAllCapacityPolicies)
     EXPECT_EQ(1U, fail.statistics().failures);
 }
 
+TEST(KTAGDemoPipelineQueue, CancelsProducerBlockedOnFullQueue)
+{
+    ktag_demo_bounded_queue<int> queue(1U);
+    ASSERT_EQ(ktag_demo_queue_push_result::pushed,
+              queue.push(1, ktag_demo_backpressure_policy::block));
+    std::atomic<bool> cancelled{false};
+    std::atomic<bool> finished{false};
+    auto result = ktag_demo_queue_push_result::failed;
+    std::thread producer([&]() {
+        result = queue.push_interruptible(
+            2, [&]() { return cancelled.load(); });
+        finished.store(true);
+    });
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(2);
+    while (queue.statistics().block_count == 0U &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    EXPECT_EQ(1U, queue.statistics().block_count);
+    cancelled.store(true);
+    while (!finished.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    EXPECT_TRUE(finished.load());
+    queue.close(); // Also release the producer if cancellation regresses.
+    producer.join();
+    EXPECT_EQ(ktag_demo_queue_push_result::closed, result);
+    EXPECT_EQ(1U, queue.statistics().pushed);
+}
+
+TEST(KTAGDemoPipelineQueue, MultipleConsumersDrainEveryItemExactlyOnce)
+{
+    ktag_demo_bounded_queue<uint32_t> queue(2U);
+    std::array<std::vector<uint32_t>, 4U> consumed;
+    std::vector<std::thread> workers;
+    for (size_t index = 0U; index < consumed.size(); ++index) {
+        workers.emplace_back([&, index]() {
+            uint32_t value = 0U;
+            while (queue.pop(&value)) {
+                consumed[index].push_back(value);
+            }
+        });
+    }
+    for (uint32_t value = 0U; value < 257U; ++value) {
+        EXPECT_EQ(ktag_demo_queue_push_result::pushed,
+                  queue.push(value, ktag_demo_backpressure_policy::block));
+    }
+    queue.close();
+    std::vector<uint32_t> values;
+    for (size_t index = 0U; index < workers.size(); ++index) {
+        workers[index].join();
+        values.insert(values.end(), consumed[index].begin(),
+                      consumed[index].end());
+    }
+    std::sort(values.begin(), values.end());
+    ASSERT_EQ(257U, values.size());
+    for (uint32_t value = 0U; value < values.size(); ++value) {
+        EXPECT_EQ(value, values[value]);
+    }
+}
+
+TEST(KTAGDemoPipelineQueue, InterruptiblePushOwnsMoveOnlyItems)
+{
+    ktag_demo_bounded_queue<std::unique_ptr<int>> queue(1U);
+    auto item = std::make_unique<int>(42);
+    const int *original = item.get();
+    EXPECT_EQ(ktag_demo_queue_push_result::pushed,
+              queue.push_interruptible(std::move(item), []() { return false; }));
+    EXPECT_EQ(nullptr, item.get());
+    std::unique_ptr<int> received;
+    ASSERT_TRUE(queue.pop(&received));
+    EXPECT_EQ(original, received.get());
+    EXPECT_EQ(42, *received);
+    EXPECT_EQ(ktag_demo_queue_push_result::closed,
+              queue.push_interruptible(std::make_unique<int>(7),
+                                       []() { return true; }));
+    EXPECT_EQ(1U, queue.statistics().pushed);
+    EXPECT_EQ(0U, queue.statistics().current_depth);
+    queue.close();
+    EXPECT_FALSE(queue.pop(&received));
+}
+
 TEST(KTAGDemoPipelineQueue, BlockPolicyWakesWhenConsumerMakesRoom)
 {
     ktag_demo_bounded_queue<int> queue(1U);
@@ -875,6 +960,61 @@ TEST(KTAGDemoPipelineConfig, ParsesDistributedBackendWithModel)
     EXPECT_EQ(ktag_demo_distributed_role::backend, config.ub.role);
     EXPECT_EQ("be-01", config.ub.node_id);
     EXPECT_EQ(2500U, config.inference_batch_timeout_us);
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, SharedYamlSupportsParallelBackendOnly)
+{
+    const std::string path = write_config(
+        "pipeline:\n"
+        "  enabled: false\n"
+        "  mode: feature_parallel\n"
+        "  model_package_path: model_package\n"
+        "  inference:\n"
+        "    threads: 1\n"
+        "    intra_op_threads: 1\n"
+        "    inter_op_threads: 1\n"
+        "  backpressure: {policy: block}\n"
+        "  distributed:\n"
+        "    ub_ring:\n"
+        "      provider_nodes: [fe-01, fe-02]\n"
+        "      user_nodes: [be-01]\n");
+    ktag_demo_pipeline_config_overrides overrides;
+    overrides.force_enable = true;
+    overrides.distributed_role_set = true;
+    overrides.distributed_role = ktag_demo_distributed_role::frontend;
+    overrides.node_id = "fe-01";
+    ktag_demo_pipeline_config frontend;
+    std::string error;
+    ASSERT_EQ(ktag_demo_pipeline_config_result::enabled,
+              ktag_demo_load_pipeline_config_with_overrides(
+                  path.c_str(), &overrides, &frontend, &error)) << error;
+
+    overrides.distributed_role = ktag_demo_distributed_role::backend;
+    overrides.node_id = "be-01";
+    overrides.inference_threads = 4U;
+    ktag_demo_pipeline_config backend;
+    EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+              ktag_demo_load_pipeline_config_with_overrides(
+                  path.c_str(), &overrides, &backend, &error));
+    EXPECT_NE(std::string::npos, error.find("use full_parallel"));
+
+    overrides.mode_set = true;
+    overrides.mode = ktag_demo_pipeline_mode::full_parallel;
+    ASSERT_EQ(ktag_demo_pipeline_config_result::enabled,
+              ktag_demo_load_pipeline_config_with_overrides(
+                  path.c_str(), &overrides, &backend, &error)) << error;
+    EXPECT_EQ(4U, backend.inference_threads);
+    EXPECT_EQ(frontend.ub.ruleset_hash, backend.ub.ruleset_hash);
+    EXPECT_EQ(1U, backend.inference_intra_op_threads);
+
+    overrides.distributed_role = ktag_demo_distributed_role::frontend;
+    overrides.node_id = "fe-01";
+    overrides.inference_threads = 0U;
+    EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+              ktag_demo_load_pipeline_config_with_overrides(
+                  path.c_str(), &overrides, &frontend, &error));
+    EXPECT_NE(std::string::npos, error.find("feature_parallel"));
     std::remove(path.c_str());
 }
 

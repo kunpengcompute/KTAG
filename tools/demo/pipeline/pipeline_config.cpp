@@ -374,13 +374,6 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
               "UB queue per Provider");
     return false;
   }
-  if (config.role == ktag_demo_distributed_role::backend &&
-      pipeline.inference_threads != 1U) {
-    set_error(error,
-              "the first distributed Backend implementation requires one "
-              "Inference worker");
-    return false;
-  }
   return true;
 }
 

@@ -42,7 +42,8 @@ pipeline:
     expire_interval_ms: 1000
 
   inference:
-    # 分布式 Backend 第一版实现强制 threads: 1。
+    # feature_parallel 使用 1 个推理 worker；Backend 可通过
+    # --pipeline-mode full_parallel --inference-threads N 开启多 worker。
     threads: 1
     batch_size: 256
     batch_timeout_us: 1000
