@@ -29,6 +29,8 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <stdexcept>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -52,7 +54,9 @@ namespace {
 
 volatile sig_atomic_t pipeline_interrupted = 0;
 
-void pipeline_signal_handler(int) { pipeline_interrupted = 1; }
+void pipeline_signal_handler(int) {
+  if (pipeline_interrupted < 2) { pipeline_interrupted = pipeline_interrupted + 1; }
+}
 
 class signal_scope {
 public:
@@ -1031,7 +1035,9 @@ public:
 
     const auto execution_start = std::chrono::steady_clock::now();
     try {
-      for (uint32_t index = 0U; index < config_.inference_threads; ++index) {
+      const uint32_t output_workers = config_.ub.enabled && config_.feature_only
+                                          ? 1U : config_.inference_threads;
+      for (uint32_t index = 0U; index < output_workers; ++index) {
         if (config_.feature_only) {
           inference_threads_.emplace_back(
               &parallel_source_executor::feature_output_worker, this, index);
@@ -1638,18 +1644,6 @@ make_ub_transport_config(const ktag_demo_pipeline_config &config,
   return transport;
 }
 
-void ub_send_one_blocking(ktag_demo_ub_ring_transport *transport,
-                          uint32_t queue_id, void *buffer, uint32_t poll_us,
-                          uint64_t *retry_count) {
-  void *buffers[1] = {buffer};
-  while (transport->send_burst(queue_id, buffers, 1U) != 1U) {
-    if (retry_count != nullptr) {
-      ++(*retry_count);
-    }
-    ub_poll_backoff(poll_us);
-  }
-}
-
 bool validate_ub_contract(const ktag_demo_ub_frame_info &info,
                           uint64_t frontend_hash, uint64_t epoch,
                           uint64_t schema_hash, uint64_t ruleset_hash,
@@ -1674,10 +1668,22 @@ bool validate_ub_contract(const ktag_demo_ub_frame_info &info,
 }
 
 class ub_frontend_record_sender {
+  struct queue_state {
+    ktag_demo_ub_queue_mapping mapping{};
+    void *ready = nullptr;
+    uint64_t sequence = 0U;
+    bool drain_sent = false;
+    bool acknowledged = false;
+    bool mapped = false;
+    bool error_sent = false;
+  };
 public:
   ~ub_frontend_record_sender() {
-    if (ready_buffer_ != nullptr && transport_ != nullptr) {
-      transport_->return_buffer(ready_buffer_);
+    abort_best_effort();
+    if (transport_) {
+      for (auto &queue : queues_) {
+        if (queue.ready) { transport_->return_buffer(queue.ready); }
+      }
     }
   }
 
@@ -1689,166 +1695,148 @@ public:
     frontend_hash_ = ub_identity_hash(config.ub.node_id);
     const size_t required = ktag_demo_ub_feature_frame_size(value_count);
     if (required == 0U || required > config.ub.data_element_size) {
-      std::ostringstream message;
-      message << "UB data_element_size=" << config.ub.data_element_size
-              << " cannot hold the configured Feature frame (required="
-              << required << ')';
-      *error = message.str();
+      *error = "UB data_element_size cannot hold configured Feature frame (required=" + std::to_string(required) + ")";
       return false;
     }
     transport_ = ktag_demo_ub_ring_transport::create(
         make_ub_transport_config(config, ktag_demo_ub_role::provider), error);
-    if (!transport_) {
-      return false;
+    if (!transport_) { return false; }
+    queues_.resize(config.ub.queues_per_provider);
+    for (size_t index = 0U; index < queues_.size(); ++index) {
+      if (!transport_->queue_mapping(config.ub.node_id, static_cast<uint32_t>(index),
+                                     &queues_[index].mapping, error)) { return false; }
+      queues_[index].mapped = true;
     }
-    if (!transport_->queue_mapping(config.ub.node_id, 0U, &mapping_, error)) {
-      return false;
-    }
-    uint32_t actual_size = 0U;
-    while (actual_size == 0U) {
-      ++receive_polls_;
+    const uint32_t expected = ktag_demo_ub_runtime_data_element_size(config.ub.data_element_size);
+    uint32_t actual = 0U;
+    while ((actual = transport_->data_element_size(queues_.front().mapping.provider_node_index)) == 0U) {
+      if (interrupted(error)) { return false; }
       ub_poll_backoff(config.ub.poll_us);
-      actual_size = transport_->data_element_size(mapping_.provider_node_index);
     }
-    const uint32_t expected_runtime_size =
-        ktag_demo_ub_runtime_data_element_size(config.ub.data_element_size);
-    if (expected_runtime_size == 0U || actual_size != expected_runtime_size) {
-      std::ostringstream message;
-      message << "Frontend/Backend UB runtime element size does not match: "
-              << "payload=" << config.ub.data_element_size
-              << ", expected_runtime=" << expected_runtime_size
-              << ", actual_runtime=" << actual_size;
-      *error = message.str();
+    if (expected == 0U || actual != expected) {
+      *error = "Frontend/Backend UB runtime element size mismatch: expected=" +
+          std::to_string(expected) + ", actual=" + std::to_string(actual);
       return false;
     }
-    if (!take_credit(&ready_buffer_, error)) {
-      return false;
+    // Establish the session before input processing; preserve the first CREDIT.
+    while (epoch_ == 0U) {
+      if (interrupted(error)) { return false; }
+      for (auto &queue : queues_) {
+        if (!poll_control(queue, error)) { return false; }
+        if (epoch_ != 0U) { break; }
+      }
+      if (epoch_ == 0U) { ub_poll_backoff(config.ub.poll_us); }
     }
-    std::printf("UB Frontend ready: node=%s, provider_index=%u, queue=%u, "
-                "element=%u, epoch=%llu\n",
-                config.ub.node_id.c_str(), mapping_.provider_node_index,
-                mapping_.tx_queue_id, actual_size,
+    std::printf("UB Frontend ready: node=%s, queues=%zu, element=%u, epoch=%llu\n",
+                config.ub.node_id.c_str(), queues_.size(), actual,
                 static_cast<unsigned long long>(epoch_));
     return true;
   }
 
-  bool send(feature_record_owned &&record, bool ground_truth_valid,
-            std::string *error) {
+  bool send(feature_record_owned &&record, bool ground_truth_valid, std::string *error) {
     if (record.values.size() != value_count_) {
       *error = "Frontend Feature value count changed after Schema freeze";
       return false;
     }
-    void *buffer = ready_buffer_;
-    ready_buffer_ = nullptr;
-    if (buffer == nullptr && !take_credit(&buffer, error)) {
+    while (!interrupted(error)) {
+      for (size_t offset = 0U; offset < queues_.size(); ++offset) {
+        const size_t index = (next_queue_ + offset) % queues_.size();
+        auto &queue = queues_[index];
+        if (!poll_control(queue, error)) { return false; }
+        if (!queue.ready) { continue; }
+        auto contract = base_contract();
+        contract.sequence = queue.sequence + 1U;
+        size_t encoded = 0U;
+        if (!ktag_demo_ub_encode_feature_frame(queue.ready, config_->ub.data_element_size,
+                contract, record, ground_truth_valid, &encoded, error) ||
+            !send_ready(queue, error)) { return false; }
+        queue.sequence = contract.sequence;
+        ++sent_features_;
+        next_queue_ = (index + 1U) % queues_.size();
+        return true;
+      }
+      ++receive_polls_;
+      ub_poll_backoff(config_->ub.poll_us);
+    }
+    return false;
+  }
+
+  // First signal stops capture; finish queued features and DRAIN. A second
+  // signal interrupts UB waits. Startup remains interruptible by one signal.
+  void begin_input() { input_started_ = true; }
+
+  bool drain(pipeline_run_statistics *statistics, std::string *error) {
+    if (statistics->emitted_flows != sent_features_) {
+      *error = "Frontend extracted/sent Feature totals do not match";
       return false;
     }
-    ktag_demo_ub_frame_contract contract = base_contract();
-    contract.sequence = sequence_ + 1U;
-    size_t encoded_size = 0U;
-    if (!ktag_demo_ub_encode_feature_frame(
-            buffer, config_->ub.data_element_size, contract, record,
-            ground_truth_valid, &encoded_size, error)) {
-      send_error(buffer);
-      return false;
+    size_t completed = 0U;
+    while (completed < queues_.size() && !interrupted(error)) {
+      bool progress = false;
+      for (size_t index = 0U; index < queues_.size(); ++index) {
+        auto &queue = queues_[index];
+        if (queue.acknowledged) { continue; }
+        if (!poll_control(queue, error)) { return false; }
+        if (queue.acknowledged) {
+          ++completed;
+          progress = true;
+          if (completed == queues_.size() && statistics->first_feature_at != std::chrono::steady_clock::time_point{}) {
+            statistics->distributed_core_nanoseconds = elapsed_nanoseconds(statistics->first_feature_at);
+          }
+          continue;
+        }
+        if (!queue.drain_sent && queue.ready) {
+          auto contract = base_contract();
+          contract.sequence = queue.sequence;
+          ktag_demo_ub_stream_statistics totals;
+          totals.feature_records = queue.sequence;
+          if (index == 0U) {
+            totals.input_packets = statistics->packets;
+            totals.input_bytes = statistics->bytes;
+          }
+          size_t encoded = 0U;
+          if (!ktag_demo_ub_encode_drain_frame(queue.ready, config_->ub.data_element_size,
+                  contract, totals, &encoded, error) || !send_ready(queue, error)) { return false; }
+          queue.drain_sent = true;
+          progress = true;
+        }
+      }
+      if (!progress) { ++receive_polls_; ub_poll_backoff(config_->ub.poll_us); }
     }
-    (void)encoded_size;
-    ub_send_one_blocking(transport_.get(), mapping_.tx_queue_id, buffer,
-                         config_->ub.poll_us, &send_retries_);
-    sequence_ = contract.sequence;
-    ++sent_features_;
+    if (completed != queues_.size()) { return false; }
+    std::printf("UB Frontend drained: features=%llu, queues=%zu, send_retries=%llu, empty_polls=%llu\n",
+                static_cast<unsigned long long>(sent_features_), queues_.size(),
+                static_cast<unsigned long long>(send_retries_), static_cast<unsigned long long>(receive_polls_));
     return true;
   }
 
-  bool drain(pipeline_run_statistics *statistics, std::string *error) {
-    void *buffer = ready_buffer_;
-    ready_buffer_ = nullptr;
-    if (buffer == nullptr && !take_credit(&buffer, error)) {
-      return false;
-    }
-    ktag_demo_ub_frame_contract contract = base_contract();
-    contract.sequence = sequence_;
-    ktag_demo_ub_stream_statistics stream_statistics;
-    stream_statistics.input_packets = statistics->packets;
-    stream_statistics.input_bytes = statistics->bytes;
-    stream_statistics.feature_records = statistics->emitted_flows;
-    size_t encoded_size = 0U;
-    if (!ktag_demo_ub_encode_drain_frame(
-            buffer, config_->ub.data_element_size, contract, stream_statistics,
-            &encoded_size, error)) {
-      transport_->return_buffer(buffer);
-      return false;
-    }
-    (void)encoded_size;
-    ub_send_one_blocking(transport_.get(), mapping_.tx_queue_id, buffer,
-                         config_->ub.poll_us, &send_retries_);
-
-    while (true) {
-      void *reply = nullptr;
-      if (transport_->receive_burst(mapping_.rx_queue_id, &reply, 1U) == 0U) {
-        ++receive_polls_;
-        ub_poll_backoff(config_->ub.poll_us);
-        continue;
-      }
-      const auto received_at = std::chrono::steady_clock::now();
-      ktag_demo_ub_frame_info info;
-      std::string frame_error;
-      const bool valid = ktag_demo_ub_inspect_frame(
-          reply, config_->ub.data_element_size, &info, &frame_error);
-      if (!valid ||
-          !validate_ub_contract(info, frontend_hash_, epoch_, schema_hash_,
-                                config_->ub.ruleset_hash, &frame_error)) {
-        transport_->return_buffer(reply);
-        *error =
-            valid ? frame_error : "invalid UB shutdown frame: " + frame_error;
-        return false;
-      }
-      if (info.message_type == ktag_demo_ub_message_type::credit) {
-        transport_->return_buffer(reply);
-        continue;
-      }
-      if (info.message_type == ktag_demo_ub_message_type::error) {
-        transport_->return_buffer(reply);
-        *error = "Backend rejected the Frontend UB stream";
-        return false;
-      }
-      if (info.message_type != ktag_demo_ub_message_type::drain_ack ||
-          info.contract.sequence != sequence_) {
-        transport_->return_buffer(reply);
-        *error = "Frontend received an unexpected UB shutdown message";
-        return false;
-      }
-      if (statistics->first_feature_at !=
-          std::chrono::steady_clock::time_point{}) {
-        // One frontend clock covers extraction, transport, backend inference
-        // and the completion reply. Never subtract clocks on different hosts.
-        statistics->distributed_core_nanoseconds = static_cast<uint64_t>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                received_at - statistics->first_feature_at)
-                .count());
-      }
-      transport_->return_buffer(reply);
-      std::printf("UB Frontend drained: features=%llu, send_retries=%llu, "
-                  "empty_polls=%llu\n",
-                  static_cast<unsigned long long>(sent_features_),
-                  static_cast<unsigned long long>(send_retries_),
-                  static_cast<unsigned long long>(receive_polls_));
-      return true;
-    }
-  }
-
   void abort_best_effort() {
-    void *buffer = ready_buffer_;
-    ready_buffer_ = nullptr;
-    if (buffer == nullptr && transport_ != nullptr) {
-      (void)transport_->receive_burst(mapping_.rx_queue_id, &buffer, 1U);
-    }
-    if (buffer != nullptr) {
-      send_error(buffer);
+    if (!transport_) { return; }
+    for (auto &queue : queues_) {
+      if (queue.acknowledged || queue.error_sent || !queue.mapped) { continue; }
+      try {
+        if (!queue.ready) { transport_->receive_burst(queue.mapping.rx_queue_id, &queue.ready, 1U); }
+        if (!queue.ready) { continue; }
+        auto contract = base_contract();
+        contract.sequence = queue.sequence;
+        size_t encoded = 0U;
+        std::string ignored;
+        if (ktag_demo_ub_encode_control_frame(queue.ready, config_->ub.data_element_size,
+                ktag_demo_ub_message_type::error, contract, &encoded, &ignored) &&
+            transport_->send_burst(queue.mapping.tx_queue_id, &queue.ready, 1U) == 1U) {
+          queue.ready = nullptr;
+          queue.error_sent = true;
+        }
+      } catch (...) { /* Best effort; the retained buffer remains owned here. */ }
     }
   }
 
 private:
+  bool interrupted(std::string *error) const {
+    if (pipeline_interrupted < (input_started_ ? 2 : 1)) { return false; }
+    *error = "Frontend UB operation interrupted";
+    return true;
+  }
   ktag_demo_ub_frame_contract base_contract() const {
     ktag_demo_ub_frame_contract contract;
     contract.frontend_id_hash = frontend_hash_;
@@ -1857,134 +1845,93 @@ private:
     contract.ruleset_hash = config_->ub.ruleset_hash;
     return contract;
   }
-
-  bool take_credit(void **buffer, std::string *error) {
-    while (true) {
-      void *received = nullptr;
-      if (transport_->receive_burst(mapping_.rx_queue_id, &received, 1U) ==
-          0U) {
-        ++receive_polls_;
-        ub_poll_backoff(config_->ub.poll_us);
-        continue;
+  bool send_ready(queue_state &queue, std::string *error) {
+    while (!interrupted(error)) {
+      if (transport_->send_burst(queue.mapping.tx_queue_id, &queue.ready, 1U) == 1U) {
+        queue.ready = nullptr;
+        return true;
       }
-      ktag_demo_ub_frame_info info;
-      std::string frame_error;
-      if (!ktag_demo_ub_inspect_frame(received, config_->ub.data_element_size,
-                                      &info, &frame_error)) {
-        send_error(received);
-        *error = "invalid UB CREDIT frame: " + frame_error;
-        return false;
-      }
-      if (info.message_type == ktag_demo_ub_message_type::error) {
-        transport_->return_buffer(received);
-        *error = "Backend rejected the Frontend during UB startup";
-        return false;
-      }
-      if (info.message_type != ktag_demo_ub_message_type::credit) {
-        send_error(received);
-        *error = "Frontend expected a CREDIT frame from Backend";
-        return false;
-      }
-      const uint64_t expected_epoch = epoch_;
-      if (!validate_ub_contract(info, frontend_hash_, expected_epoch,
-                                schema_hash_, config_->ub.ruleset_hash,
-                                &frame_error) ||
-          info.contract.epoch == 0U) {
-        send_error(received);
-        *error = frame_error.empty() ? "UB CREDIT epoch must be non-zero"
-                                     : frame_error;
-        return false;
-      }
-      if (epoch_ == 0U) {
-        epoch_ = info.contract.epoch;
-      }
-      *buffer = received;
-      return true;
+      ++send_retries_;
+      ub_poll_backoff(config_->ub.poll_us);
     }
+    return false;
   }
-
-  void send_error(void *buffer) {
-    if (buffer == nullptr || transport_ == nullptr || config_ == nullptr) {
-      return;
+  bool poll_control(queue_state &queue, std::string *error) {
+    if (queue.ready || queue.acknowledged) { return true; }
+    void *buffer = nullptr;
+    if (transport_->receive_burst(queue.mapping.rx_queue_id, &buffer, 1U) == 0U) { return true; }
+    // Keep ownership in queue.ready until sent back or returned on destruction.
+    queue.ready = buffer;
+    ktag_demo_ub_frame_info info;
+    if (!ktag_demo_ub_inspect_frame(buffer, config_->ub.data_element_size, &info, error)) { return false; }
+    if (info.message_type == ktag_demo_ub_message_type::error) {
+      *error = "Backend rejected Frontend UB stream on queue " + std::to_string(queue.mapping.rx_queue_id);
+      return false;
     }
-    ktag_demo_ub_frame_contract contract = base_contract();
-    contract.sequence = sequence_;
-    size_t encoded_size = 0U;
-    std::string ignored;
-    if (ktag_demo_ub_encode_control_frame(buffer, config_->ub.data_element_size,
-                                          ktag_demo_ub_message_type::error,
-                                          contract, &encoded_size, &ignored)) {
-      ub_send_one_blocking(transport_.get(), mapping_.tx_queue_id, buffer,
-                           config_->ub.poll_us, &send_retries_);
+    if (!validate_ub_contract(info, frontend_hash_, epoch_, schema_hash_, config_->ub.ruleset_hash, error) || info.contract.epoch == 0U) {
+      if (error->empty()) { *error = "UB CREDIT epoch must be non-zero"; }
+      return false;
+    }
+    if (info.message_type == ktag_demo_ub_message_type::credit) {
+      epoch_ = info.contract.epoch;
+      if (!queue.drain_sent) { return true; }
+    } else if (info.message_type == ktag_demo_ub_message_type::drain_ack &&
+               queue.drain_sent && info.contract.sequence == queue.sequence) {
+      queue.acknowledged = true;
     } else {
-      transport_->return_buffer(buffer);
+      *error = "Frontend received unexpected UB control frame on queue " + std::to_string(queue.mapping.rx_queue_id);
+      return false;
     }
+    transport_->return_buffer(buffer);
+    queue.ready = nullptr;
+    return true;
   }
 
   const ktag_demo_pipeline_config *config_ = nullptr;
   std::unique_ptr<ktag_demo_ub_ring_transport> transport_;
-  ktag_demo_ub_queue_mapping mapping_{};
-  void *ready_buffer_ = nullptr;
-  uint64_t frontend_hash_ = 0U;
-  uint64_t epoch_ = 0U;
-  uint64_t sequence_ = 0U;
-  uint64_t schema_hash_ = 0U;
+  std::vector<queue_state> queues_;
+  size_t next_queue_ = 0U;
+  uint64_t frontend_hash_ = 0U, epoch_ = 0U, schema_hash_ = 0U;
   uint32_t value_count_ = 0U;
-  uint64_t sent_features_ = 0U;
-  uint64_t send_retries_ = 0U;
-  uint64_t receive_polls_ = 0U;
+  bool input_started_ = false;
+  uint64_t sent_features_ = 0U, send_retries_ = 0U, receive_polls_ = 0U;
 };
 
-struct ub_backend_provider_state {
+struct ub_queue_worker {
   std::string hostname;
+  uint32_t sub_queue = 0U, cpu = 0U;
   uint64_t frontend_hash = 0U;
   ktag_demo_ub_queue_mapping mapping{};
-  uint64_t last_sequence = 0U;
-  uint64_t received_features = 0U;
-  bool drained = false;
-  void *drain_buffer = nullptr;
-};
-
-struct ub_inference_batch {
+  inference_context_ptr inference;
   feature_batch_ptr input;
+  prediction_batch_ptr output;
+  std::vector<uint8_t> frame;
   std::vector<ktag_feature_record_details> details;
   std::vector<uint32_t> source_indices;
   std::vector<uint64_t> frontend_hashes;
   std::vector<uint8_t> ground_truth_valid;
-};
-
-struct ub_inference_worker {
-  inference_context_ptr inference;
-  prediction_batch_ptr output;
   std::vector<pipeline_prediction> predictions;
   pipeline_run_statistics statistics;
-  uint64_t batches = 0U;
-  std::chrono::steady_clock::time_point completed_at{};
-};
-
-struct ub_parallel_inference_state {
-  explicit ub_parallel_inference_state(size_t capacity)
-      : batch_queue(capacity) {}
-
-  ktag_demo_bounded_queue<ub_inference_batch> batch_queue;
-  std::vector<ub_inference_worker> workers;
-  std::vector<std::thread> threads;
-  std::mutex spare_mutex;
-  std::vector<ub_inference_batch> spare_batches;
-  std::atomic<bool> cancelled{false};
-  std::mutex error_mutex;
-  std::string error;
+  std::vector<void *> initial_credits;
+  void *held = nullptr;
+  void *error_buffer = nullptr;
+  uint64_t sequence = 0U, batches = 0U, send_retries = 0U, empty_polls = 0U;
+  bool acknowledged = false;
+  std::chrono::steady_clock::time_point first_received{}, completed_at{}, batch_started{};
 };
 
 class ub_backend_executor {
 public:
   ~ub_backend_executor() {
-    stop_workers(true);
-    if (transport_ != nullptr) {
-      for (auto &provider : providers_) {
-        if (provider.drain_buffer != nullptr) {
-          transport_->free_buffer(provider.drain_buffer);
-        }
+    cancel_.store(true, std::memory_order_relaxed);
+    gate_.notify_all();
+    join_workers();
+    if (transport_) {
+      abort_best_effort();
+      for (auto &worker : workers_) {
+        if (worker.held) { transport_->free_buffer(worker.held); }
+        if (worker.error_buffer) { transport_->free_buffer(worker.error_buffer); }
+        for (void *buffer : worker.initial_credits) { if (buffer) { transport_->free_buffer(buffer); } }
       }
     }
   }
@@ -1996,691 +1943,352 @@ public:
     schema_hash_ = ktag_feature_schema_get_hash(schema);
     value_count_ = ktag_feature_schema_get_value_count(schema);
     const size_t feature_size = ktag_demo_ub_feature_frame_size(value_count_);
-    const size_t required = std::max(
-        feature_size, static_cast<size_t>(KTAG_DEMO_UB_DRAIN_FRAME_SIZE));
-    if (feature_size == 0U || required > config.ub.data_element_size) {
-      std::ostringstream message;
-      message << "UB data_element_size=" << config.ub.data_element_size
-              << " cannot hold the configured Feature frame (required="
-              << required << ')';
-      *error = message.str();
+    frame_size_ = std::max(feature_size, static_cast<size_t>(KTAG_DEMO_UB_DRAIN_FRAME_SIZE));
+    if (feature_size == 0U || frame_size_ > config.ub.data_element_size) {
+      *error = "UB data_element_size cannot hold configured Feature/DRAIN frame";
       return false;
     }
-    if (config.inference_threads == 1U) {
-      // Preserve the original context/batch initialization order as well.
-      inference_ = create_inference_context(config, schema);
-      input_.reset(
-          ktag_feature_batch_create(schema, config.inference_batch_size));
-      output_.reset(ktag_prediction_batch_create(config.inference_batch_size));
-      if (!inference_ || !input_ || !output_) {
-        *error = std::string("failed to create distributed Backend Inference "
-                             "contexts: ") +
-                 ktag_inference_get_last_error();
-        return false;
-      }
-    } else {
-      input_.reset(
-          ktag_feature_batch_create(schema, config.inference_batch_size));
-      if (!input_) {
-        *error = "failed to create UB receiver batch";
-        return false;
-      }
-      if (!initialize_parallel_workers(error)) {
+    std::vector<uint32_t> allowed;
+    if (!ktag_demo_ub_allowed_cpus(&allowed, error)) { return false; }
+    if (config.ub.backend_worker_cpus.size() != config.inference_threads ||
+        config.inference_threads != config.ub.provider_nodes.size() * config.ub.queues_per_provider) {
+      *error = "UB worker, CPU and queue counts do not match";
+      return false;
+    }
+    for (size_t index = 0; index < config.ub.backend_worker_cpus.size(); ++index) {
+      const auto cpu = config.ub.backend_worker_cpus[index];
+      if (std::find(allowed.begin(), allowed.end(), cpu) == allowed.end()) {
+        *error = "UB affinity error: worker=" + std::to_string(index) + ", cpu=" + std::to_string(cpu) + " is outside the pre-EAL allowed CPU set";
         return false;
       }
     }
     transport_ = ktag_demo_ub_ring_transport::create(
         make_ub_transport_config(config, ktag_demo_ub_role::user), error);
-    if (!transport_) {
-      return false;
-    }
-    try {
-      local_frame_.resize(required);
-    } catch (...) {
-      *error = "out of memory allocating UB local receive buffer";
-      return false;
-    }
-    epoch_ = static_cast<uint64_t>(
-                 std::chrono::duration_cast<std::chrono::nanoseconds>(
-                     std::chrono::system_clock::now().time_since_epoch())
-                     .count()) ^
+    if (!transport_) { return false; }
+    epoch_ = static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count()) ^
              (static_cast<uint64_t>(getpid()) << 32U);
-    if (epoch_ == 0U) {
-      epoch_ = 1U;
-    }
-    try {
-      providers_.reserve(config.ub.provider_nodes.size());
-      for (const auto &hostname : config.ub.provider_nodes) {
-        ub_backend_provider_state provider;
-        provider.hostname = hostname;
-        provider.frontend_hash = ub_identity_hash(hostname);
-        if (!transport_->queue_mapping(hostname, 0U, &provider.mapping,
-                                       error)) {
+    if (epoch_ == 0U) { epoch_ = 1U; }
+    workers_.reserve(config.inference_threads);
+    for (const auto &hostname : config.ub.provider_nodes) {
+      for (uint32_t sub = 0; sub < config.ub.queues_per_provider; ++sub) {
+        ub_queue_worker worker;
+        worker.hostname = hostname;
+        worker.frontend_hash = ub_identity_hash(hostname);
+        worker.sub_queue = sub;
+        worker.cpu = config.ub.backend_worker_cpus[workers_.size()];
+        if (!transport_->queue_mapping(hostname, sub, &worker.mapping, error)) { return false; }
+        const auto expected = ktag_demo_ub_runtime_data_element_size(config.ub.data_element_size);
+        if (expected == 0U || transport_->data_element_size(worker.mapping.provider_node_index) != expected) {
+          *error = "Provider/Backend UB runtime element size mismatch for " + hostname;
           return false;
         }
-        const uint32_t actual_size =
-            transport_->data_element_size(provider.mapping.provider_node_index);
-        const uint32_t expected_runtime_size =
-            ktag_demo_ub_runtime_data_element_size(config.ub.data_element_size);
-        if (expected_runtime_size == 0U ||
-            actual_size != expected_runtime_size) {
-          std::ostringstream message;
-          message << "Provider/Backend UB runtime element size does not "
-                     "match: payload="
-                  << config.ub.data_element_size
-                  << ", expected_runtime=" << expected_runtime_size
-                  << ", actual_runtime=" << actual_size;
-          *error = message.str();
-          return false;
-        }
-        providers_.push_back(std::move(provider));
+        workers_.push_back(std::move(worker));
       }
-    } catch (...) {
-      *error = "out of memory creating Backend Provider state";
-      return false;
     }
-    if (!prepost_credits(error)) {
-      return false;
-    }
-    std::printf("UB Backend ready: providers=%zu, credits/provider=%u, "
-                "element=%u, epoch=%llu, receive=rte_memcpy_sync, "
-                "copy_bytes=%zu, inference_workers=%u\n",
-                providers_.size(), config.ub.credits_per_provider,
-                config.ub.data_element_size,
-                static_cast<unsigned long long>(epoch_), local_frame_.size(),
-                config.inference_threads);
-    for (const auto &provider : providers_) {
-      std::printf("  Provider: hostname=%s, frontend_id_hash=%llu, queue=%u\n",
-                  provider.hostname.c_str(),
-                  static_cast<unsigned long long>(provider.frontend_hash),
-                  provider.mapping.rx_queue_id);
+    // Allocate on the EAL main lcore, before any queue worker runs. Reserve an
+    // extra control buffer per queue so errors never depend on alloc_buf in a std::thread.
+    for (auto &worker : workers_) {
+      worker.initial_credits.reserve(config.ub.credits_per_queue);
+      for (uint32_t n = 0; n <= config.ub.credits_per_queue; ++n) {
+        void *buffer = transport_->allocate_buffer(worker.mapping.provider_node_index);
+        if (!buffer) {
+          *error = "Provider " + worker.hostname + " does not have enough UB buffers for all queue CREDITs and error reserves";
+          return false;
+        }
+        if (n == config.ub.credits_per_queue) { worker.error_buffer = buffer; }
+        else { worker.initial_credits.push_back(buffer); }
+      }
     }
     return true;
   }
 
   bool run(std::vector<pipeline_prediction> *predictions,
            pipeline_run_statistics *statistics, std::string *error) {
-    if (config_->inference_threads == 1U) {
-      // Select once. The serial instantiations contain the original receive,
-      // CREDIT and synchronous inference paths, without parallel-state checks.
-      return receive_batches<false>(predictions, statistics, error) &&
-             finish<false>(statistics, error);
+    try {
+      threads_.reserve(workers_.size());
+      for (size_t index = 0; index < workers_.size(); ++index) {
+        threads_.emplace_back(&ub_backend_executor::worker_main, this, index);
+      }
+      while (ready_.load(std::memory_order_acquire) != workers_.size() && !cancelled()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      if (!cancelled()) {
+        for (auto &worker : workers_) {
+          for (auto &buffer : worker.initial_credits) {
+            if (!send_control(worker, buffer, ktag_demo_ub_message_type::credit, error)) {
+              fail(*error);
+              break;
+            }
+          }
+          if (cancelled()) { break; }
+        }
+      }
+      {
+        std::lock_guard<std::mutex> lock(gate_mutex_);
+        started_ = true;
+      }
+      gate_.notify_all();
+      if (!cancelled()) {
+        std::printf("UB Backend ready: providers=%zu, queues/provider=%u, inference_workers=%zu, credits/queue=%u, epoch=%llu\n",
+                    config_->ub.provider_nodes.size(), config_->ub.queues_per_provider,
+                    workers_.size(), config_->ub.credits_per_queue, static_cast<unsigned long long>(epoch_));
+        for (size_t index = 0; index < workers_.size(); ++index) {
+          const auto &worker = workers_[index];
+          std::printf("  UB worker %zu: provider=%s, sub_queue=%u, rx=%u, tx=%u, cpu=%u\n",
+                      index, worker.hostname.c_str(), worker.sub_queue,
+                      worker.mapping.rx_queue_id, worker.mapping.tx_queue_id, worker.cpu);
+        }
+      }
+      while (done_.load(std::memory_order_acquire) != threads_.size() && !cancelled()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    } catch (const std::exception &failure) {
+      fail(std::string("UB Backend execution failed: ") + failure.what());
+    } catch (...) { fail("unknown UB Backend execution failure"); }
+    if (pipeline_interrupted != 0) { fail("UB Backend interrupted"); }
+    if (cancelled()) { gate_.notify_all(); }
+    join_workers();
+    if (cancelled()) {
+      abort_best_effort();
+      *error = error_.empty() ? "UB Backend cancelled" : error_;
+      return false;
     }
-    return run_parallel(predictions, statistics, error);
+    try {
+      size_t count = predictions->size();
+      for (const auto &worker : workers_) { count += worker.predictions.size(); }
+      predictions->reserve(count);
+      std::chrono::steady_clock::time_point first{}, last{};
+      uint64_t features = 0U, batches = 0U;
+      for (auto &worker : workers_) {
+        if (!worker.acknowledged || worker.statistics.inference_inputs != worker.sequence) {
+          *error = "UB Backend completed with missing ACK or inference count mismatch";
+          return false;
+        }
+        const auto limit = std::numeric_limits<uint64_t>::max();
+        if (worker.statistics.bytes > limit - statistics->bytes || worker.statistics.packets > limit - statistics->packets) {
+          *error = "UB input statistics overflow";
+          return false;
+        }
+        statistics->bytes += worker.statistics.bytes;
+        statistics->packets += worker.statistics.packets;
+        statistics->inference_inputs += worker.statistics.inference_inputs;
+        statistics->predictions += worker.statistics.predictions;
+        features += worker.sequence;
+        batches += worker.batches;
+        if (worker.first_received != std::chrono::steady_clock::time_point{} &&
+            (first == std::chrono::steady_clock::time_point{} || worker.first_received < first)) { first = worker.first_received; }
+        last = std::max(last, worker.completed_at);
+        predictions->insert(predictions->end(), std::make_move_iterator(worker.predictions.begin()),
+                            std::make_move_iterator(worker.predictions.end()));
+        std::printf("  UB worker drained: provider=%s, sub_queue=%u, cpu=%u, features=%llu, batches=%llu, send_retries=%llu, empty_polls=%llu\n",
+                    worker.hostname.c_str(), worker.sub_queue, worker.cpu,
+                    static_cast<unsigned long long>(worker.sequence), static_cast<unsigned long long>(worker.batches),
+                    static_cast<unsigned long long>(worker.send_retries), static_cast<unsigned long long>(worker.empty_polls));
+      }
+      statistics->emitted_flows += features;
+      if (first != std::chrono::steady_clock::time_point{} && last != std::chrono::steady_clock::time_point{}) {
+        statistics->distributed_inference_wall_nanoseconds = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(last - first).count());
+      }
+      std::printf("UB Backend drained: features=%llu, batches=%llu, queues=%zu\n",
+                  static_cast<unsigned long long>(features), static_cast<unsigned long long>(batches), workers_.size());
+      return true;
+    } catch (const std::exception &failure) {
+      *error = std::string("failed to merge UB Backend results: ") + failure.what();
+      return false;
+    }
   }
 
 private:
-  bool run_parallel(std::vector<pipeline_prediction> *predictions,
-                    pipeline_run_statistics *statistics, std::string *error) {
-    bool success = false;
-    try {
-      for (size_t index = 0U; index < parallel_->workers.size(); ++index) {
-        parallel_->threads.emplace_back(&ub_backend_executor::inference_worker,
-                                        this, index);
-      }
-      success = receive_batches<true>(predictions, statistics, error);
-    } catch (const std::exception &failure) {
-      *error = std::string("distributed Backend execution failed: ") +
-               failure.what();
-    } catch (...) {
-      *error = "unknown distributed Backend execution failure";
-    }
-    stop_workers(!success);
-    if (!parallel_->error.empty()) {
-      *error = parallel_->error;
-      success = false;
-    }
-    if (pipeline_interrupted != 0) {
-      *error = "Backend interrupted before inference completed";
-      success = false;
-    }
-    if (!success) {
-      abort_best_effort();
-      return false;
-    }
-    try {
-      size_t prediction_count = predictions->size();
-      for (const auto &worker : parallel_->workers) {
-        prediction_count += worker.predictions.size();
-      }
-      predictions->reserve(prediction_count);
-      for (size_t index = 0U; index < parallel_->workers.size(); ++index) {
-        auto &worker = parallel_->workers[index];
-        predictions->insert(
-            predictions->end(),
-            std::make_move_iterator(worker.predictions.begin()),
-            std::make_move_iterator(worker.predictions.end()));
-        std::vector<pipeline_prediction>().swap(worker.predictions);
-        statistics->inference_inputs += worker.statistics.inference_inputs;
-        statistics->predictions += worker.statistics.predictions;
-        inference_batches_ += worker.batches;
-        last_inference_completed_at_ =
-            std::max(last_inference_completed_at_, worker.completed_at);
-        std::printf("  Inference worker %zu: inputs=%llu, batches=%llu\n",
-                    index,
-                    static_cast<unsigned long long>(
-                        worker.statistics.inference_inputs),
-                    static_cast<unsigned long long>(worker.batches));
-      }
-      if (finish<true>(statistics, error)) {
-        return true;
-      }
-    } catch (const std::exception &failure) {
-      *error = std::string("failed to finish UB Backend: ") + failure.what();
-    }
-    abort_best_effort();
-    return false;
-  }
-
-  template <bool Parallel>
-  bool receive_batches(std::vector<pipeline_prediction> *predictions,
-                       pipeline_run_statistics *statistics,
-                       std::string *error) {
-    std::vector<ktag_feature_record_details> details;
-    std::vector<uint32_t> source_indices;
-    std::vector<uint64_t> frontend_hashes;
-    std::vector<uint8_t> ground_truth_valid;
-    try {
-      details.reserve(config_->inference_batch_size);
-      source_indices.reserve(config_->inference_batch_size);
-      frontend_hashes.reserve(config_->inference_batch_size);
-      ground_truth_valid.reserve(config_->inference_batch_size);
-    } catch (...) {
-      *error = "out of memory reserving distributed Inference Batch";
-      return false;
-    }
-    auto first_record_at = std::chrono::steady_clock::time_point{};
-    uint32_t drained_count = 0U;
-    while (drained_count < providers_.size()) {
-      if constexpr (Parallel) {
-        if (cancelled()) {
-          *error = "Backend stopped before all Frontends sent DRAIN";
-          return false;
-        }
-      } else if (pipeline_interrupted != 0) {
-        *error = "Backend interrupted before all Frontends sent DRAIN";
-        return false;
-      }
-      bool received_any = false;
-      for (auto &provider : providers_) {
-        if (provider.drained) {
-          continue;
-        }
-        ktag_demo_ub_copy_receipt receipt;
-        bool received = false;
-        try {
-          received = transport_->receive_copy(
-              provider.mapping.rx_queue_id, local_frame_.data(),
-              local_frame_.size(), local_frame_.size(), &receipt);
-        } catch (const std::exception &failure) {
-          *error = "UB receive/copy from " + provider.hostname + ": " +
-                   failure.what();
-          return false;
-        }
-        if (!received) {
-          continue;
-        }
-        // Only this local snapshot is passed to frame readers. Keep the UB
-        // buffer for CREDIT, DRAIN_ACK and error-path recycling.
-        void *buffer = receipt.ub_buffer;
-        const void *frame = local_frame_.data();
-        const auto received_at = receipt.received_at;
-        received_any = true;
-        ktag_demo_ub_frame_info info;
-        std::string frame_error;
-        if (!ktag_demo_ub_inspect_frame(frame, local_frame_.size(), &info,
-                                        &frame_error) ||
-            !validate_ub_contract(info, provider.frontend_hash, epoch_,
-                                  schema_hash_, config_->ub.ruleset_hash,
-                                  &frame_error)) {
-          transport_->free_buffer(buffer);
-          *error =
-              "invalid UB frame from " + provider.hostname + ": " + frame_error;
-          return false;
-        }
-        if (info.message_type == ktag_demo_ub_message_type::error) {
-          transport_->free_buffer(buffer);
-          *error = "Frontend " + provider.hostname +
-                   " rejected the UB stream contract";
-          return false;
-        }
-        if (info.message_type == ktag_demo_ub_message_type::drain) {
-          if (info.contract.sequence != provider.last_sequence) {
-            transport_->free_buffer(buffer);
-            *error = "DRAIN sequence does not match the last Feature from " +
-                     provider.hostname;
-            return false;
-          }
-          ktag_demo_ub_stream_statistics stream_statistics;
-          if (!ktag_demo_ub_decode_drain_frame(
-                  frame, local_frame_.size(), &stream_statistics,
-                  &frame_error) ||
-              stream_statistics.feature_records != provider.received_features) {
-            transport_->free_buffer(buffer);
-            *error = "invalid DRAIN statistics from " + provider.hostname +
-                     ": " + (frame_error.empty() ? "Feature count mismatch"
-                                                : frame_error);
-            return false;
-          }
-          const uint64_t max_count = std::numeric_limits<uint64_t>::max();
-          if (stream_statistics.input_bytes > max_count - statistics->bytes ||
-              stream_statistics.input_packets > max_count - statistics->packets) {
-            transport_->free_buffer(buffer);
-            *error = "UB input statistics overflow";
-            return false;
-          }
-          statistics->bytes += stream_statistics.input_bytes;
-          statistics->packets += stream_statistics.input_packets;
-          provider.drained = true;
-          provider.drain_buffer = buffer;
-          ++drained_count;
-          if (!details.empty() &&
-              !dispatch_batch<Parallel>(
-                  &details, &source_indices, &frontend_hashes,
-                  &ground_truth_valid, predictions, statistics, error)) {
-            return false;
-          }
-          continue;
-        }
-        if (info.message_type != ktag_demo_ub_message_type::feature ||
-            info.value_count != value_count_ ||
-            info.contract.sequence != provider.last_sequence + 1U) {
-          transport_->free_buffer(buffer);
-          *error = "Feature type, value_count or sequence is invalid for " +
-                   provider.hostname;
-          return false;
-        }
-        if (first_feature_received_at_ ==
-            std::chrono::steady_clock::time_point{}) {
-          first_feature_received_at_ = received_at;
-        }
-        feature_record_owned record;
-        if (!ktag_demo_ub_decode_feature_frame(frame, local_frame_.size(),
-                                               &info, &record, &frame_error)) {
-          transport_->free_buffer(buffer);
-          *error = "failed to decode Feature from " + provider.hostname + ": " +
-                   frame_error;
-          return false;
-        }
-        if (ktag_feature_batch_append(
-                input_.get(), &record.details.metadata, record.values.data(),
-                static_cast<uint32_t>(record.values.size())) != KTAG_SUCCESS) {
-          transport_->free_buffer(buffer);
-          *error = "failed to append a distributed Feature to Inference "
-                   "Batch";
-          return false;
-        }
-        try {
-          details.push_back(record.details);
-          source_indices.push_back(record.source_index);
-          frontend_hashes.push_back(provider.frontend_hash);
-          ground_truth_valid.push_back(
-              (info.flags & KTAG_DEMO_UB_FRAME_FLAG_GROUND_TRUTH_VALID) != 0U);
-        } catch (...) {
-          transport_->free_buffer(buffer);
-          *error = "out of memory retaining distributed Feature metadata";
-          return false;
-        }
-        provider.last_sequence = info.contract.sequence;
-        ++provider.received_features;
-        ++received_features_;
-        if (details.size() == 1U) {
-          first_record_at = std::chrono::steady_clock::now();
-        }
-        if (!return_credit<Parallel>(provider, buffer, error)) {
-          return false;
-        }
-        if (details.size() >= config_->inference_batch_size &&
-            !dispatch_batch<Parallel>(
-                &details, &source_indices, &frontend_hashes,
-                &ground_truth_valid, predictions, statistics, error)) {
-          return false;
-        }
-      }
-
-      if (!details.empty() &&
-          elapsed_nanoseconds(first_record_at) >=
-              static_cast<uint64_t>(config_->inference_batch_timeout_us) *
-                  1000U &&
-          !dispatch_batch<Parallel>(
-              &details, &source_indices, &frontend_hashes,
-              &ground_truth_valid, predictions, statistics, error)) {
-        return false;
-      }
-      if (!received_any) {
-        ++receive_polls_;
-        ub_poll_backoff(config_->ub.poll_us);
-      }
-    }
-
-    if (!details.empty() &&
-        !dispatch_batch<Parallel>(
-            &details, &source_indices, &frontend_hashes,
-            &ground_truth_valid, predictions, statistics, error)) {
-      return false;
-    }
-    return true;
-  }
-
-  template <bool Parallel>
-  bool finish(pipeline_run_statistics *statistics, std::string *error) {
-    if (first_feature_received_at_ != std::chrono::steady_clock::time_point{} &&
-        last_inference_completed_at_ != std::chrono::steady_clock::time_point{}) {
-      statistics->distributed_inference_wall_nanoseconds =
-          static_cast<uint64_t>(
-              std::chrono::duration_cast<std::chrono::nanoseconds>(
-                  last_inference_completed_at_ - first_feature_received_at_)
-                  .count());
-    }
-    if (statistics->inference_inputs != received_features_) {
-      *error = "UB Backend inference count does not match received Features";
-      return false;
-    }
-    for (auto &provider : providers_) {
-      ktag_demo_ub_frame_contract contract = provider_contract(provider);
-      contract.sequence = provider.last_sequence;
-      size_t encoded_size = 0U;
-      if (!ktag_demo_ub_encode_control_frame(
-              provider.drain_buffer, config_->ub.data_element_size,
-              ktag_demo_ub_message_type::drain_ack, contract, &encoded_size,
-              error)) {
-        return false;
-      }
-      (void)encoded_size;
-      void *buffer = provider.drain_buffer;
-      provider.drain_buffer = nullptr;
-      if constexpr (Parallel) {
-        if (!send_control(provider.mapping.tx_queue_id, buffer, error)) {
-          return false;
-        }
-      } else {
-        ub_send_one_blocking(transport_.get(), provider.mapping.tx_queue_id,
-                             buffer, config_->ub.poll_us, &send_retries_);
-      }
-    }
-    statistics->emitted_flows += received_features_;
-    std::printf("UB Backend drained: features=%llu, batches=%llu, "
-                "send_retries=%llu, empty_polls=%llu\n",
-                static_cast<unsigned long long>(received_features_),
-                static_cast<unsigned long long>(inference_batches_),
-                static_cast<unsigned long long>(send_retries_),
-                static_cast<unsigned long long>(receive_polls_));
-    for (const auto &provider : providers_) {
-      std::printf("  Provider drained: hostname=%s, features=%llu, "
-                  "last_sequence=%llu\n",
-                  provider.hostname.c_str(),
-                  static_cast<unsigned long long>(provider.received_features),
-                  static_cast<unsigned long long>(provider.last_sequence));
-    }
-    return true;
-  }
-
-  bool initialize_parallel_workers(std::string *error) {
-    try {
-      // queue_capacity remains a record budget, rather than a batch count.
-      const size_t capacity = std::max<size_t>(
-          1U, config_->feature_queue_capacity / config_->inference_batch_size);
-      parallel_.reset(new ub_parallel_inference_state(capacity));
-      parallel_->workers.reserve(config_->inference_threads);
-      parallel_->threads.reserve(config_->inference_threads);
-      // Bound the number of reusable batches by queued + running + producer.
-      // Reserve here so workers never grow this vector under the recycle lock.
-      parallel_->spare_batches.reserve(
-          capacity + config_->inference_threads + 1U);
-      for (uint32_t index = 0U; index < config_->inference_threads; ++index) {
-        ub_inference_worker worker;
-        worker.inference = create_inference_context(*config_, schema_);
-        worker.output.reset(
-            ktag_prediction_batch_create(config_->inference_batch_size));
-        if (!worker.inference || !worker.output) {
-          *error = std::string("failed to create UB Inference worker ") +
-                   std::to_string(index) + ": " +
-                   ktag_inference_get_last_error();
-          return false;
-        }
-        parallel_->workers.push_back(std::move(worker));
-      }
-      return true;
-    } catch (const std::exception &failure) {
-      *error = std::string("failed to initialize UB Inference workers: ") +
-               failure.what();
-      return false;
-    }
-  }
-
-  bool cancelled() const {
-    return parallel_->cancelled.load(std::memory_order_relaxed) ||
-           pipeline_interrupted != 0;
-  }
-
-  void stop_workers(bool cancel) {
-    if (!parallel_) {
-      return;
-    }
-    if (cancel) {
-      parallel_->cancelled.store(true, std::memory_order_relaxed);
-    }
-    parallel_->batch_queue.close();
-    for (auto &thread : parallel_->threads) {
-      if (thread.joinable()) {
-        thread.join();
-      }
-    }
-  }
-
-  void fail_worker(const std::string &message) {
+  bool cancelled() const { return cancel_.load(std::memory_order_relaxed) || pipeline_interrupted != 0; }
+  void fail(const std::string &message) {
     {
-      std::lock_guard<std::mutex> lock(parallel_->error_mutex);
-      if (parallel_->error.empty()) {
-        parallel_->error = message;
-      }
+      std::lock_guard<std::mutex> lock(error_mutex_);
+      if (error_.empty()) { error_ = message; }
     }
-    parallel_->cancelled.store(true, std::memory_order_relaxed);
-    parallel_->batch_queue.close();
+    cancel_.store(true, std::memory_order_relaxed);
+    gate_.notify_all();
   }
-
-  void inference_worker(size_t index) {
-    try {
-      auto &worker = parallel_->workers[index];
-      ub_inference_batch batch;
-      while (parallel_->batch_queue.pop(&batch)) {
-        if (cancelled()) {
-          break;
-        }
-        std::string error;
-        if (!infer_batch(worker.inference.get(), batch.input.get(),
-                         worker.output.get(), &batch.details,
-                         &batch.source_indices, &batch.frontend_hashes,
-                         &batch.ground_truth_valid, &worker.predictions,
-                         &worker.statistics, &worker.batches,
-                         &worker.completed_at, &error)) {
-          fail_worker("UB Inference worker " + std::to_string(index) +
-                      ": " + error);
-          return;
-        }
-        // Recycle the batch storage instead of allocating it on every submit.
-        std::lock_guard<std::mutex> lock(parallel_->spare_mutex);
-        parallel_->spare_batches.push_back(std::move(batch));
-      }
-    } catch (const std::exception &failure) {
-      fail_worker("UB Inference worker " + std::to_string(index) +
-                  ": " + failure.what());
-    } catch (...) {
-      fail_worker("unknown UB Inference worker failure");
-    }
+  void join_workers() {
+    for (auto &thread : threads_) { if (thread.joinable()) { thread.join(); } }
   }
-
-  template <bool Parallel>
-  bool dispatch_batch(
-      std::vector<ktag_feature_record_details> *details,
-      std::vector<uint32_t> *source_indices,
-      std::vector<uint64_t> *frontend_hashes,
-      std::vector<uint8_t> *ground_truth_valid,
-      std::vector<pipeline_prediction> *predictions,
-      pipeline_run_statistics *statistics, std::string *error) {
-    if constexpr (!Parallel) {
-      return infer_batch(inference_.get(), input_.get(), output_.get(),
-                          details, source_indices, frontend_hashes,
-                          ground_truth_valid, predictions, statistics,
-                          &inference_batches_, &last_inference_completed_at_,
-                          error);
-    } else {
-      ub_inference_batch batch;
-      batch.input = std::move(input_);
-      batch.details.swap(*details);
-      batch.source_indices.swap(*source_indices);
-      batch.frontend_hashes.swap(*frontend_hashes);
-      batch.ground_truth_valid.swap(*ground_truth_valid);
-      if (parallel_->batch_queue.push_interruptible(
-              std::move(batch), [this]() { return cancelled(); }) !=
-          ktag_demo_queue_push_result::pushed) {
-        *error = "UB Inference batch submission interrupted or workers stopped";
-        return false;
-      }
-      {
-        std::lock_guard<std::mutex> lock(parallel_->spare_mutex);
-        if (!parallel_->spare_batches.empty()) {
-          batch = std::move(parallel_->spare_batches.back());
-          parallel_->spare_batches.pop_back();
-        }
-      }
-      input_ = std::move(batch.input);
-      details->swap(batch.details);
-      source_indices->swap(batch.source_indices);
-      frontend_hashes->swap(batch.frontend_hashes);
-      ground_truth_valid->swap(batch.ground_truth_valid);
-      if (!input_) {
-        input_.reset(ktag_feature_batch_create(schema_,
-                                               config_->inference_batch_size));
-      }
-      if (!input_) {
-        *error = "failed to allocate next UB Inference batch";
-        return false;
-      }
-      details->reserve(config_->inference_batch_size);
-      source_indices->reserve(config_->inference_batch_size);
-      frontend_hashes->reserve(config_->inference_batch_size);
-      ground_truth_valid->reserve(config_->inference_batch_size);
-      return true;
-    }
-  }
-
-  // A failed worker must also unblock a receiver waiting to return CREDIT.
-  // Ownership of buffer is consumed on both success and failure.
-  bool send_control(uint32_t queue, void *buffer, std::string *error) {
-    void *buffers[1] = {buffer};
-    while (true) {
-      if (cancelled()) {
-        transport_->free_buffer(buffer);
-        *error = "UB Backend control send interrupted or workers stopped";
-        return false;
-      }
-      if (transport_->send_burst(queue, buffers, 1U) == 1U) {
-        return true;
-      }
-      ++send_retries_;
-      ub_poll_backoff(config_->ub.poll_us);
-    }
-  }
-
-  void abort_best_effort() {
-    for (auto &provider : providers_) {
-      void *buffer = provider.drain_buffer;
-      provider.drain_buffer = nullptr;
-      if (buffer == nullptr) {
-        buffer = transport_->allocate_buffer(
-            provider.mapping.provider_node_index);
-      }
-      if (buffer == nullptr) {
-        continue;
-      }
-      size_t encoded_size = 0U;
-      std::string ignored;
-      if (ktag_demo_ub_encode_control_frame(
-              buffer, config_->ub.data_element_size,
-              ktag_demo_ub_message_type::error, provider_contract(provider),
-              &encoded_size, &ignored) &&
-          transport_->send_burst(provider.mapping.tx_queue_id, &buffer, 1U) ==
-              1U) {
-        continue;
-      }
-      transport_->free_buffer(buffer);
-    }
-  }
-
-  ktag_demo_ub_frame_contract
-  provider_contract(const ub_backend_provider_state &provider) const {
+  ktag_demo_ub_frame_contract contract_for(const ub_queue_worker &worker) const {
     ktag_demo_ub_frame_contract contract;
-    contract.frontend_id_hash = provider.frontend_hash;
+    contract.frontend_id_hash = worker.frontend_hash;
     contract.epoch = epoch_;
+    contract.sequence = worker.sequence;
     contract.schema_hash = schema_hash_;
     contract.ruleset_hash = config_->ub.ruleset_hash;
     return contract;
   }
-
-  bool prepost_credits(std::string *error) {
-    for (auto &provider : providers_) {
-      std::vector<void *> buffers;
-      try {
-        buffers.reserve(config_->ub.credits_per_provider);
-      } catch (...) {
-        *error = "out of memory reserving initial UB CREDIT buffers";
+  // Consumes the buffer on success; on failure its caller retains ownership.
+  bool send_control(ub_queue_worker &worker, void *&buffer,
+                    ktag_demo_ub_message_type type, std::string *error) {
+    size_t encoded = 0U;
+    if (!ktag_demo_ub_encode_control_frame(buffer, config_->ub.data_element_size,
+                                          type, contract_for(worker), &encoded, error)) { return false; }
+    while (!cancelled()) {
+      if (transport_->send_burst(worker.mapping.tx_queue_id, &buffer, 1U) == 1U) {
+        buffer = nullptr;
+        return true;
+      }
+      ++worker.send_retries;
+      ub_poll_backoff(config_->ub.poll_us);
+    }
+    *error = "UB Backend control send cancelled";
+    return false;
+  }
+  bool flush(ub_queue_worker &worker, std::string *error) {
+    return infer_batch(worker.inference.get(), worker.input.get(), worker.output.get(),
+        &worker.details, &worker.source_indices, &worker.frontend_hashes, &worker.ground_truth_valid,
+        &worker.predictions, &worker.statistics, &worker.batches, &worker.completed_at, error);
+  }
+  bool receive_queue(ub_queue_worker &worker, std::string *error) {
+    while (!cancelled()) {
+      ktag_demo_ub_copy_receipt receipt;
+      if (!transport_->receive_copy(worker.mapping.rx_queue_id, worker.frame.data(),
+              worker.frame.size(), worker.frame.size(), &receipt)) {
+        if (!worker.details.empty() && elapsed_nanoseconds(worker.batch_started) >=
+            static_cast<uint64_t>(config_->inference_batch_timeout_us) * 1000U && !flush(worker, error)) { return false; }
+        ++worker.empty_polls;
+        ub_poll_backoff(config_->ub.poll_us);
+        continue;
+      }
+      worker.held = receipt.ub_buffer;
+      ktag_demo_ub_frame_info info;
+      if (!ktag_demo_ub_inspect_frame(worker.frame.data(), worker.frame.size(), &info, error) ||
+          !validate_ub_contract(info, worker.frontend_hash, epoch_, schema_hash_, config_->ub.ruleset_hash, error)) { return false; }
+      if (info.message_type == ktag_demo_ub_message_type::error) {
+        *error = "Frontend aborted UB stream";
         return false;
       }
-      for (uint32_t index = 0U; index < config_->ub.credits_per_provider;
-           ++index) {
-        void *buffer =
-            transport_->allocate_buffer(provider.mapping.provider_node_index);
-        if (buffer == nullptr) {
-          for (void *allocated : buffers) {
-            transport_->free_buffer(allocated);
-          }
-          *error = "Provider " + provider.hostname +
-                   " does not have enough UB buffers for configured credits";
+      if (info.message_type == ktag_demo_ub_message_type::drain) {
+        ktag_demo_ub_stream_statistics totals;
+        if (info.contract.sequence != worker.sequence ||
+            !ktag_demo_ub_decode_drain_frame(worker.frame.data(), worker.frame.size(), &totals, error) ||
+            totals.feature_records != worker.sequence ||
+            (worker.sub_queue != 0U && (totals.input_packets != 0U || totals.input_bytes != 0U))) {
+          if (error->empty()) { *error = "invalid per-queue DRAIN sequence or statistics"; }
           return false;
         }
-        buffers.push_back(buffer);
-      }
-      const ktag_demo_ub_frame_contract contract = provider_contract(provider);
-      for (size_t index = 0U; index < buffers.size(); ++index) {
-        size_t encoded_size = 0U;
-        if (!ktag_demo_ub_encode_control_frame(
-                buffers[index], config_->ub.data_element_size,
-                ktag_demo_ub_message_type::credit, contract, &encoded_size,
-                error)) {
-          for (size_t pending = index; pending < buffers.size(); ++pending) {
-            transport_->free_buffer(buffers[pending]);
-          }
+        worker.statistics.packets = totals.input_packets;
+        worker.statistics.bytes = totals.input_bytes;
+        if (!flush(worker, error) || worker.statistics.inference_inputs != worker.sequence) {
+          if (error->empty()) { *error = "per-queue inference count mismatch"; }
           return false;
         }
-        (void)encoded_size;
-        ub_send_one_blocking(transport_.get(), provider.mapping.tx_queue_id,
-                             buffers[index], config_->ub.poll_us,
-                             &send_retries_);
+        // ACK may let this provider destroy its region immediately. Finish
+        // every remaining payload-header access before publishing the ACK.
+        transport_->free_buffer(worker.error_buffer);
+        worker.error_buffer = nullptr;
+        if (!send_control(worker, worker.held, ktag_demo_ub_message_type::drain_ack, error)) { return false; }
+        worker.acknowledged = true;
+        return true;
       }
+      if (info.message_type != ktag_demo_ub_message_type::feature || info.value_count != value_count_ ||
+          info.contract.sequence != worker.sequence + 1U) {
+        *error = "invalid Feature type, value count or per-queue sequence";
+        return false;
+      }
+      if (worker.first_received == std::chrono::steady_clock::time_point{}) { worker.first_received = receipt.received_at; }
+      feature_record_owned record;
+      if (!ktag_demo_ub_decode_feature_frame(worker.frame.data(), worker.frame.size(), &info, &record, error)) { return false; }
+      if (ktag_feature_batch_append(worker.input.get(), &record.details.metadata, record.values.data(),
+                                    static_cast<uint32_t>(record.values.size())) != KTAG_SUCCESS) {
+        *error = "failed to append distributed Feature to local Batch";
+        return false;
+      }
+      worker.details.push_back(record.details);
+      worker.source_indices.push_back(record.source_index);
+      worker.frontend_hashes.push_back(worker.frontend_hash);
+      worker.ground_truth_valid.push_back((info.flags & KTAG_DEMO_UB_FRAME_FLAG_GROUND_TRUTH_VALID) != 0U);
+      worker.sequence = info.contract.sequence;
+      if (worker.details.size() == 1U) { worker.batch_started = std::chrono::steady_clock::now(); }
+      if (!send_control(worker, worker.held, ktag_demo_ub_message_type::credit, error)) { return false; }
+      if ((worker.details.size() >= config_->inference_batch_size ||
+           elapsed_nanoseconds(worker.batch_started) >= static_cast<uint64_t>(config_->inference_batch_timeout_us) * 1000U) &&
+          !flush(worker, error)) { return false; }
     }
-    return true;
+    *error = "UB queue worker cancelled";
+    return false;
   }
-
-  template <bool Parallel>
-  bool return_credit(const ub_backend_provider_state &provider, void *buffer,
-                     std::string *error) {
-    ktag_demo_ub_frame_contract contract = provider_contract(provider);
-    size_t encoded_size = 0U;
-    if (!ktag_demo_ub_encode_control_frame(buffer,
-                                           config_->ub.data_element_size,
-                                           ktag_demo_ub_message_type::credit,
-                                           contract, &encoded_size, error)) {
-      transport_->free_buffer(buffer);
-      return false;
-    }
-    (void)encoded_size;
-    if constexpr (Parallel) {
-      return send_control(provider.mapping.tx_queue_id, buffer, error);
-    } else {
-      ub_send_one_blocking(transport_.get(), provider.mapping.tx_queue_id,
-                           buffer, config_->ub.poll_us, &send_retries_);
-      return true;
+  void worker_main(size_t index) {
+    auto &worker = workers_[index];
+    std::string error;
+    try {
+      if (!ktag_demo_ub_bind_cpu(worker.cpu, &error)) { throw std::runtime_error(error); }
+      worker.inference = create_inference_context(*config_, schema_);
+      worker.input.reset(ktag_feature_batch_create(schema_, config_->inference_batch_size));
+      worker.output.reset(ktag_prediction_batch_create(config_->inference_batch_size));
+      if (!worker.inference || !worker.input || !worker.output) {
+        throw std::runtime_error(std::string("failed to initialize local model/Batch: ") + ktag_inference_get_last_error());
+      }
+      worker.frame.resize(frame_size_);
+      worker.details.reserve(config_->inference_batch_size);
+      worker.source_indices.reserve(config_->inference_batch_size);
+      worker.frontend_hashes.reserve(config_->inference_batch_size);
+      worker.ground_truth_valid.reserve(config_->inference_batch_size);
+      ready_.fetch_add(1U, std::memory_order_release);
+      {
+        std::unique_lock<std::mutex> lock(gate_mutex_);
+        while (!started_ && !cancelled()) {
+          gate_.wait_for(lock, std::chrono::milliseconds(10));
+        }
+      }
+      if (!cancelled() && !receive_queue(worker, &error)) { throw std::runtime_error(error); }
+    } catch (const std::exception &failure) {
+      fail("UB worker=" + std::to_string(index) + ", provider=" + worker.hostname +
+           ", sub_queue=" + std::to_string(worker.sub_queue) + ": " + failure.what());
+    } catch (...) { fail("unknown UB queue worker failure: " + std::to_string(index)); }
+    done_.fetch_add(1U, std::memory_order_release);
+  }
+  void abort_best_effort() {
+    // All owners have joined, so the main lcore may produce on these queues.
+    if (abort_notified_) { return; }
+    abort_notified_ = true;
+    for (size_t first = 0U; first < workers_.size();) {
+      size_t end = first + 1U;
+      while (end < workers_.size() && workers_[end].hostname == workers_[first].hostname) { ++end; }
+      ub_queue_worker *notification = nullptr;
+      for (size_t index = first; index < end; ++index) {
+        auto &worker = workers_[index];
+        if (!worker.acknowledged && notification == nullptr) {
+          if (!worker.error_buffer && worker.held) { std::swap(worker.error_buffer, worker.held); }
+          if (!worker.error_buffer && !worker.initial_credits.empty()) {
+            std::swap(worker.error_buffer, worker.initial_credits.back());
+          }
+          if (worker.error_buffer) { notification = &worker; }
+        }
+        if (worker.held) { transport_->free_buffer(worker.held); worker.held = nullptr; }
+        for (auto &buffer : worker.initial_credits) {
+          if (buffer) { transport_->free_buffer(buffer); buffer = nullptr; }
+        }
+        if (worker.error_buffer && notification != &worker) {
+          transport_->free_buffer(worker.error_buffer);
+          worker.error_buffer = nullptr;
+        }
+      }
+      first = end;
+      // One ERROR is sufficient: the frontend polls all its control queues.
+      // No allocations here; cleanup also runs after allocation failures.
+      if (!notification) { continue; }
+      auto &worker = *notification;
+      try {
+        size_t encoded = 0U;
+        std::string ignored;
+        if (ktag_demo_ub_encode_control_frame(worker.error_buffer, config_->ub.data_element_size,
+                ktag_demo_ub_message_type::error, contract_for(worker), &encoded, &ignored) &&
+            encoded != 0U) {
+          const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+          do {
+            if (transport_->send_burst(worker.mapping.tx_queue_id, &worker.error_buffer, 1U) == 1U) {
+              worker.error_buffer = nullptr;
+              break;
+            }
+            ub_poll_backoff(config_->ub.poll_us);
+          } while (std::chrono::steady_clock::now() < deadline);
+        }
+      } catch (...) { /* Preserve local ownership on failure. */ }
     }
   }
 
@@ -2724,22 +2332,19 @@ private:
 
   const ktag_demo_pipeline_config *config_ = nullptr;
   const ktag_feature_schema *schema_ = nullptr;
-  inference_context_ptr inference_;
-  feature_batch_ptr input_;
-  prediction_batch_ptr output_;
-  std::unique_ptr<ub_parallel_inference_state> parallel_;
   std::unique_ptr<ktag_demo_ub_ring_transport> transport_;
-  std::vector<ub_backend_provider_state> providers_;
-  std::vector<uint8_t> local_frame_;
-  uint64_t epoch_ = 0U;
-  uint64_t schema_hash_ = 0U;
+  std::vector<ub_queue_worker> workers_;
+  std::vector<std::thread> threads_;
+  std::atomic<bool> cancel_{false};
+  std::atomic<size_t> ready_{0U}, done_{0U};
+  std::mutex gate_mutex_, error_mutex_;
+  std::condition_variable gate_;
+  bool started_ = false;
+  bool abort_notified_ = false;
+  std::string error_;
+  size_t frame_size_ = 0U;
   uint32_t value_count_ = 0U;
-  uint64_t received_features_ = 0U;
-  uint64_t inference_batches_ = 0U;
-  std::chrono::steady_clock::time_point first_feature_received_at_{};
-  std::chrono::steady_clock::time_point last_inference_completed_at_{};
-  uint64_t send_retries_ = 0U;
-  uint64_t receive_polls_ = 0U;
+  uint64_t schema_hash_ = 0U, epoch_ = 0U;
 };
 
 bool run_ub_frontend_inputs(
@@ -2752,8 +2357,10 @@ bool run_ub_frontend_inputs(
   ub_frontend_record_sender sender;
   if (!sender.initialize(config, ktag_feature_schema_get_hash(schema),
                          ktag_feature_schema_get_value_count(schema), error)) {
+    sender.abort_best_effort();
     return false;
   }
+  sender.begin_input();
   bool success = true;
   if (interface_name != nullptr && interface_name[0] != '\0') {
     std::printf("\n========== UB Frontend 网口采集 =========="

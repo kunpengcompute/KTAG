@@ -451,10 +451,11 @@ void print_usage(const char *prog_name) {
          "(默认: 1)\n");
   printf("  --pipeline-mode <mode>  "
          "legacy/single_thread/staged/feature_parallel/full_parallel\n");
-  printf("  -n, --feature-threads N Feature Worker 数量（仅新 pipeline）\n");
-  printf("  --inference-threads N   Inference Worker 数量（仅新 pipeline）\n");
+  printf("  -n, --feature-threads N Feature Worker 数量（非 UB pipeline）\n");
+  printf("  --inference-threads N   Inference Worker 数量（非 UB pipeline）\n");
   printf("  --distributed-role R    UB 节点角色: frontend/backend\n");
   printf("  --node-id HOSTNAME      本机在 UB 拓扑中的 hostname\n");
+  printf("  UB 分布式的线程数、pipeline-mode 和 EAL 参数只从 YAML 读取；后端 worker 数必须等于全部前端队列数之和。\n");
   printf(
       "  --dpdk                  用 DPDK PMD 收网卡报文（仅新 pipeline，需编译"
       "支持）\n");
@@ -1000,7 +1001,8 @@ int main(int argc, char *argv[]) {
                 pipeline_error.c_str());
         ret = -1;
       } else if (pipeline_result == ktag_demo_pipeline_config_result::enabled) {
-        if (pipeline_config.capture_backend ==
+        if (pipeline_config.ub.role != ktag_demo_distributed_role::backend &&
+            pipeline_config.capture_backend ==
             ktag_demo_capture_backend::dpdk) {
 #ifdef KTAG_DEMO_HAVE_DPDK
           /* EAL init is idempotent and must run on the main thread; the

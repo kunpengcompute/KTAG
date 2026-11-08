@@ -42,8 +42,8 @@ pipeline:
     expire_interval_ms: 1000
 
   inference:
-    # feature_parallel 使用 1 个推理 worker；Backend 可通过
-    # --pipeline-mode full_parallel --inference-threads N 开启多 worker。
+    # UB 后端每个 worker 独占一个队列：必须为 provider 数 × queues_per_provider。
+    # 与 feature.threads 独立配置；UB 场景禁止命令行覆盖线程数和 pipeline-mode。
     threads: 1
     batch_size: 256
     batch_timeout_us: 1000
@@ -68,14 +68,19 @@ pipeline:
       queues_per_provider: 1
       queue_depth: 1024
       data_element_size: 4096
-      credits_per_provider: 256
+      credits_per_queue: 64
+      # 按列表顺序逐 worker 绑核；数量必须等于 inference.threads。
+      # 两前端各 48 队列时，threads=96、此处为 "0-95"（以实际可用 CPU 为准）。
+      backend_worker_cpus: "0"
       poll_us: 50
       # 可选：1:1 PCAP 验收需要 Classification Report 时取消注释；
       # 键必须是 provider_nodes 中的 hostname，数组长度等于该节点 -p 数量。
       # ground_truth_labels:
       #   computer01: [0, 1]
-      # 第一项是 EAL 的 argv[0]；-l 为绑核列表，现场按 CPU 拓扑调整。
-      eal_arguments: [kdadk_demo, --no-huge, -l, "0"]
+      # 第一项是 EAL 的 argv[0]；这是离线 PCAP 的 UB EAL 参数。
+      # 此处允许前端特征线程在 CPU 0-3 调度，现场按 CPU 拓扑/允许集合调整。
+      # 在线 --dpdk 首先使用 capture.dpdk.eal_args 初始化 EAL，应在该字段也设置合适的 CPU 掩码。
+      eal_arguments: [kdadk_demo, --no-huge, --no-pci, --iova-mode=va, "--lcores=0@(0-3)"]
 
   plugins: []
   schema:

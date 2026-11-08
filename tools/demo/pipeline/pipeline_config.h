@@ -38,7 +38,10 @@ struct ktag_demo_ub_config {
   uint32_t queue_depth = 1024U;
   /* YAML payload capacity; rte_ub_ring may report a larger internal stride. */
   uint32_t data_element_size = 4096U;
-  uint32_t credits_per_provider = 256U;
+  uint32_t credits_per_queue = 64U;
+  std::vector<uint32_t> backend_worker_cpus;
+  bool legacy_credit_configured = false;
+  bool inference_threads_configured = false;
   uint32_t poll_us = 50U;
   uint64_t ruleset_hash = 0U;
   std::vector<std::string> eal_arguments;

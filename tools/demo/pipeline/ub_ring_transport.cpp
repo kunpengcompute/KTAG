@@ -13,6 +13,8 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
+#include <cstring>
+#include <sched.h>
 
 #include <rte_eal.h>
 #include <rte_errno.h>
@@ -75,12 +77,23 @@ bool validate_config(const ktag_demo_ub_transport_config &config,
         set_error(error, "UB Provider shm size is required for both roles");
         return false;
     }
-    if (config.role == ktag_demo_ub_role::provider &&
-        (config.queue_depth < 2U ||
-         (config.queue_depth & (config.queue_depth - 1U)) != 0U)) {
+    if (config.queue_depth < 2U ||
+        (config.queue_depth & (config.queue_depth - 1U)) != 0U) {
         set_error(
             error,
             "UB Provider shm/queue values are invalid or not power-of-two");
+        return false;
+    }
+    const auto ring_size = rte_ring_get_memsize(config.queue_depth);
+    const uint64_t metadata = (sizeof(ub_ring_metadata) +
+                              2ULL * config.queues_per_provider * sizeof(uint64_t) + 63U) & ~63ULL;
+    const uint32_t stride = ktag_demo_ub_runtime_data_element_size(config.data_element_size);
+    // The current provider_init does not check layout bounds before writing
+    // its rings. Reject undersized regions before entering the SDK.
+    if (ring_size < 0 || stride == 0U || config.provider_shm_size <
+        metadata + 2ULL * config.queues_per_provider * static_cast<uint64_t>(ring_size) +
+        static_cast<uint64_t>(rte_ring_get_memsize(2U)) + 128U + 2ULL * stride) {
+        set_error(error, "UB Provider shm is too small for queue layout and data buffers, or queue_depth is unsupported");
         return false;
     }
     return true;
@@ -148,6 +161,42 @@ bool initialize_eal(const ktag_demo_ub_transport_config &config, bool *owns_eal,
 }
 
 } // namespace
+
+bool ktag_demo_ub_allowed_cpus(std::vector<uint32_t> *cpus, std::string *error) {
+    for (size_t bits = 1024U; bits <= 1048576U; bits *= 2U) {
+        std::vector<unsigned long> mask(bits / (8U * sizeof(unsigned long)), 0UL);
+        if (sched_getaffinity(0, mask.size() * sizeof(unsigned long),
+                              reinterpret_cast<cpu_set_t *>(mask.data())) == 0) {
+            cpus->clear();
+            for (size_t cpu = 0; cpu < bits; ++cpu) {
+                if ((mask[cpu / (8U * sizeof(unsigned long))] >>
+                     (cpu % (8U * sizeof(unsigned long)))) & 1UL) {
+                    cpus->push_back(static_cast<uint32_t>(cpu));
+                }
+            }
+            return !cpus->empty();
+        }
+        if (errno != EINVAL) { break; }
+    }
+    set_error(error, std::string("cannot read pre-EAL CPU affinity: ") + std::strerror(errno));
+    return false;
+}
+
+bool ktag_demo_ub_bind_cpu(uint32_t cpu, std::string *error) {
+    // Linux accepts a short setaffinity mask; the kernel zero-extends it.
+    const size_t word_bits = 8U * sizeof(unsigned long);
+    std::vector<unsigned long> mask(static_cast<size_t>(cpu) / word_bits + 1U, 0UL);
+    mask[cpu / word_bits] = 1UL << (cpu % word_bits);
+    if (sched_setaffinity(0, mask.size() * sizeof(unsigned long),
+                          reinterpret_cast<cpu_set_t *>(mask.data())) == 0) {
+        std::vector<uint32_t> actual;
+        if (ktag_demo_ub_allowed_cpus(&actual, error) && actual.size() == 1U && actual.front() == cpu) {
+            return true;
+        }
+    }
+    set_error(error, "cannot bind worker to CPU " + std::to_string(cpu) + ": " + std::strerror(errno));
+    return false;
+}
 
 uint32_t ktag_demo_ub_runtime_data_element_size(uint32_t payload_size) {
 #if defined(UB_RING_BUF_HDR_SIZE)
@@ -237,6 +286,37 @@ ktag_demo_ub_ring_transport::create(const ktag_demo_ub_transport_config &config,
                                         ? "rte_ub_ring_provider_init"
                                         : "rte_ub_ring_user_init"));
         return nullptr;
+    }
+
+    if (config.role == ktag_demo_ub_role::user) {
+        std::unordered_set<uint32_t> tx_ids, rx_ids;
+        for (const auto &hostname : config.provider_nodes) {
+            uint32_t pi = 0U;
+            if (rte_ub_ring_get_peer_index(state->handle, hostname.c_str(), &pi) < 0) {
+                set_error(error, "cannot map UB Provider " + hostname);
+                return nullptr;
+            }
+            uint32_t actual = 0U, tx = 0U, rx = 0U;
+            while (actual <= 512U &&
+                   rte_ub_ring_get_queue_mapping(state->handle, pi, actual, &tx, &rx) == 0) {
+                if (!tx_ids.insert(tx).second || !rx_ids.insert(rx).second) {
+                    set_error(error, "duplicate UB queue mapping for " + hostname);
+                    return nullptr;
+                }
+                ++actual;
+            }
+            if (actual != config.queues_per_provider) {
+                set_error(error, "UB queue layout mismatch: provider=" + hostname +
+                    ", expected_queues=" + std::to_string(config.queues_per_provider) +
+                    ", actual_queues=" + std::to_string(actual));
+                return nullptr;
+            }
+        }
+        if (rte_ub_ring_get_total_queues(state->handle) !=
+            config.provider_nodes.size() * config.queues_per_provider) {
+            set_error(error, "UB actual total queue count does not match YAML");
+            return nullptr;
+        }
     }
 
     auto *transport =
