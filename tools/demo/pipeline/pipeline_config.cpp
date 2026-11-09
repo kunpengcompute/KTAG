@@ -236,7 +236,7 @@ bool hash_config_file(const fs::path &path, uint64_t *hash,
 }
 
 bool parse_worker_cpus(const std::string &text, std::vector<uint32_t> *cpus,
-                       std::string *error) {
+                       std::string *error, const std::string &field = "backend_worker_cpus") {
   std::unordered_set<uint32_t> unique;
   size_t offset = 0U;
   auto number = [&](uint32_t *value) {
@@ -266,7 +266,7 @@ bool parse_worker_cpus(const std::string &text, std::vector<uint32_t> *cpus,
     }
     for (uint64_t cpu = first; cpu <= last; ++cpu) {
       if (!unique.insert(static_cast<uint32_t>(cpu)).second) {
-        set_error(error, "backend_worker_cpus contains duplicate CPU " + std::to_string(cpu));
+        set_error(error, field + " contains duplicate CPU " + std::to_string(cpu));
         return false;
       }
       cpus->push_back(static_cast<uint32_t>(cpu));
@@ -274,8 +274,16 @@ bool parse_worker_cpus(const std::string &text, std::vector<uint32_t> *cpus,
     if (offset == text.size()) { return true; }
     if (text[offset++] != ',' || offset == text.size()) { break; }
   }
-  set_error(error, "backend_worker_cpus must be a non-empty CPU list/range (at most 512 CPUs), for example 0-3,8-11");
+  set_error(error, field + " must be a non-empty CPU list/range (at most 512 CPUs), for example 0-3,8-11");
   return false;
+}
+
+bool read_worker_cpus(const YAML::Node &node, const char *field,
+                      std::vector<uint32_t> *cpus, std::string *error) {
+  if (!has_value(node) || !has_value(node[field])) { return true; }
+  std::string value;
+  return read_string(node, field, &value, error) &&
+      parse_worker_cpus(value, cpus, error, field);
 }
 
 bool parse_ub_config(const YAML::Node &pipeline, ktag_demo_ub_config *config,
@@ -303,7 +311,9 @@ bool parse_ub_config(const YAML::Node &pipeline, ktag_demo_ub_config *config,
       inference.IsMap() && has_value(inference["threads"]);
   std::string cpu_list;
   if (!read_string(ub, "backend_worker_cpus", &cpu_list, error) ||
-      (!cpu_list.empty() && !parse_worker_cpus(cpu_list, &config->backend_worker_cpus, error))) {
+      (!cpu_list.empty() && !parse_worker_cpus(cpu_list, &config->backend_worker_cpus, error)) ||
+      !read_worker_cpus(ub, "sender_worker_cpus", &config->sender_worker_cpus, error) ||
+      !read_u32(ub, "sender_threads", &config->sender_threads, error)) {
     return false;
   }
   if (!read_bool(ub, "enabled", &config->enabled, error) ||
@@ -438,6 +448,40 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
     set_error(error, "distributed UB requires intra_op_threads: 1 and inter_op_threads: 1");
     return false;
   }
+  if (config.sender_threads == 0U || config.sender_threads > config.queues_per_provider ||
+      pipeline.feature_queue_capacity < config.sender_threads) {
+    set_error(error, "UB sender_threads must be 1..queues_per_provider and not exceed inference.queue_capacity");
+    return false;
+  }
+  if (pipeline.dpdk_rx_threads == 0U || pipeline.dpdk_rx_threads > 256U ||
+      (pipeline.dpdk_rx_threads > 1U && pipeline.dpdk_rx_threads != pipeline.dpdk_rx_queue_count)) {
+    set_error(error, "UB rx_threads must be 1, or equal rx_queue_count (at most 256)");
+    return false;
+  }
+  const bool online = pipeline.capture_backend == ktag_demo_capture_backend::dpdk;
+  const bool parallel = config.sender_threads > 1U || (online && pipeline.dpdk_rx_threads > 1U);
+  std::unordered_set<uint32_t> frontend_cpus;
+  auto check_cpus = [&](const std::vector<uint32_t> &cpus, size_t count,
+                         const char *field, bool required, size_t used) {
+    if (cpus.empty() && !required) { return true; }
+    if (cpus.size() != count) {
+      set_error(error, std::string(field) + " must specify exactly " + std::to_string(count) + " CPUs");
+      return false;
+    }
+    for (size_t i = 0; i < used; ++i) {
+      if (!frontend_cpus.insert(cpus[i]).second) {
+        set_error(error, std::string(field) + " overlaps another Frontend worker CPU: " + std::to_string(cpus[i]));
+        return false;
+      }
+    }
+    return true;
+  };
+  if (!check_cpus(pipeline.dpdk_rx_worker_cpus, pipeline.dpdk_rx_threads, "rx_worker_cpus",
+                   parallel && online, online ? pipeline.dpdk_rx_threads : 1U) ||
+      !check_cpus(pipeline.feature_worker_cpus, pipeline.feature_threads, "feature.worker_cpus",
+                   parallel, pipeline.feature_threads) ||
+      !check_cpus(config.sender_worker_cpus, config.sender_threads, "sender_worker_cpus",
+                   parallel, config.sender_threads)) { return false; }
   return true;
 }
 
@@ -638,6 +682,7 @@ bool parse_enabled_config(const YAML::Node &pipeline,
 
   if (!read_u32(capture, "packet_pool_size", &config->packet_pool_size,
                 error) ||
+      !read_worker_cpus(feature, "worker_cpus", &config->feature_worker_cpus, error) ||
       !read_u32(feature, "threads", &config->feature_threads, error) ||
       !read_u32(feature, "queue_capacity", &config->packet_queue_capacity,
                 error) ||
@@ -710,6 +755,8 @@ bool parse_enabled_config(const YAML::Node &pipeline,
     return false;
   }
   if (!read_u32(dpdk, "rx_queue_count", &config->dpdk_rx_queue_count, error) ||
+      !read_u32(dpdk, "rx_threads", &config->dpdk_rx_threads, error) ||
+      !read_worker_cpus(dpdk, "rx_worker_cpus", &config->dpdk_rx_worker_cpus, error) ||
       !read_u32(dpdk, "rx_queue_depth", &config->dpdk_rx_queue_depth, error) ||
       !read_u32(dpdk, "mbuf_pool_size", &config->dpdk_mbuf_pool_size, error) ||
       !read_u32(dpdk, "burst_size", &config->dpdk_burst_size, error) ||
@@ -840,6 +887,12 @@ bool apply_overrides_and_normalize(
 
   if (config->ub.enabled) {
     return validate_ub_config(*config, error);
+  }
+  if (config->dpdk_rx_threads != 1U || config->ub.sender_threads != 1U ||
+      !config->dpdk_rx_worker_cpus.empty() || !config->feature_worker_cpus.empty() ||
+      !config->ub.sender_worker_cpus.empty()) {
+    set_error(error, "Frontend RX/sender threads and worker CPU lists require distributed UB");
+    return false;
   }
   if (config->feature_only) {
     if (config->mode == ktag_demo_pipeline_mode::single_thread ||

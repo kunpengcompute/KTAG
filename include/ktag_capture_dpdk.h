@@ -92,6 +92,19 @@ KTAG_API void *ktag_dpdk_capture_open(const ktag_dpdk_capture_config *config);
  */
 KTAG_API ktag_status ktag_dpdk_capture_next(void *context, ktag_packet *packet);
 
+/* Configure readers BEFORE starting them: 1 keeps next() round-robin;
+ * >1 requires readers == rx_queue_count, OWNED packets and working RSS.
+ * Different queues may then call next_queue() concurrently; exactly one
+ * reader owns each queue. Never mix next() and next_queue() in one run.
+ * Stats/close require all readers to have stopped. */
+KTAG_API ktag_status ktag_dpdk_capture_prepare_readers(void *context, uint32_t readers);
+KTAG_API ktag_status ktag_dpdk_capture_next_queue(
+    void *context, uint32_t queue_id, ktag_packet *packet);
+/* Call enter/leave on the reader thread, once per multi-reader lifetime.
+ * Registration is incompatible with same-host DPDK secondary processes. */
+KTAG_API ktag_status ktag_dpdk_capture_reader_enter(void *context);
+KTAG_API void ktag_dpdk_capture_reader_leave(void *context);
+
 KTAG_API uint32_t ktag_dpdk_capture_get_link_type(const void *context);
 
 /* Stops a running capture; next() then reports END_OF_STREAM. */

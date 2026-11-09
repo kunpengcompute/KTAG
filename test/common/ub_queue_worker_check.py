@@ -29,16 +29,21 @@ def main():
 
     fixture = (Path(__file__).with_suffix('.cpp')).read_text(encoding='utf-8')
     actual = '\n'.join([
-        between('struct pipeline_capture_queue_statistics', 'bool is_recoverable_truncated_capture'),
+        between('class owned_packet {', 'bool is_recoverable_truncated_capture'),
+        between('bool is_recoverable_truncated_capture', 'void add_source_statistics('),
+        between('uint64_t timestamp_us(', 'bool flow_key_less('),
+        between('bool append_predictions(', '#if KTAG_ENABLE_DPDK_UB'),
         between('bool append_distributed_predictions(', '#endif'),
+        between('bool copy_feature_records(', 'domain_store_ptr create_domain_store()'),
         between('inference_context_ptr\ncreate_inference_context(', 'schema_ptr compose_schema'),
+        between('class parallel_source_executor {', '#if KTAG_ENABLE_DPDK_UB'),
         between('uint64_t ub_identity_hash(', 'bool run_ub_frontend_inputs('),
     ])
     generated = build / 'queue_workers_check.cpp'
     generated.write_text(fixture.replace('// INSERT_ACTUAL_EXECUTORS', actual), encoding='utf-8')
     executable = build / ('queue_workers_check.exe' if os.name == 'nt' else 'queue_workers_check')
     command = [str(Path(args.zig).resolve()), 'c++'] if args.zig else [args.cxx]
-    command += ['-std=c++17', '-O1', '-UNDEBUG', '-DKTAG_BUILDING_DLL']
+    command += ['-std=c++17', '-O1', '-UNDEBUG', '-DKTAG_BUILDING_DLL', '-DKTAG_ENABLE_DPDK_UB=1']
     if os.name != 'nt':
         command += ['-pthread']
     for include in ['include', 'tools/demo/pipeline', 'src/inference']:

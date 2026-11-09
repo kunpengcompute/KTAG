@@ -33,9 +33,17 @@ pipeline:
 
   capture:
     packet_pool_size: 65536
+    dpdk:
+      # 在线：4 个 RX 队列各由一个收包线程操作。PCAP 仍只读一个文件线程。
+      rx_queue_count: 4
+      rx_threads: 4
+      rx_worker_cpus: "0-3"
+      # 与现场已验证的 PCI / 插件 / 内存参数合并，不能删除必要的现场参数。
+      eal_args: "--lcores=0@(0-95) -a 0000:a5:00.0"
 
   feature:
-    threads: 4
+    threads: 16
+    worker_cpus: "4-19"
     queue_capacity: 65536
     flow_hash_seed: 2026
     lifecycle_mode: legacy
@@ -44,7 +52,7 @@ pipeline:
   inference:
     # UB 后端每个 worker 独占一个队列：必须为 provider 数 × queues_per_provider。
     # 与 feature.threads 独立配置；UB 场景禁止命令行覆盖线程数和 pipeline-mode。
-    threads: 1
+    threads: 16
     batch_size: 256
     batch_timeout_us: 1000
     queue_capacity: 4096
@@ -65,22 +73,25 @@ pipeline:
       region: ktag_ub_region
       shm_prefix: ktag_feature
       provider_shm_size: 268435456
-      queues_per_provider: 1
+      queues_per_provider: 16
+      # 每个 sender 独占一个本地输出队列和一个 UB 队列；前端共 36 个业务线程。
+      sender_threads: 16
+      sender_worker_cpus: "20-35"
       queue_depth: 1024
       data_element_size: 4096
       credits_per_queue: 64
       # 按列表顺序逐 worker 绑核；数量必须等于 inference.threads。
       # 两前端各 48 队列时，threads=96、此处为 "0-95"（以实际可用 CPU 为准）。
-      backend_worker_cpus: "0"
+      backend_worker_cpus: "0-15"
       poll_us: 50
       # 可选：1:1 PCAP 验收需要 Classification Report 时取消注释；
       # 键必须是 provider_nodes 中的 hostname，数组长度等于该节点 -p 数量。
       # ground_truth_labels:
       #   computer01: [0, 1]
       # 第一项是 EAL 的 argv[0]；这是离线 PCAP 的 UB EAL 参数。
-      # 此处允许前端特征线程在 CPU 0-3 调度，现场按 CPU 拓扑/允许集合调整。
+      # 允许 SDK/控制线程在 CPU 0-95 调度；业务线程按各 worker_cpus 显式绑定。
       # 在线 --dpdk 首先使用 capture.dpdk.eal_args 初始化 EAL，应在该字段也设置合适的 CPU 掩码。
-      eal_arguments: [kdadk_demo, --no-huge, --no-pci, --iova-mode=va, "--lcores=0@(0-3)"]
+      eal_arguments: [kdadk_demo, --no-huge, --no-pci, --iova-mode=va, "--lcores=0@(0-95)"]
 
   plugins: []
   schema:

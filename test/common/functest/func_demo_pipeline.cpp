@@ -992,11 +992,83 @@ TEST(KTAGDemoPipelineConfig, ParsesOfficialUbSampleForBothRoles)
         std::string error;
         ASSERT_EQ(ktag_demo_pipeline_config_result::enabled,
                   ktag_demo_load_pipeline_config_with_overrides(sample.string().c_str(), &overrides, &config, &error)) << error;
-        EXPECT_EQ(1U, config.inference_threads);
-        EXPECT_EQ(4U, config.feature_threads);
+        EXPECT_EQ(16U, config.inference_threads);
+        EXPECT_EQ(16U, config.feature_threads);
+        EXPECT_EQ(16U, config.ub.sender_threads);
+        EXPECT_EQ(4U, config.dpdk_rx_threads);
         EXPECT_EQ(64U, config.ub.credits_per_queue);
-        EXPECT_EQ((std::vector<uint32_t>{0U}), config.ub.backend_worker_cpus);
+        EXPECT_EQ(16U, config.ub.backend_worker_cpus.size());
+        EXPECT_EQ(15U, config.ub.backend_worker_cpus.back());
     }
+}
+
+TEST(KTAGDemoPipelineConfig, ParsesFrontendRxAndSenderParallelism)
+{
+    auto body = ub_queue_test_yaml(4U, 2U);
+    const auto feature = body.find("  feature: {threads: 3}");
+    body.replace(feature, std::string("  feature: {threads: 3}").size(),
+        "  capture:\n    dpdk: {rx_queue_count: 2, rx_threads: 2, rx_worker_cpus: '0-1'}\n"
+        "  feature: {threads: 3, worker_cpus: '2-4'}");
+    body += "      sender_threads: 2\n      sender_worker_cpus: '5-6'\n";
+    const auto path = write_config(body);
+    for (const bool frontend : {true, false}) {
+        auto overrides = ub_queue_test_role(frontend);
+        overrides.force_dpdk = frontend;
+        ktag_demo_pipeline_config config;
+        std::string error;
+        ASSERT_EQ(ktag_demo_pipeline_config_result::enabled,
+            ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error)) << error;
+        EXPECT_EQ(2U, config.dpdk_rx_threads);
+        EXPECT_EQ(2U, config.ub.sender_threads);
+        EXPECT_EQ((std::vector<uint32_t>{2, 3, 4}), config.feature_worker_cpus);
+        EXPECT_EQ(4U, config.inference_threads);
+    }
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsInvalidFrontendParallelConfiguration)
+{
+    auto valid = ub_queue_test_yaml(4U, 2U);
+    valid.replace(valid.find("  feature: {threads: 3}"), std::string("  feature: {threads: 3}").size(),
+        "  capture:\n    dpdk: {rx_queue_count: 2, rx_threads: 2, rx_worker_cpus: '0-1'}\n"
+        "  feature: {threads: 3, worker_cpus: '2-4'}");
+    valid += "      sender_threads: 2\n      sender_worker_cpus: '5-6'\n";
+    const std::vector<std::pair<std::string, std::string>> mutations = {
+        {"rx_threads: 2", "rx_threads: 3"},
+        {"sender_threads: 2", "sender_threads: 3"},
+        {"sender_threads: 2", "sender_threads: 0"},
+        {"rx_worker_cpus: '0-1'", "rx_worker_cpus: ''"},
+        {"worker_cpus: '2-4'", "worker_cpus: '1-3'"},
+        {"sender_worker_cpus: '5-6'", "sender_worker_cpus: '4-5'"},
+        {"sender_worker_cpus: '5-6'", "sender_worker_cpus: '5'"},
+        {"sender_worker_cpus: '5-6'", "sender_worker_cpus: '5,5'"},
+        {"    threads: 4", "    queue_capacity: 1\n    threads: 4"}
+    };
+    for (const auto &mutation : mutations) {
+        auto body = valid;
+        body.replace(body.find(mutation.first), mutation.first.size(), mutation.second);
+        const auto path = write_config(body);
+        auto overrides = ub_queue_test_role(true);
+        overrides.force_dpdk = true;
+        ktag_demo_pipeline_config config;
+        std::string error;
+        EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+            ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error));
+        EXPECT_FALSE(error.empty());
+        std::remove(path.c_str());
+    }
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsFrontendThreadSettingsOutsideUb)
+{
+    const auto path = write_config("pipeline:\n  enabled: true\n  model_package_path: model_package\n"
+        "  mode: feature_parallel\n  capture:\n    dpdk: {rx_threads: 2, rx_queue_count: 2}\n");
+    ktag_demo_pipeline_config config;
+    std::string error;
+    EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config(path.c_str(), &config, &error));
+    EXPECT_NE(std::string::npos, error.find("require distributed UB"));
+    std::remove(path.c_str());
 }
 
 TEST(KTAGDemoPipelineConfig, RejectsInvalidDistributedCpuLists)

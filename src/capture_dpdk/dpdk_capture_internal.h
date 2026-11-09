@@ -37,6 +37,9 @@ struct ktag_dpdk_context {
   uint32_t burst_size = KTAG_DPDK_DEFAULT_BURST_SIZE;
   /* Receive queues configured on the port; always >= 1 once open succeeds. */
   uint16_t rx_queue_count = 1U;
+  uint32_t reader_count = 1U;
+  bool rss_enabled = false;
+  std::atomic<uint64_t> parallel_sequence{1U};
   /* Queue whose cache is being drained. */
   uint16_t active_queue = 0U;
   /* Queue the next refill scan starts from, giving round-robin fairness. */

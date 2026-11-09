@@ -7,6 +7,8 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <unistd.h>
 
 #include <atomic>
+#include <algorithm>
+#include <cstdio>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
@@ -23,10 +25,12 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <rte_ethdev.h>
 #include <rte_mbuf.h>
 #include <rte_mempool.h>
+#include <rte_lcore.h>
 
 namespace {
 
 thread_local std::string dpdk_error;
+thread_local void *registered_capture = nullptr;
 
 constexpr uint32_t EAL_MAX_ARGV = 64U;
 constexpr uint16_t MBUF_POOL_CACHE_SIZE = 512U;
@@ -248,8 +252,14 @@ ktag_status configure_port(ktag_dpdk_context *context,
 
   const uint32_t rx_queues =
       config->rx_queue_count == 0U ? 1U : config->rx_queue_count;
+  if (rx_queues > info.max_rx_queues) {
+    dpdk_error = "rx_queue_count=" + std::to_string(rx_queues) +
+        " exceeds NIC max_rx_queues=" + std::to_string(info.max_rx_queues);
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
   context->rx_queue_count = static_cast<uint16_t>(rx_queues);
   context->pending.resize(rx_queues);
+  for (auto &pending : context->pending) { pending.reserve(context->burst_size); }
   context->counters.resize(rx_queues);
 
   uint16_t nb_rx = config->rx_queue_depth == 0U
@@ -292,6 +302,7 @@ ktag_status configure_port(ktag_dpdk_context *context,
         (RTE_ETH_RSS_IP | RTE_ETH_RSS_TCP | RTE_ETH_RSS_UDP);
     if (port_conf.rx_adv_conf.rss_conf.rss_hf != 0U) {
       port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_RSS;
+      context->rss_enabled = true;
     } else {
       port_conf.rxmode.mq_mode = RTE_ETH_MQ_RX_NONE;
     }
@@ -422,6 +433,10 @@ KTAG_API ktag_status ktag_dpdk_capture_next(void *context,
   }
 
   auto *capture = static_cast<ktag_dpdk_context *>(context);
+  if (capture->reader_count != 1U) {
+    dpdk_error = "multi-reader capture requires next_queue(), not next()";
+    return KTAG_ERROR_INVALID_STATE;
+  }
   ktag_packet_init(packet);
   if (capture->stopped.load(std::memory_order_acquire)) {
     return KTAG_STATUS_END_OF_STREAM;
@@ -500,6 +515,130 @@ KTAG_API ktag_status ktag_dpdk_capture_next(void *context,
   return KTAG_SUCCESS;
 }
 
+KTAG_API ktag_status ktag_dpdk_capture_prepare_readers(void *context, uint32_t readers) {
+  dpdk_error.clear();
+  auto *capture = static_cast<ktag_dpdk_context *>(context);
+  if (!capture || readers == 0U || (readers > 1U &&
+      (readers != capture->rx_queue_count || capture->mode != KTAG_DPDK_PACKET_OWNED))) {
+    dpdk_error = "RX readers must be 1, or equal rx_queue_count with OWNED packets";
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
+  if (readers > 1U) {
+    if (!capture->rss_enabled) {
+      dpdk_error = "multi-reader RX requires NIC RSS support";
+      return KTAG_ERROR_INVALID_STATE;
+    }
+    rte_eth_dev_info info{};
+    if (rte_eth_dev_info_get(capture->port, &info) != 0 || info.reta_size < readers) {
+      dpdk_error = "NIC RSS RETA cannot cover all requested RX queues";
+      return KTAG_ERROR_INVALID_STATE;
+    }
+    std::vector<rte_eth_rss_reta_entry64> reta((info.reta_size + RTE_ETH_RETA_GROUP_SIZE - 1U) / RTE_ETH_RETA_GROUP_SIZE);
+    for (uint32_t i = 0; i < info.reta_size; ++i) {
+      auto &entry = reta[i / RTE_ETH_RETA_GROUP_SIZE];
+      const auto bit = i % RTE_ETH_RETA_GROUP_SIZE;
+      entry.mask |= uint64_t{1} << bit;
+      entry.reta[bit] = static_cast<uint16_t>(i % readers);
+    }
+    const int updated = rte_eth_dev_rss_reta_update(capture->port, reta.data(), info.reta_size);
+    const int queried = rte_eth_dev_rss_reta_query(capture->port, reta.data(), info.reta_size);
+    if (queried == 0) {
+      std::vector<bool> covered(readers, false);
+      for (uint32_t i = 0; i < info.reta_size; ++i) {
+        const auto q = reta[i / RTE_ETH_RETA_GROUP_SIZE].reta[i % RTE_ETH_RETA_GROUP_SIZE];
+        if (q < readers) { covered[q] = true; }
+      }
+      if (std::find(covered.begin(), covered.end(), false) != covered.end()) {
+        dpdk_error = "NIC RSS RETA does not cover every configured RX queue";
+        return KTAG_ERROR_INVALID_STATE;
+      }
+    } else if (updated != 0) {
+      // Some PMDs expose neither operation; be explicit about the limit.
+      std::fprintf(stderr, "WARNING: RSS RETA update/query unavailable (%d/%d); verify per-RX queue packet distribution\n", updated, queried);
+    }
+    std::printf("DPDK readers: queues=%u, readers=%u, RSS=enabled, RETA=%u, query=%s\n",
+                capture->rx_queue_count, readers, info.reta_size, queried == 0 ? "verified" : "unavailable");
+  }
+  capture->reader_count = readers;
+  return KTAG_SUCCESS;
+}
+
+KTAG_API ktag_status ktag_dpdk_capture_reader_enter(void *context) {
+  dpdk_error.clear();
+  auto *capture = static_cast<ktag_dpdk_context *>(context);
+  if (!capture) { dpdk_error = "invalid RX reader context"; return KTAG_ERROR_INVALID_ARGUMENT; }
+  if (capture->reader_count == 1U) { return KTAG_SUCCESS; }
+  if (registered_capture || rte_lcore_id() != LCORE_ID_ANY || rte_thread_register() != 0) {
+    dpdk_error = "RX thread registration failed (lcore capacity or DPDK secondary process conflict)";
+    return KTAG_ERROR_INVALID_STATE;
+  }
+  registered_capture = context;
+  return KTAG_SUCCESS;
+}
+
+KTAG_API void ktag_dpdk_capture_reader_leave(void *context) {
+  if (registered_capture == context && context != nullptr) {
+    rte_thread_unregister();
+    registered_capture = nullptr;
+  }
+}
+
+KTAG_API ktag_status ktag_dpdk_capture_next_queue(
+    void *context, uint32_t queue_id, ktag_packet *packet) {
+  dpdk_error.clear();
+  auto *capture = static_cast<ktag_dpdk_context *>(context);
+  if (!capture || !packet || packet->struct_size < sizeof(*packet) ||
+      packet->api_version != KTAG_API_VERSION || packet->owner ||
+      queue_id >= capture->rx_queue_count) {
+    dpdk_error = "invalid queue reader arguments or unreleased owned packet";
+    return KTAG_ERROR_INVALID_ARGUMENT;
+  }
+  if (capture->reader_count <= 1U || capture->mode != KTAG_DPDK_PACKET_OWNED ||
+      registered_capture != context) {
+    dpdk_error = "next_queue requires prepared OWNED multi-reader capture and reader_enter()";
+    return KTAG_ERROR_INVALID_STATE;
+  }
+  ktag_packet_init(packet);
+  if (capture->stopped.load(std::memory_order_acquire)) { return KTAG_STATUS_END_OF_STREAM; }
+  auto &pending = capture->pending[queue_id];
+  auto &counters = capture->counters[queue_id];
+  const auto now_us = ktag_dpdk_now_us_internal();
+  if (pending.empty()) {
+    rte_mbuf *burst[KTAG_DPDK_DEFAULT_BURST_SIZE];
+    const auto count = rte_eth_rx_burst(capture->port, static_cast<uint16_t>(queue_id), burst, capture->burst_size);
+    if (count == 0U) {
+      const auto last = capture->last_rx_us.load(std::memory_order_relaxed);
+      if (capture->rx_idle_eof_us && now_us >= last && now_us - last >= capture->rx_idle_eof_us) {
+        capture->stopped.store(true, std::memory_order_release);
+        return KTAG_STATUS_END_OF_STREAM;
+      }
+      if (capture->poll_interval_us) { rte_delay_us(capture->poll_interval_us); }
+      return KTAG_STATUS_TIMEOUT;
+    }
+    pending.assign(burst, burst + count);
+    counters.received += count;
+    auto last = capture->last_rx_us.load(std::memory_order_relaxed);
+    while (last < now_us && !capture->last_rx_us.compare_exchange_weak(last, now_us, std::memory_order_relaxed)) {}
+  }
+  rte_mbuf *mbuf = pending.front();
+  pending.erase(pending.begin());
+  packet->data = rte_pktmbuf_mtod(mbuf, const uint8_t *);
+  packet->captured_length = rte_pktmbuf_pkt_len(mbuf);
+  packet->original_length = packet->captured_length;
+  packet->link_type = capture->link_type;
+  packet->sequence = capture->parallel_sequence.fetch_add(1U, std::memory_order_relaxed);
+  packet->timestamp.seconds = static_cast<int64_t>(now_us / 1000000U);
+  packet->timestamp.microseconds = static_cast<int32_t>(now_us % 1000000U);
+  const auto status = ktag_packet_make_owned(packet);
+  rte_pktmbuf_free(mbuf);
+  if (status != KTAG_SUCCESS) {
+    dpdk_error = "failed to make queue-captured packet owned";
+    return status;
+  }
+  ++counters.delivered;
+  return KTAG_SUCCESS;
+}
+
 KTAG_API uint32_t ktag_dpdk_capture_get_link_type(const void *context) {
   const auto *capture = static_cast<const ktag_dpdk_context *>(context);
   return capture == nullptr ? 0U : capture->link_type;
@@ -545,8 +684,12 @@ ktag_dpdk_capture_get_stats(const void *context,
   for (const auto &queue : capture->pending) {
     pending += queue.size();
   }
-  stats->received = capture->received_total;
-  stats->delivered = capture->delivered_total;
+  stats->received = 0U;
+  stats->delivered = 0U;
+  for (const auto &queue : capture->counters) {
+    stats->received += queue.received;
+    stats->delivered += queue.delivered;
+  }
   stats->pending = pending;
   stats->discarded = capture->discarded_total;
 

@@ -9,6 +9,7 @@
 #include <cstring>
 #include <deque>
 #include <exception>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -22,6 +23,8 @@
 #include "pipeline_runner.h"
 #include "ub_feature_wire.h"
 #include "ub_ring_transport.h"
+#include "pipeline_worker.h"
+#include "demo_capture_source.h"
 #include "prediction_batch_internal.h"
 
 using pipeline_prediction = ktag_demo_pipeline_prediction;
@@ -38,7 +41,7 @@ struct mock_queue {
   std::mutex mutex;
   std::deque<void *> features, controls;
   std::thread::id reader, writer;
-  std::atomic<int> sending_features{0}, sending_controls{0}, receiving{0};
+  std::atomic<int> sending_features{0}, sending_controls{0}, receiving{0}, returning{0};
 };
 struct mock_scenario {
   unsigned providers, queues;
@@ -72,6 +75,63 @@ mock_scenario *scenario;
 thread_local uint32_t mock_cpu = 0U;
 thread_local std::string last_error;
 struct ktag_feature_schema {};
+struct ktag_feature_context { std::thread::id owner; };
+struct ktag_domain_store {};
+using feature_context_ptr = std::unique_ptr<ktag_feature_context>;
+using domain_store_ptr = std::unique_ptr<ktag_domain_store>;
+domain_store_ptr create_domain_store() { return std::make_unique<ktag_domain_store>(); }
+feature_context_ptr create_feature_context(const ktag_demo_pipeline_config &,
+    const ktag_feature_schema *, const ktag_feature_registry *, ktag_domain_store *) {
+  return std::make_unique<ktag_feature_context>();
+}
+struct ktag_packet_buffer { uint64_t id; };
+extern "C" void ktag_packet_init(ktag_packet *p) { *p = {}; p->struct_size = sizeof(*p); p->api_version = KTAG_API_VERSION; }
+extern "C" void ktag_packet_release(ktag_packet *p) { delete p->owner; ktag_packet_init(p); }
+extern "C" ktag_status ktag_packet_get_flow_key(const ktag_packet *p, ktag_flow_key *key) {
+  *key = {}; key->port_a = static_cast<uint16_t>(p->sequence); return KTAG_SUCCESS;
+}
+extern "C" uint32_t ktag_flow_select_worker(const ktag_flow_key *key, uint32_t workers, uint64_t) { return key->port_a % workers; }
+extern "C" ktag_status ktag_feature_process_packet(ktag_feature_context *ctx, const ktag_packet *p, ktag_feature_batch *out) {
+  if (ctx->owner == std::thread::id{}) { ctx->owner = std::this_thread::get_id(); }
+  assert(ctx->owner == std::this_thread::get_id());
+  ktag_feature_batch_clear(out);
+  ktag_feature_record_metadata metadata{};
+  metadata.struct_size = sizeof(metadata); metadata.api_version = KTAG_API_VERSION;
+  metadata.flow_id = p->sequence;
+  const float values[] = {float(p->sequence), 1};
+  return ktag_feature_batch_append(out, &metadata, values, 2);
+}
+extern "C" ktag_status ktag_feature_expire(ktag_feature_context *, uint64_t, ktag_feature_batch *out) { ktag_feature_batch_clear(out); return KTAG_SUCCESS; }
+extern "C" ktag_status ktag_feature_flush(ktag_feature_context *, ktag_feature_batch *out) { ktag_feature_batch_clear(out); return KTAG_SUCCESS; }
+extern "C" ktag_status ktag_feature_get_statistics(const ktag_feature_context *, ktag_feature_statistics *) { return KTAG_SUCCESS; }
+
+class mock_capture_source : public demo_capture_source {
+  std::vector<unsigned> positions_;
+  std::atomic<bool> stopped_{false};
+public:
+  explicit mock_capture_source(unsigned readers) : positions_(readers, 0) {}
+  bool prepare_readers(uint32_t count, std::string *) override { return count == positions_.size(); }
+  ktag_status next(ktag_packet *p) override { return next_queue(0, p); }
+  ktag_status next_queue(uint32_t q, ktag_packet *p) override {
+    // Queue 0 ends early while every other queue still has work.
+    const unsigned count = positions_.size() > 1 && q == 0 ? 1 : 513;
+    if (stopped_ || positions_[q] == count) { return KTAG_STATUS_END_OF_STREAM; }
+    ktag_packet_init(p);
+    p->sequence = q * 10000 + ++positions_[q];
+    p->owner = new ktag_packet_buffer{p->sequence};
+    p->data = reinterpret_cast<const uint8_t *>(&p->owner->id);
+    p->captured_length = p->original_length = 64;
+    p->timestamp.seconds = 1;
+    return KTAG_SUCCESS;
+  }
+  void interrupt() override { stopped_ = true; }
+  uint32_t link_type() const override { return KTAG_CAPTURE_LINKTYPE_ETHERNET; }
+  const char *last_error() const override { return "mock capture"; }
+};
+std::unique_ptr<demo_capture_source> create_demo_capture_source(
+    const ktag_demo_pipeline_config &config, const char *, bool, bool, std::string *) {
+  return std::make_unique<mock_capture_source>(config.dpdk_rx_threads);
+}
 struct ktag_inference_context { std::thread::id owner; };
 
 extern "C" {
@@ -123,7 +183,10 @@ bool ktag_demo_ub_bind_cpu(uint32_t cpu, std::string *error) {
   return true;
 }
 uint32_t ktag_demo_ub_runtime_data_element_size(uint32_t payload) { return payload; }
-struct ktag_demo_ub_ring_transport::implementation { ktag_demo_ub_transport_config config; };
+struct ktag_demo_ub_ring_transport::implementation {
+  ktag_demo_ub_transport_config config;
+  std::atomic<int> returning{0};
+};
 ktag_demo_ub_ring_transport::ktag_demo_ub_ring_transport(std::unique_ptr<implementation> state) : state_(std::move(state)) {}
 ktag_demo_ub_ring_transport::~ktag_demo_ub_ring_transport() = default;
 std::unique_ptr<ktag_demo_ub_ring_transport> ktag_demo_ub_ring_transport::create(const ktag_demo_ub_transport_config &config, std::string *) {
@@ -147,7 +210,12 @@ void *ktag_demo_ub_ring_transport::allocate_buffer(uint32_t) {
   return buffer;
 }
 void ktag_demo_ub_ring_transport::free_buffer(void *buffer) { scenario->release(buffer); }
-void ktag_demo_ub_ring_transport::return_buffer(void *buffer) { scenario->release(buffer); }
+void ktag_demo_ub_ring_transport::return_buffer(void *buffer) {
+  assert(state_->returning.fetch_add(1) == 0); // One producer for this provider's return ring.
+  std::this_thread::yield();
+  scenario->release(buffer);
+  --state_->returning;
+}
 uint16_t ktag_demo_ub_ring_transport::send_burst(uint32_t id, void **buffers, uint16_t count) {
   auto &queue = *scenario->channels.at(id);
   const bool provider = state_->config.role == ktag_demo_ub_role::provider;
@@ -164,7 +232,10 @@ uint16_t ktag_demo_ub_ring_transport::send_burst(uint32_t id, void **buffers, ui
   std::lock_guard<std::mutex> lock(queue.mutex);
   if (provider) {
     if (queue.writer == std::thread::id{}) { queue.writer = std::this_thread::get_id(); }
-    assert(queue.writer == std::this_thread::get_id());
+    // Error cleanup may take ownership only after the sender has joined.
+    if (info.message_type != ktag_demo_ub_message_type::error) {
+      assert(queue.writer == std::this_thread::get_id());
+    }
     if (scenario->corrupt && info.message_type == ktag_demo_ub_message_type::feature) {
       static_cast<uint8_t *>(*buffers)[KTAG_DEMO_UB_FRAME_HEADER_SIZE] ^= 1U;
     }
@@ -218,7 +289,8 @@ bool ktag_demo_ub_ring_transport::receive_copy(uint32_t id, void *local, size_t 
 // INSERT_ACTUAL_EXECUTORS
 
 void run_case(unsigned providers, unsigned queues, unsigned records,
-              const std::string &fault = "", uint32_t batch_timeout = 100000) {
+              const std::string &fault = "", uint32_t batch_timeout = 100000,
+              unsigned senders = 1, unsigned producers = 1) {
   std::signal(SIGINT, [](int) { pipeline_interrupted = 1; });
   mock_scenario state(providers, queues);
   scenario = &state; pipeline_interrupted = 0;
@@ -235,6 +307,7 @@ void run_case(unsigned providers, unsigned queues, unsigned records,
   for (unsigned p = 0; p < providers; ++p) { config.ub.provider_nodes.push_back("computer0" + std::to_string(p + 1)); }
   config.ub.queues_per_provider = queues; config.ub.credits_per_queue = 2;
   config.ub.data_element_size = 4096; config.ub.ruleset_hash = 456; config.ub.poll_us = 0;
+  config.ub.sender_threads = senders;
   config.inference_threads = providers * queues; config.inference_batch_size = 8;
   config.inference_batch_timeout_us = batch_timeout;
   for (unsigned n = 0; n < providers * queues; ++n) { config.ub.backend_worker_cpus.push_back(n); }
@@ -246,13 +319,24 @@ void run_case(unsigned providers, unsigned queues, unsigned records,
       ub_frontend_record_sender sender;
       std::string error;
       bool ok = sender.initialize(frontend, 123, 2, &error);
-      for (unsigned n = 1; ok && n <= records; ++n) {
+      std::atomic<bool> submitted{ok};
+      std::vector<std::thread> submissions;
+      for (unsigned producer = 0; ok && producer < producers; ++producer) {
+        submissions.emplace_back([&, producer]() {
+        std::string local_error;
+        unsigned cursor = producer % senders;
+        for (unsigned n = producer + 1; submitted.load() && n <= records; n += producers) {
         feature_record_owned record;
         record.source_index = p + 10;
         record.details.metadata.flow_id = p * 10000 + n;
         record.values = {float(n), float(p)};
-        ok = sender.send(std::move(record), p == 0, &error);
+        if (!sender.send(std::move(record), p == 0, &local_error, cursor)) { submitted = false; }
+        cursor = (cursor + 1U) % senders;
+        }
+        });
       }
+      for (auto &submission : submissions) { submission.join(); }
+      ok = submitted.load();
       if (ok) {
         pipeline_run_statistics statistics;
         statistics.packets = records * 2; statistics.bytes = records * 100;
@@ -331,8 +415,8 @@ void run_case(unsigned providers, unsigned queues, unsigned records,
   }
   assert(state.live_models == 0);
   state.clear_queues();
-  std::printf("PASS providers=%u queues/provider=%u records/provider=%u fault=%s timeout=%u peak=%d\n",
-              providers, queues, records, fault.c_str(), batch_timeout, int(state.peak));
+  std::printf("PASS providers=%u queues/provider=%u records/provider=%u fault=%s timeout=%u senders=%u producers=%u peak=%d\n",
+              providers, queues, records, fault.c_str(), batch_timeout, senders, producers, int(state.peak));
 }
 
 void check_graceful_frontend_stop() {
@@ -378,9 +462,6 @@ void check_graceful_frontend_stop() {
     record.values = {1, 2}; record.details.metadata.flow_id = 1;
     pipeline_interrupted = 1;
     assert(sender.send(std::move(record), true, &error)); // Flush after first signal.
-    pipeline_interrupted = 2;
-    assert(!sender.send(std::move(record), true, &error)); // Second signal cancels waits.
-    pipeline_interrupted = 1;
     pipeline_run_statistics totals;
     totals.emitted_flows = 1; totals.bytes = 100; totals.packets = 2;
     totals.first_feature_at = std::chrono::steady_clock::now();
@@ -389,13 +470,74 @@ void check_graceful_frontend_stop() {
   }
   state.clear_queues();
   pipeline_interrupted = 0;
+  // A second signal is terminal in a real run; do not transiently set it and
+  // then reset it while asynchronous sender workers are still running.
+  assert(ktag_demo_ub_encode_control_frame(
+      buffer = backend->allocate_buffer(0), 4096,
+      ktag_demo_ub_message_type::credit, contract, &encoded, &error));
+  assert(backend->send_burst(0, &buffer, 1) == 1);
+  {
+    ub_frontend_record_sender sender;
+    assert(sender.initialize(config, 123, 2, &error));
+    sender.begin_input();
+    feature_record_owned record; record.values = {1, 2};
+    pipeline_interrupted = 2;
+    assert(!sender.send(std::move(record), true, &error));
+    sender.abort_best_effort();
+  }
+  state.clear_queues();
+  pipeline_interrupted = 0;
   std::puts("PASS first frontend signal drains pending features; second signal cancels");
+}
+
+void check_frontend_executor(unsigned readers, unsigned senders, bool cancel_output = false) {
+  mock_scenario state(1, 16); scenario = &state; pipeline_interrupted = 0;
+  ktag_demo_pipeline_config config;
+  config.ub.enabled = true; config.feature_only = true;
+  config.ub.sender_threads = senders; config.feature_threads = 16;
+  config.capture_backend = ktag_demo_capture_backend::dpdk;
+  config.dpdk_rx_threads = config.dpdk_rx_queue_count = readers;
+  config.packet_queue_capacity = 2; // Force backpressure with tiny queues.
+  std::atomic<bool> cancelled{false};
+  std::mutex mutex;
+  std::set<uint64_t> ids;
+  std::set<unsigned> routed;
+  const unsigned expected = readers == 1 ? 513 : 1 + (readers - 1) * 513;
+  feature_record_handler handler = [&](feature_record_owned &&record, uint32_t sender, std::string *error) {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (cancel_output && ids.size() == 17) {
+      cancelled = true; *error = "injected sender failure"; return false;
+    }
+    assert(ids.insert(record.details.metadata.flow_id).second);
+    assert(record.source_index == 7 && record.values.size() == 2 && sender < senders);
+    routed.insert(sender);
+    return true;
+  };
+  pipeline_source_statistics statistics;
+  std::string error;
+  ktag_feature_schema schema;
+  parallel_source_executor executor(config, &schema, nullptr, 7, handler, &cancelled);
+  const bool ok = executor.run("mock-nic", true, nullptr, nullptr, &statistics, &error);
+  if (cancel_output) {
+    assert(!ok && !error.empty());
+  } else {
+    assert(ok && ids.size() == expected);
+    assert(statistics.packets == expected && statistics.bytes == expected * 64ULL);
+    assert(statistics.emitted_flows == expected && statistics.queue_drops == 0);
+    assert(routed.size() == senders);
+  }
+  std::printf("PASS actual frontend executor RX=%u F=16 S=%u: early RX EOF, source labels, exact delivery, cancel=%d\n", readers, senders, cancel_output);
 }
 
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   std::puts("Starting actual UB queue executor checks");
   std::signal(SIGINT, [](int) { pipeline_interrupted = 1; });
+  check_frontend_executor(1, 1);
+  check_frontend_executor(4, 16);
+  check_frontend_executor(16, 16);
+  check_frontend_executor(4, 3);
+  check_frontend_executor(4, 16, true);
   run_case(1, 1, 37);
   run_case(1, 2, 37);
   run_case(1, 2, 37, "slow");
@@ -412,6 +554,15 @@ int main() {
   run_case(2, 2, 100000, "blocked");
   run_case(2, 2, 100000, "interrupt");
   run_case(2, 48, 7);
+  run_case(1, 16, 4097, "", 1000, 16, 16);
+  run_case(2, 16, 1025, "", 1000, 16, 16);
+  run_case(1, 16, 4097, "", 1000, 4, 16);
+  run_case(1, 16, 4097, "", 1000, 3, 16); // Uneven ownership groups.
+  run_case(1, 16, 257, "", 1000, 16, 2); // F < S still reaches every sender.
+  run_case(1, 16, 1, "", 1000, 16, 16);
+  run_case(1, 16, 0, "", 1000, 16, 16);
+  run_case(1, 16, 4097, "corrupt", 1000, 16, 16);
+  run_case(1, 16, 100000, "blocked", 1000, 16, 16);
   check_graceful_frontend_stop();
   std::puts("PASS all UB queue worker checks");
 }

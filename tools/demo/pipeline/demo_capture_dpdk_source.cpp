@@ -31,6 +31,21 @@ public:
     return ktag_dpdk_capture_next(capture_, packet);
   }
 
+  bool prepare_readers(uint32_t count, std::string *error) override {
+    if (ktag_dpdk_capture_prepare_readers(capture_, count) == KTAG_SUCCESS) { return true; }
+    *error = ktag_dpdk_capture_get_last_error();
+    return false;
+  }
+  bool enter_reader(std::string *error) override {
+    if (ktag_dpdk_capture_reader_enter(capture_) == KTAG_SUCCESS) { return true; }
+    *error = ktag_dpdk_capture_get_last_error();
+    return false;
+  }
+  void leave_reader() override { ktag_dpdk_capture_reader_leave(capture_); }
+  ktag_status next_queue(uint32_t queue, ktag_packet *packet) override {
+    return ktag_dpdk_capture_next_queue(capture_, queue, packet);
+  }
+
   void interrupt() override {
     if (capture_ != nullptr) {
       ktag_dpdk_capture_interrupt(capture_);
