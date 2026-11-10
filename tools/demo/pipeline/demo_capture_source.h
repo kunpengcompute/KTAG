@@ -48,6 +48,11 @@ struct demo_capture_source {
   }
   virtual bool enter_reader(std::string *) { return true; }
   virtual void leave_reader() {}
+  /* Called once per worker thread at start/exit. The DPDK backend registers
+   * the thread as an EAL lcore here so mbuf get/put use the pool's per-lcore
+   * cache instead of hitting the shared ring from every worker. */
+  virtual bool worker_thread_enter(std::string *) { return true; }
+  virtual void worker_thread_leave() {}
   virtual ktag_status next_queue(uint32_t, ktag_packet *) { return KTAG_ERROR_NOT_SUPPORTED; }
   /* MBUF handoff: no copy, the caller owns the mbuf until it releases it.
    * queue_id == UINT32_MAX means "drive all queues round-robin". */

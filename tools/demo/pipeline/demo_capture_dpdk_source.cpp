@@ -42,6 +42,15 @@ public:
     return false;
   }
   void leave_reader() override { ktag_dpdk_capture_reader_leave(capture_); }
+
+  bool worker_thread_enter(std::string *error) override {
+    if (ktag_dpdk_capture_thread_enter() == KTAG_SUCCESS) { return true; }
+    if (error != nullptr) { *error = ktag_dpdk_capture_get_last_error(); }
+    return false;
+  }
+  void worker_thread_leave() override {
+    ktag_dpdk_capture_thread_leave(capture_);
+  }
   ktag_status next_queue(uint32_t queue, ktag_packet *packet) override {
     return ktag_dpdk_capture_next_queue(capture_, queue, packet);
   }

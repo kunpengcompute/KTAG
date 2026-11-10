@@ -31,6 +31,8 @@ namespace {
 
 thread_local std::string dpdk_error;
 thread_local void *registered_capture = nullptr;
+/* Set when ktag_dpdk_capture_thread_enter() registered this thread itself. */
+thread_local bool worker_thread_registered = false;
 
 constexpr uint32_t EAL_MAX_ARGV = 64U;
 constexpr uint16_t MBUF_POOL_CACHE_SIZE = 512U;
@@ -579,7 +581,13 @@ KTAG_API ktag_status ktag_dpdk_capture_reader_enter(void *context) {
   auto *capture = static_cast<ktag_dpdk_context *>(context);
   if (!capture) { dpdk_error = "invalid RX reader context"; return KTAG_ERROR_INVALID_ARGUMENT; }
   if (capture->reader_count == 1U) { return KTAG_SUCCESS; }
-  if (registered_capture || rte_lcore_id() != LCORE_ID_ANY || rte_thread_register() != 0) {
+  if (registered_capture) {
+    dpdk_error = "RX thread already entered for this capture";
+    return KTAG_ERROR_INVALID_STATE;
+  }
+  /* ktag_dpdk_capture_thread_enter() may have registered the thread already;
+   * in that case the thread scope owns the unregister. */
+  if (rte_lcore_id() == LCORE_ID_ANY && rte_thread_register() != 0) {
     dpdk_error = "RX thread registration failed (lcore capacity or DPDK secondary process conflict)";
     return KTAG_ERROR_INVALID_STATE;
   }
@@ -589,9 +597,44 @@ KTAG_API ktag_status ktag_dpdk_capture_reader_enter(void *context) {
 
 KTAG_API void ktag_dpdk_capture_reader_leave(void *context) {
   if (registered_capture == context && context != nullptr) {
-    rte_thread_unregister();
     registered_capture = nullptr;
+    if (!worker_thread_registered && rte_lcore_id() != LCORE_ID_ANY) {
+      rte_thread_unregister();
+    }
   }
+}
+
+KTAG_API ktag_status ktag_dpdk_capture_thread_enter(void) {
+  dpdk_error.clear();
+  if (rte_lcore_id() != LCORE_ID_ANY) {
+    /* Already an EAL lcore: nothing to register and nothing to undo. */
+    worker_thread_registered = false;
+    return KTAG_SUCCESS;
+  }
+  if (rte_thread_register() != 0) {
+    dpdk_error = std::string("rte_thread_register failed: ") +
+                 rte_strerror(rte_errno);
+    return KTAG_ERROR_INTERNAL;
+  }
+  worker_thread_registered = true;
+  return KTAG_SUCCESS;
+}
+
+KTAG_API void ktag_dpdk_capture_thread_leave(void *context) {
+  if (!worker_thread_registered) {
+    return;
+  }
+  worker_thread_registered = false;
+  auto *capture = static_cast<ktag_dpdk_context *>(context);
+  if (capture != nullptr && capture->pool != nullptr) {
+    /*
+     * Return cached mbufs to the pool before the lcore id is released:
+     * once rte_thread_unregister() runs, rte_lcore_id() is LCORE_ID_ANY and
+     * this thread can no longer reach its cache.
+     */
+    rte_mempool_cache_flush(nullptr, capture->pool);
+  }
+  rte_thread_unregister();
 }
 
 KTAG_API ktag_status ktag_dpdk_capture_next_queue(

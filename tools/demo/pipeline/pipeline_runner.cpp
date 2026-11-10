@@ -46,6 +46,32 @@ private:
 };
 #endif
 
+/*
+ * Worker threads that touch mbufs must be registered with the capture backend
+ * so DPDK uses the mempool's per-lcore cache instead of the shared ring. The
+ * guard unregisters on every exit path, including exceptions.
+ */
+class worker_thread_scope {
+public:
+  explicit worker_thread_scope(demo_capture_source *source) : source_(source) {}
+  ~worker_thread_scope() {
+    if (active_ && source_ != nullptr) {
+      source_->worker_thread_leave();
+    }
+  }
+  worker_thread_scope(const worker_thread_scope &) = delete;
+  worker_thread_scope &operator=(const worker_thread_scope &) = delete;
+
+  bool enter(std::string *error) {
+    active_ = source_ != nullptr && source_->worker_thread_enter(error);
+    return active_;
+  }
+
+private:
+  demo_capture_source *source_;
+  bool active_ = false;
+};
+
 #include <arpa/inet.h>
 #include <signal.h>
 #include <unistd.h>
@@ -1259,6 +1285,11 @@ private:
     std::string worker_error;
     if (config_.ub.enabled && !ktag_demo_start_worker("rx", worker_index, config_.dpdk_rx_worker_cpus,
         config_.initial_allowed_cpus, &worker_error)) { fail(worker_error); return; }
+    worker_thread_scope thread_scope(capture_.get());
+    if (!thread_scope.enter(&worker_error)) {
+      fail("RX worker=" + std::to_string(worker_index) + ": " + worker_error);
+      return;
+    }
     if (!capture_->enter_reader(&worker_error)) { fail("RX worker=" + std::to_string(worker_index) + ": " + worker_error); return; }
     if (!await_start()) { return; }
     ktag_packet packet{};
@@ -1406,6 +1437,12 @@ private:
     if (config_.ub.enabled && !ktag_demo_start_worker("feat", worker_index, config_.feature_worker_cpus,
         config_.initial_allowed_cpus, &worker_error)) {
       fail(worker_error); finish_feature_worker(worker_index, start); return;
+    }
+    worker_thread_scope thread_scope(capture_.get());
+    if (!thread_scope.enter(&worker_error)) {
+      fail("Feature worker=" + std::to_string(worker_index) + ": " + worker_error);
+      finish_feature_worker(worker_index, start);
+      return;
     }
     feature_batch_ptr output(ktag_feature_batch_create(schema_, 64U));
     if (!output) {
