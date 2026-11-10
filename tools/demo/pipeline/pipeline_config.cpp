@@ -459,7 +459,15 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
     return false;
   }
   const bool online = pipeline.capture_backend == ktag_demo_capture_backend::dpdk;
-  if (pipeline.dpdk_ring_handoff && !online) {
+  /*
+   * The handoff ring sits on the Capture -> Feature path, which only the
+   * Frontend runs. A Backend node receives Feature frames over the UB ring and
+   * never captures, so a YAML shared by both roles may keep
+   * capture.dpdk.handoff: ring for the Frontend; it is ignored here instead of
+   * failing Backend startup.
+   */
+  if (pipeline.dpdk_ring_handoff && !online &&
+      config.role == ktag_demo_distributed_role::frontend) {
     set_error(error,
               "pipeline.capture.dpdk.handoff: ring requires "
               "pipeline.capture.backend: dpdk");
