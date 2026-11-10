@@ -1,0 +1,54 @@
+# Same file on frontend and backend. Worker counts and affinities are YAML-only.
+# Example CPU layout: frontend 64 RX + 30 feature + 2 compressed TCP senders.
+# Backend 16 independent TCP receive/decompress/inference workers.
+schema:
+  name: ktag_legacy_v1
+  version: 1
+capture:
+  backend: dpdk
+  # Starts after every RX reader is registered and all backend workers are ready.
+  # 0 means run until frontend Ctrl+C; Ctrl+C stops RX and drains the full pipeline.
+  duration_s: 60
+  dpdk:
+    device: "0000:a5:00.0"
+    rx_queue_count: 64
+    rx_threads: 64
+    rx_worker_cpus: "0-63"
+    rx_queue_depth: 1024
+    mbuf_pool_size: 0
+    burst_size: 64
+    poll_interval_us: 0
+    rx_idle_eof_us: 0
+    # Merge in the NIC driver/plugin/IOVA/hugepage arguments verified on site.
+    eal_args: "--lcores=0@(0-95) -a 0000:a5:00.0"
+feature:
+  threads: 30
+  worker_cpus: "64-93"
+  packet_queue_capacity: 65536
+  feature_queue_capacity: 4096
+  flow_hash_seed: 2026
+  lifecycle_mode: legacy
+  expire_interval_ms: 1000
+inference:
+  threads: 16
+  worker_cpus: "0-15"
+  batch_size: 256
+  batch_timeout_us: 1000
+  intra_op_threads: 1
+  inter_op_threads: 1
+  # Global retained prediction limit across all workers; CSV is written after drain.
+  prediction_limit: 10000000
+transport:
+  port: 19090
+  sender_threads: 2
+  sender_worker_cpus: "94-95"
+  batch_records: 256
+  batch_timeout_us: 1000
+  max_uncompressed_bytes: 4194304
+  progress_timeout_s: 120
+compression:
+  codec: zstd
+  level: 1
+  target_ratio: 10.0
+backpressure:
+  policy: block

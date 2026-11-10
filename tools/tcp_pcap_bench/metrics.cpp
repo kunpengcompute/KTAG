@@ -56,17 +56,19 @@ void print_performance(const Config &c, const Metrics &m, bool success,
                       : "推理有效吞吐量（后端接收至推理）", core);
   if (core) out << "十进制换算: " << double(input_bytes)*8/core << " Gbit/s\n";
   out << "======================= 性能统计 =======================\n"
-      << "运行状态: " << (success ? (complete ? "成功，完整输入" : "成功，部分 PCAP 输入") : "失败") << '\n'
+      << "运行状态: " << (success ? (c.online ? "成功，应用接收数据已排空" :
+          (complete ? "成功，完整输入" : "成功，部分 PCAP 输入")) : "失败") << '\n'
       << "单位说明: MiB/s、Gibit/s 与 UB 旧版 MB/s、Gbps 的计算口径相同\n";
   auto seconds = [&](const char *label, uint64_t value) {
     out << label << ": " << double(value)/1e9 << " 秒\n";
   };
   if (frontend) {
-    seconds("PCAP 读取累计耗时", m.read_ns.load());
+    if (c.online) seconds("DPDK RX CPU 累计计算量", m.read_cpu_ns.load());
+    else seconds("PCAP 读取累计耗时", m.read_ns.load());
     seconds("特征计算累计耗时（所有线程 API 调用之和）", m.feature_ns.load());
     seconds("特征编码累计耗时", m.encode_ns.load());
     seconds("压缩累计耗时", m.compress_ns.load());
-    seconds("TCP 发送累计耗时（含等待）", m.send_ns.load());
+    seconds(c.online ? "TCP 非阻塞发送调用累计耗时" : "TCP 发送累计耗时（含等待）", m.send_ns.load());
     out << "特征 CPU 累计计算量: " << double(m.feature_cpu_ns.load())/1e9 << " CPU 秒\n";
     if (core) seconds("核心链路耗时（特征提取、压缩、传输、解压、等待及后端推理）", core);
     else out << "核心链路耗时: N/A\n";
@@ -81,9 +83,10 @@ void print_performance(const Config &c, const Metrics &m, bool success,
     out << "后端阶段吞吐不能替代前端全链路核心吞吐\n";
   }
   seconds("端到端总耗时（进程启动至本次统计采样，含初始化及结果输出）", total_wall);
-  if (pipeline) seconds(frontend ? "读取开始至后端完成确认耗时" : "首个文件就绪至完成确认耗时", pipeline);
+  if (pipeline) seconds(frontend ? "读取开始至后端完成确认耗时" :
+                        (c.online ? "后端就绪至完成确认耗时" : "首个文件就绪至完成确认耗时"), pipeline);
   out << "处理包数: " << m.packets.load() << " 个\n"
-      << "总数据量: " << double(input_bytes)/1048576 << " MiB（PCAP captured bytes）\n"
+      << "总数据量: " << double(input_bytes)/1048576 << (c.online ? " MiB（DPDK captured bytes）\n" : " MiB（PCAP captured bytes）\n")
       << "阶段累计耗时可并行重叠，不能相加作为核心链路耗时\n";
   throughput("端到端吞吐量（进程启动至本次统计采样）", total_wall);
   out << "========================================================\n"
@@ -100,12 +103,16 @@ void print_performance(const Config &c, const Metrics &m, bool success,
       << "实际压缩比: ";
   if (m.compressed_bytes) out << double(m.raw_bytes.load())/m.compressed_bytes.load() << ":1\n";
   else out << "N/A\n";
+  if (c.online && frontend)
+    out << "DPDK received/delivered/pending/missed+errors: " << m.capture_received.load() << '/'
+        << m.capture_delivered.load() << '/' << m.capture_pending.load() << '/' << m.capture_drops.load() << '\n';
   out << "========================================================\n";
   std::cout << out.str();
 }
 } // namespace
 void Metrics::write(const Config &c, bool success, const std::string &error) const {
-  bool complete = success && sources.size() == (c.role == "frontend" ? c.pcaps.size() : sources.size()) && !sources.empty();
+  bool complete = success && !sources.empty() &&
+    (c.online || c.role != "frontend" || sources.size() == c.pcaps.size());
   for (const auto &source : sources) complete &= source.warning.empty();
   auto first = first_feature.load(), last = c.role == "frontend" ? completed.load() : inference_completed.load();
   uint64_t core = success && first && last >= first ? last-first : 0;
@@ -118,10 +125,12 @@ void Metrics::write(const Config &c, bool success, const std::string &error) con
   if (c.role == "frontend" && core) json << core_gbit_s; else json << "null";
   json << ",\n  \"status\": " << json_quote(success ? "complete" : "failed") << ",\n  \"error\": " << json_quote(error)
     << ",\n  \"role\": " << json_quote(c.role) << ",\n  \"input_complete\": " << (complete ? "true" : "false")
-    << ",\n  \"input_mode\": \"frontend_local_pcap\",\n  \"timestamp_mode\": \"pcap_microseconds\""
-    << ",\n  \"read_mode\": \"as_fast_as_possible\",\n  \"core_timer\": "
+    << ",\n  \"input_mode\": " << json_quote(c.online ? "frontend_dpdk_live" : "frontend_local_pcap")
+    << ",\n  \"input_complete_scope\": " << json_quote(c.online ? "delivered_application_packets" : "pcap_files")
+    << ",\n  \"timestamp_mode\": " << json_quote(c.online ? "dpdk_receive_microseconds" : "pcap_microseconds")
+    << ",\n  \"read_mode\": " << json_quote(c.online ? "live_rx" : "as_fast_as_possible") << ",\n  \"core_timer\": "
     << json_quote(c.role == "frontend" ? "first_feature_process_to_DONE" : "first_feature_batch_received_to_last_inference_complete")
-    << ",\n  \"pipeline_timer\": " << json_quote(c.role == "frontend" ? "reader_start_to_DONE" : "first_FILE_READY_to_DONE")
+    << ",\n  \"pipeline_timer\": " << json_quote(c.role == "frontend" ? "reader_start_to_DONE" : (c.online ? "all_workers_READY_to_DONE" : "first_FILE_READY_to_DONE"))
     << ",\n  \"compression_level\": " << c.level << ",\n  \"target_ratio\": " << c.target_ratio
     << ",\n  \"schema\": \"ktag_legacy_v1\",\n  \"schema_hash\": " << schema_hash
     << ",\n  \"extraction_rules_hash\": " << c.rules_hash();
@@ -133,6 +142,9 @@ void Metrics::write(const Config &c, bool success, const std::string &error) con
     << ",\n  \"feature_queue_capacity\": " << c.feature_queue << ",\n  \"compression_batch_records\": " << c.compression_records
     << ",\n  \"inference_batch_records\": " << c.inference_records << ",\n  \"prediction_limit\": " << c.prediction_limit;
   auto field = [&](const char *name, uint64_t value) { json << ",\n  " << json_quote(name) << ": " << value; };
+  field("rx_threads", c.online ? c.rx_threads : 1); field("sender_threads", c.sender_threads);
+  field("inference_threads", c.inference_threads); field("tcp_connections", c.online ? c.inference_threads : 1);
+  if (c.online) field("duration_s", c.duration_s);
 #define COUNTER(name) field(#name, name.load())
   COUNTER(packets); COUNTER(bytes); COUNTER(original_bytes); COUNTER(short_captures);
   COUNTER(unsupported); COUNTER(processed); COUNTER(rejected); COUNTER(extracted);
@@ -160,8 +172,13 @@ void Metrics::write(const Config &c, bool success, const std::string &error) con
   number("compression_ratio_socket", socket_bytes != 0, socket_bytes ? double(raw_bytes.load())/socket_bytes : 0);
   json << ",\n  \"target_ratio_met\": ";
   if (compressed_bytes) json << (double(raw_bytes.load())/compressed_bytes.load() >= c.target_ratio ? "true" : "false"); else json << "null";
-  json << ",\n  \"replay_actual_mbps\": null,\n  \"replay_cpu_ns\": null,\n  \"capture_drops\": null"
-    << ",\n  \"nic_interface\": " << json_quote(nic_interface)
+  json << ",\n  \"replay_actual_mbps\": null,\n  \"replay_cpu_ns\": null,\n  \"capture_drops\": ";
+  if (c.online && c.role == "frontend") json << capture_drops.load(); else json << "null";
+  if (c.online && c.role == "frontend") {
+    field("capture_received", capture_received.load()); field("capture_delivered", capture_delivered.load());
+    field("capture_pending", capture_pending.load());
+  }
+  json << ",\n  \"nic_interface\": " << json_quote(nic_interface)
     << ",\n  \"nic_counter_scope\": \"whole_run_all_interface_traffic\"";
   auto nic_end = nic_snapshot(nic_interface);
   for (auto key : {"rx_bytes", "tx_bytes", "rx_packets", "tx_packets", "rx_dropped", "tx_dropped", "rx_errors", "tx_errors"}) {

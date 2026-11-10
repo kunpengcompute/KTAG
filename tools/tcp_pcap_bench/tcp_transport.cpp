@@ -5,15 +5,16 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
 
 namespace tcp_bench {
 static void syscheck(bool ok, const char *why) {
   if (!ok) throw std::runtime_error(std::string(why)+": "+std::strerror(errno));
 }
-static bool wait_fd(int fd, short events, Clock::time_point deadline, bool idle) {
+static bool wait_fd(int fd, short events, Clock::time_point deadline, bool idle, bool interruptible = true) {
   for (;;) {
-    require(!interrupted, "interrupted");
+    require(!interruptible || !interrupted, "interrupted");
     auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline-Clock::now()).count();
     if (left < 0) { if (idle) return false; throw std::runtime_error("TCP progress timeout"); }
     pollfd p{fd, events, 0}; int n = poll(&p, 1, int(std::min<int64_t>(left+1, 100)));
@@ -64,13 +65,39 @@ int accept_frontend(const Config &c) {
     }
   } catch (...) { close(listener); throw; }
 }
-Channel::Channel(int fd, uint32_t timeout_s, uint32_t max_raw, Metrics &metrics)
-  : fd_(fd), timeout_s_(timeout_s), max_raw_(max_raw), metrics_(metrics) {}
+Listener::Listener(const Config &c) : fd_(new_socket()) {
+  try {
+    int one = 1;
+    syscheck(setsockopt(fd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == 0, "SO_REUSEADDR");
+    auto a = address(c.local_ip, c.port);
+    syscheck(bind(fd_, reinterpret_cast<sockaddr *>(&a), sizeof(a)) == 0, "bind backend IP");
+    syscheck(listen(fd_, int(c.inference_threads)) == 0, "listen");
+  } catch (...) { close(fd_); throw; }
+}
+Listener::~Listener() { close(fd_); }
+int Listener::accept(uint32_t timeout_s) {
+  auto deadline = Clock::now()+std::chrono::seconds(timeout_s);
+  for (;;) {
+    wait_fd(fd_, POLLIN, deadline, false);
+    int fd = accept4(fd_, nullptr, nullptr, SOCK_CLOEXEC|SOCK_NONBLOCK);
+    if (fd < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+    syscheck(fd >= 0, "accept"); return fd;
+  }
+}
+Channel::Channel(int fd, uint32_t timeout_s, uint32_t max_raw, Metrics &metrics, bool interruptible)
+  : fd_(fd), timeout_s_(timeout_s), max_raw_(max_raw), metrics_(metrics), interruptible_(interruptible) {
+  if (!interruptible_) {
+    int one = 1;
+    if (setsockopt(fd_, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) < 0) {
+      close(fd_); syscheck(false, "TCP_NODELAY");
+    }
+  }
+}
 Channel::~Channel() { close(fd_); }
 void Channel::stop() { shutdown(fd_, SHUT_RDWR); }
 void Channel::transfer(uint8_t *data, size_t count, bool writing, Clock::time_point deadline) {
   while (count) {
-    wait_fd(fd_, writing ? POLLOUT : POLLIN, deadline, false);
+    wait_fd(fd_, writing ? POLLOUT : POLLIN, deadline, false, interruptible_);
     ssize_t n = writing ? ::send(fd_, data, count, MSG_NOSIGNAL) : recv(fd_, data, count, 0);
     if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) continue;
     syscheck(n >= 0, writing ? "send" : "recv"); require(n != 0, "TCP peer closed");
@@ -90,7 +117,7 @@ void Channel::control(Type type, uint64_t run, const Writer &w) {
   Message m; m.type = type; m.run = run; m.body = w.data; send(m);
 }
 bool Channel::read_message(Message &m, Clock::time_point deadline, bool idle) {
-  if (!wait_fd(fd_, POLLIN, deadline, idle)) return false;
+  if (!wait_fd(fd_, POLLIN, deadline, idle, interruptible_)) return false;
   Bytes header(header_size); transfer(header.data(), header.size(), false,
                                        Clock::now()+std::chrono::seconds(timeout_s_));
   uint32_t size = 0; m = decode_header(header, max_raw_, size); m.body.resize(size);
@@ -102,5 +129,23 @@ Message Channel::receive() {
 }
 bool Channel::receive_for(Message &m, uint32_t timeout_us) {
   return read_message(m, Clock::now()+std::chrono::microseconds(timeout_us), true);
+}
+void Channel::start_send(const Message &m) {
+  require(!pending(), "TCP connection already has a pending message");
+  pending_bytes_ = encode_header(m);
+  pending_bytes_.insert(pending_bytes_.end(), m.body.begin(), m.body.end());
+  pending_offset_ = 0;
+  send_deadline_ = Clock::now()+std::chrono::seconds(timeout_s_);
+}
+bool Channel::advance_send() {
+  if (!pending()) return false;
+  require(Clock::now() < send_deadline_, "TCP asynchronous send progress timeout");
+  auto n = ::send(fd_, pending_bytes_.data()+pending_offset_, pending_bytes_.size()-pending_offset_, MSG_NOSIGNAL);
+  if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) return false;
+  syscheck(n >= 0, "send"); require(n != 0, "TCP peer closed");
+  pending_offset_ += size_t(n); metrics_.socket_tx += uint64_t(n);
+  send_deadline_ = Clock::now()+std::chrono::seconds(timeout_s_);
+  if (pending_offset_ == pending_bytes_.size()) { pending_bytes_.clear(); pending_offset_ = 0; }
+  return true;
 }
 } // namespace tcp_bench

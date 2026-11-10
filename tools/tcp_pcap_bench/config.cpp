@@ -7,8 +7,9 @@
 
 namespace tcp_bench {
 void usage() {
-  std::cout << "KTAG local PCAP -> features -> Zstd -> TCP -> inference\n"
+  std::cout << "KTAG PCAP / DPDK -> features -> Zstd -> TCP -> inference\n"
     "  --role frontend --local-ip IP --connect IP:PORT -p FILE [-p FILE ...]\n"
+    "  --role frontend --config ONLINE_YAML --local-ip IP --connect IP:PORT -i PCI\n"
     "  --role backend --bind-ip IP --port PORT --model PACKAGE --result CSV\n"
     "  Optional: --config YAML --stats JSON --feature-audit FILE --network-interface IFACE\n";
 }
@@ -19,6 +20,28 @@ static uint32_t integer(const std::string &value) {
   require(!value.empty() && value.find_first_not_of("0123456789") == std::string::npos,
           "expected an unsigned integer: "+value);
   auto n = std::stoull(value); require(n <= UINT32_MAX, "integer out of range"); return uint32_t(n);
+}
+static std::vector<uint32_t> cpu_list(const YAML::Node &node, const char *key) {
+  std::vector<uint32_t> result;
+  if (!node[key]) return result;
+  auto text = node[key].as<std::string>();
+  size_t start = 0;
+  while (start < text.size()) {
+    auto end = text.find(',', start);
+    auto part = text.substr(start, end == std::string::npos ? end : end-start);
+    auto dash = part.find('-');
+    auto first = integer(part.substr(0, dash));
+    auto last = dash == std::string::npos ? first : integer(part.substr(dash+1));
+    require(first <= last && last < 1024, "CPU range must be ascending and below 1024");
+    for (auto cpu = first; cpu <= last; ++cpu) {
+      require(std::find(result.begin(), result.end(), cpu) == result.end(), "duplicate worker CPU");
+      result.push_back(cpu);
+    }
+    if (end == std::string::npos) break;
+    start = end+1;
+    require(start < text.size(), "trailing comma in CPU list");
+  }
+  return result;
 }
 uint64_t Config::rules_hash() const {
   // Normalize the public API's zero-as-default values, as in the original UB pipeline.
@@ -48,8 +71,19 @@ Config parse_config(int argc, char **argv) {
     if (s["version"]) require(s["version"].as<unsigned>() == 1, "unsupported schema version");
     for (auto key : {"feature_order", "feature_ids", "remove_features", "add_features"})
       if (s[key]) require(s[key].size() == 0, "exact Legacy V1 schema required");
-    if (cap["backend"]) require(cap["backend"].as<std::string>() == "pcap", "local input requires capture backend pcap");
+    std::string capture_backend = "pcap"; read(cap, "backend", capture_backend);
+    require(capture_backend == "pcap" || capture_backend == "dpdk", "capture.backend must be pcap or dpdk");
+    c.online = capture_backend == "dpdk";
     read(cap, "packet_pool_size", c.packet_pool);
+    auto dpdk = section(cap, "dpdk");
+    read(dpdk, "device", c.device); read(dpdk, "eal_args", c.eal_args);
+    read(dpdk, "rx_threads", c.rx_threads); read(dpdk, "rx_queue_count", c.rx_queues);
+    read(dpdk, "rx_queue_depth", c.rx_depth); read(dpdk, "mbuf_pool_size", c.mbuf_pool);
+    read(dpdk, "burst_size", c.burst); read(dpdk, "poll_interval_us", c.rx_poll_us);
+    read(dpdk, "rx_idle_eof_us", c.rx_idle_eof_us); read(cap, "duration_s", c.duration_s);
+    c.rx_cpus = cpu_list(dpdk, "rx_worker_cpus");
+    c.feature_cpus = cpu_list(f, "worker_cpus");
+    c.inference_cpus = cpu_list(inf, "worker_cpus");
     read(f, "threads", c.feature_threads); read(f, "flow_hash_seed", c.flow_hash_seed);
     read(f, "queue_capacity", c.packet_queue); read(f, "packet_queue_capacity", c.packet_queue);
     read(f, "feature_queue_capacity", c.feature_queue); read(f, "flow_capacity", c.flow_capacity);
@@ -59,12 +93,15 @@ Config parse_config(int argc, char **argv) {
     require(lifecycle == "legacy" || lifecycle == "modern", "invalid lifecycle mode"); c.modern = lifecycle == "modern";
     read(inf, "batch_size", c.inference_records); read(inf, "batch_timeout_us", c.inference_timeout_us);
     read(inf, "queue_capacity", c.feature_queue); read(inf, "prediction_limit", c.prediction_limit);
-    for (auto key : {"threads", "intra_op_threads", "inter_op_threads"})
+    read(inf, "threads", c.inference_threads);
+    for (auto key : {"intra_op_threads", "inter_op_threads"})
       if (inf[key]) require(inf[key].as<unsigned>() == 1, "inference threads must be 1");
     read(inf, "model_package_path", c.model); read(n, "model_package_path", c.model);
     if (!c.model.empty() && std::filesystem::path(c.model).is_relative())
       c.model = (std::filesystem::absolute(c.config_path).parent_path()/c.model).lexically_normal().string();
     read(t, "bind_ip", c.local_ip); read(t, "port", c.port);
+    read(t, "sender_threads", c.sender_threads);
+    c.sender_cpus = cpu_list(t, "sender_worker_cpus");
     read(t, "batch_records", c.compression_records); read(t, "batch_timeout_us", c.compression_timeout_us);
     read(t, "max_uncompressed_bytes", c.max_body); read(t, "progress_timeout_s", c.timeout_s);
     read(z, "level", c.level); read(z, "target_ratio", c.target_ratio);
@@ -90,6 +127,7 @@ Config parse_config(int argc, char **argv) {
     else if (a == "--feature-audit") c.audit = v;
     else if (a == "--network-interface") c.network_interface = v;
     else if (a == "-p") c.pcaps.push_back(v);
+    else if (a == "-i") { c.device = v; c.online = true; }
     else throw std::runtime_error("unknown local-PCAP option: "+a);
   }
   require(c.role == "frontend" || c.role == "backend", "--role must be frontend or backend");
@@ -103,8 +141,30 @@ Config parse_config(int argc, char **argv) {
   require(c.level >= ZSTD_minCLevel() && c.level <= ZSTD_maxCLevel(), "invalid Zstd level");
   require(std::isfinite(c.target_ratio) && c.target_ratio > 0, "invalid target ratio");
   require(!c.local_ip.empty(), "local bind IPv4 is required");
+  if (c.online) {
+    require(c.rx_threads && c.rx_threads <= 128 && c.rx_threads == c.rx_queues,
+            "online RX threads must equal RX queues, in [1,128]");
+    require(c.inference_threads && c.inference_threads <= 128 && c.sender_threads &&
+            c.sender_threads <= c.inference_threads && c.feature_queue >= c.sender_threads,
+            "online worker counts must satisfy 1 <= senders <= inference threads <= 128");
+    require(c.rx_depth && c.burst && c.burst <= 64, "invalid RX depth or burst size");
+    require(c.audit.empty(), "online multi-channel feature audit is unsupported");
+    auto check = [](const std::vector<uint32_t> &cpus, uint32_t count) {
+      require(cpus.empty() || cpus.size() == count, "worker CPU count must equal thread count");
+    };
+    check(c.rx_cpus, c.rx_threads); check(c.feature_cpus, c.feature_threads);
+    check(c.sender_cpus, c.sender_threads); check(c.inference_cpus, c.inference_threads);
+    std::vector<uint32_t> front_cpus = c.rx_cpus;
+    front_cpus.insert(front_cpus.end(), c.feature_cpus.begin(), c.feature_cpus.end());
+    front_cpus.insert(front_cpus.end(), c.sender_cpus.begin(), c.sender_cpus.end());
+    std::sort(front_cpus.begin(), front_cpus.end());
+    require(std::adjacent_find(front_cpus.begin(), front_cpus.end()) == front_cpus.end(),
+            "online frontend RX, feature and sender CPU sets must be disjoint");
+  } else require(c.inference_threads == 1 && c.sender_threads == 1, "PCAP mode requires one sender and one inference worker");
   if (c.role == "frontend") {
-    require(!c.peer_ip.empty() && !c.pcaps.empty(), "frontend needs --connect and at least one -p PCAP");
+    require(!c.peer_ip.empty(), "frontend needs --connect");
+    require(c.online ? (c.pcaps.empty() && !c.device.empty()) : !c.pcaps.empty(),
+            "frontend needs either online -i PCI (no -p) or at least one -p PCAP");
     require(c.pcaps.size() <= 100000 && c.result.empty(), "frontend input count too large or unexpected --result");
   } else require(c.pcaps.empty() && c.peer_ip.empty() && !c.model.empty() && !c.result.empty(),
                  "backend needs --model and --result; PCAP/--connect belong on frontend");
