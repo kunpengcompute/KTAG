@@ -1071,18 +1071,31 @@ public:
         *error = "capture backend does not support ring handoff";
         return false;
       }
-      ring_handoffs_.reserve(config_.feature_threads);
-      for (uint32_t index = 0U; index < config_.feature_threads; ++index) {
-        char name[32] = {};
-        std::snprintf(name, sizeof(name), "ktag_h2f_%u_%u", source_index_,
-                      index);
-        dpdk_ring_handoff *ring = dpdk_ring_handoff::create(
-            name, config_.packet_queue_capacity, -1);
-        if (ring == nullptr) {
-          *error = "failed to create the DPDK handoff ring";
-          return false;
+      /*
+       * One SPSC ring per (RX worker, Feature worker) pair. A flow is pinned
+       * to one RX queue by RSS, so a Feature worker sees each flow from one
+       * producer only and packet order within a flow is preserved.
+       * The configured capacity is split across the producer shards so the
+       * total handoff buffering does not grow with the RX worker count.
+       */
+      const uint32_t ring_producers = rx_workers_;
+      const uint32_t ring_capacity =
+          std::max(2U, config_.packet_queue_capacity / ring_producers);
+      ring_handoffs_.resize(config_.feature_threads);
+      for (uint32_t worker = 0U; worker < config_.feature_threads; ++worker) {
+        ring_handoffs_[worker].reserve(ring_producers);
+        for (uint32_t producer = 0U; producer < ring_producers; ++producer) {
+          char name[40] = {};
+          std::snprintf(name, sizeof(name), "ktag_h2f_%u_%u_%u", source_index_,
+                        worker, producer);
+          dpdk_ring_handoff *ring = dpdk_ring_handoff::create(
+              name, ring_capacity, -1, true);
+          if (ring == nullptr) {
+            *error = "failed to create the DPDK handoff ring";
+            return false;
+          }
+          ring_handoffs_[worker].emplace_back(ring);
         }
-        ring_handoffs_.emplace_back(ring);
       }
     }
 #else
@@ -1293,25 +1306,33 @@ private:
       const ktag_status key_status = ktag_packet_get_flow_key(&packet, &key);
       if (key_status != KTAG_SUCCESS) {
         ++stats.unsupported;
+#ifdef KTAG_DEMO_HAVE_DPDK
         if (use_ring) { ktag_dpdk_mbuf_release(ring_mbuf); }
-        else { ktag_packet_release(&packet); }
+        else
+#endif
+        { ktag_packet_release(&packet); }
         continue;
       }
       const uint32_t worker = ktag_flow_select_worker(
           &key, config_.feature_threads, config_.flow_hash_seed);
       if (worker == KTAG_WORKER_INDEX_INVALID ||
           worker >= packet_queues_.size()) {
+#ifdef KTAG_DEMO_HAVE_DPDK
         if (use_ring) { ktag_dpdk_mbuf_release(ring_mbuf); }
-        else { ktag_packet_release(&packet); }
+        else
+#endif
+        { ktag_packet_release(&packet); }
         fail("dispatcher returned an invalid Feature worker");
         break;
       }
 
+#ifdef KTAG_DEMO_HAVE_DPDK
       if (use_ring) {
         demo_ring_item item{};
         item.mbuf = ring_mbuf;
         item.packet = packet;
-        dpdk_ring_handoff *const ring = ring_handoffs_[worker].get();
+        dpdk_ring_handoff *const ring =
+            ring_handoffs_[worker][worker_index].get();
         uint32_t spins = 0U;
         bool queued = false;
         while (!(queued = ring->enqueue(item))) {
@@ -1332,6 +1353,7 @@ private:
         }
         continue;
       }
+#endif
 
       owned_packet item(&packet);
       const auto result =
@@ -1396,6 +1418,12 @@ private:
     uint64_t last_expire_us = 0U;
     owned_packet packet;
     const bool use_ring = ring_handoff();
+#ifdef KTAG_DEMO_HAVE_DPDK
+    /* This Feature worker owns one SPSC ring per RX producer. */
+    const std::vector<std::unique_ptr<dpdk_ring_handoff>> *const rings =
+        use_ring ? &ring_handoffs_[worker_index] : nullptr;
+    uint32_t ring_cursor = 0U;
+#endif
     while (true) {
 #ifdef KTAG_DEMO_HAVE_DPDK
       demo_ring_item ring_item{};
@@ -1407,7 +1435,18 @@ private:
       }
 #ifdef KTAG_DEMO_HAVE_DPDK
       else {
-        if (!ring_handoffs_[worker_index]->dequeue(&ring_item)) {
+        bool dequeued = false;
+        const uint32_t ring_count = static_cast<uint32_t>(rings->size());
+        for (uint32_t offset = 0U; offset < ring_count; ++offset) {
+          const uint32_t slot = (ring_cursor + offset) % ring_count;
+          if ((*rings)[slot]->dequeue(&ring_item)) {
+            /* Rotate so one busy producer cannot starve the others. */
+            ring_cursor = (slot + 1U) % ring_count;
+            dequeued = true;
+            break;
+          }
+        }
+        if (!dequeued) {
           if (rings_closed_.load(std::memory_order_acquire)) {
             break;
           }
@@ -1711,8 +1750,9 @@ private:
   std::vector<inference_worker_statistics> inference_stats_;
   std::vector<std::thread> capture_threads_;
 #ifdef KTAG_DEMO_HAVE_DPDK
-  /* One ring per Feature worker; empty when handoff is the mutex queue. */
-  std::vector<std::unique_ptr<dpdk_ring_handoff>> ring_handoffs_;
+  /* [Feature worker][RX producer] SPSC rings; empty when handoff is the
+   * mutex queue. */
+  std::vector<std::vector<std::unique_ptr<dpdk_ring_handoff>>> ring_handoffs_;
   std::atomic<bool> rings_closed_{false};
 #endif
   std::vector<std::thread> feature_threads_;

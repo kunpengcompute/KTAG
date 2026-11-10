@@ -41,13 +41,17 @@ dpdk_ring_handoff::dpdk_ring_handoff(void *ring, uint32_t capacity)
 
 dpdk_ring_handoff *dpdk_ring_handoff::create(const char *name,
                                              uint32_t capacity,
-                                             int socket_id)
+                                             int socket_id,
+                                             bool single_producer)
 {
   const uint32_t count = round_up_pow2(capacity);
   const int socket = socket_id < 0 ? rte_socket_id() : socket_id;
+  unsigned int flags = RING_F_SC_DEQ | RING_F_EXACT_SZ;
+  if (single_producer) {
+    flags |= RING_F_SP_ENQ;
+  }
   struct rte_ring *ring = rte_ring_create_elem(
-      name, sizeof(demo_ring_item), count, socket,
-      RING_F_SC_DEQ | RING_F_EXACT_SZ);
+      name, sizeof(demo_ring_item), count, socket, flags);
   if (ring == nullptr) {
     return nullptr;
   }

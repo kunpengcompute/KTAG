@@ -23,14 +23,17 @@ struct demo_ring_item {
 /*
  * Thin wrapper over a DPDK rte_ring. Kept in its own translation unit so the
  * DPDK include path and arch flags apply only here, not to the whole demo.
- * Multi-producer / single-consumer: every RX worker may enqueue, exactly one
- * Feature worker dequeues from its own ring.
+ *
+ * The runner creates one ring per (RX worker, Feature worker) pair, so every
+ * ring has exactly one producer and one consumer. create() therefore sets
+ * RING_F_SP_ENQ | RING_F_SC_DEQ: no CAS or atomic RMW on the ring cursors,
+ * which is what removes the producer-side contention of a shared MP ring.
  */
 class dpdk_ring_handoff {
 public:
   /* capacity is rounded up to a power of two by rte_ring_create(). */
   static dpdk_ring_handoff *create(const char *name, uint32_t capacity,
-                                   int socket_id);
+                                   int socket_id, bool single_producer);
   ~dpdk_ring_handoff();
 
   dpdk_ring_handoff(const dpdk_ring_handoff &) = delete;
