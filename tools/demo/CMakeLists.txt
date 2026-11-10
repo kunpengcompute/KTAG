@@ -74,8 +74,19 @@ endif()
 
 # Optional DPDK poll-mode capture backend.
 if(KTAG_ENABLE_DPDK)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(DPDK_RING REQUIRED IMPORTED_TARGET libdpdk)
+    target_sources(kdadk_demo PRIVATE
+        pipeline/dpdk_ring_handoff.cpp
+    )
     target_compile_definitions(kdadk_demo PRIVATE KTAG_DEMO_HAVE_DPDK=1)
     target_link_libraries(kdadk_demo PRIVATE ktag_capture_dpdk)
+    target_link_directories(kdadk_demo PRIVATE ${DPDK_RING_LIBRARY_DIRS})
+    target_link_libraries(kdadk_demo PRIVATE ${DPDK_RING_LIBRARIES})
+    # DPDK's -include/arch flags apply only to the ring wrapper, never to the
+    # rest of the demo, which keeps its portable compiler flags.
+    set_source_files_properties(pipeline/dpdk_ring_handoff.cpp PROPERTIES
+        COMPILE_OPTIONS "${DPDK_RING_CFLAGS}")
 endif()
 
 # The demo intentionally exercises both the new three-layer API and the

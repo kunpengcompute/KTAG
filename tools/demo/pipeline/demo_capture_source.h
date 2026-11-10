@@ -49,6 +49,12 @@ struct demo_capture_source {
   virtual bool enter_reader(std::string *) { return true; }
   virtual void leave_reader() {}
   virtual ktag_status next_queue(uint32_t, ktag_packet *) { return KTAG_ERROR_NOT_SUPPORTED; }
+  /* MBUF handoff: no copy, the caller owns the mbuf until it releases it.
+   * queue_id == UINT32_MAX means "drive all queues round-robin". */
+  virtual bool supports_mbuf_handoff() const { return false; }
+  virtual ktag_status next_mbuf(ktag_packet *, void **, uint32_t) {
+    return KTAG_ERROR_NOT_SUPPORTED;
+  }
   virtual void interrupt() = 0;
   virtual uint32_t link_type() const = 0;
   virtual const char *last_error() const = 0;

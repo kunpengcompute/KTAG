@@ -46,6 +46,18 @@ public:
     return ktag_dpdk_capture_next_queue(capture_, queue, packet);
   }
 
+  bool supports_mbuf_handoff() const override {
+    return capture_ != nullptr;
+  }
+
+  ktag_status next_mbuf(ktag_packet *packet, void **mbuf,
+                        uint32_t queue) override {
+    if (queue == UINT32_MAX) {
+      return ktag_dpdk_capture_next_mbuf(capture_, packet, mbuf);
+    }
+    return ktag_dpdk_capture_next_queue_mbuf(capture_, queue, packet, mbuf);
+  }
+
   void interrupt() override {
     if (capture_ != nullptr) {
       ktag_dpdk_capture_interrupt(capture_);
@@ -115,7 +127,9 @@ make_dpdk_capture_config(const ktag_demo_pipeline_config &config,
   capture_config.rx_idle_eof_us = config.dpdk_rx_idle_eof_us;
   capture_config.poll_interval_us = config.dpdk_poll_interval_us;
   capture_config.packet_mode =
-      owned ? KTAG_DPDK_PACKET_OWNED : KTAG_DPDK_PACKET_BORROWED;
+      config.dpdk_ring_handoff
+          ? KTAG_DPDK_PACKET_MBUF
+          : (owned ? KTAG_DPDK_PACKET_OWNED : KTAG_DPDK_PACKET_BORROWED);
   return capture_config;
 }
 
