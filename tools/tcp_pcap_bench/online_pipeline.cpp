@@ -65,7 +65,7 @@ struct OnlineRun {
   ~OnlineRun() { cancel(); join(); }
   void cancel() {
     failed = true;
-    for (auto &channel : channels) channel->stop();
+    for (auto &channel : channels) if (channel) channel->stop();
     if (cancel_input) cancel_input();
     changed.notify_all();
   }
@@ -95,14 +95,22 @@ Writer online_hello(const Config &c, uint64_t schema, uint64_t run, uint32_t lan
   w.u32(KTAG_DEMO_UB_FRAME_VERSION); w.u32(KTAG_LEGACY_V1_VALUE_COUNT);
   return w;
 }
-uint64_t validate_hello(const Message &message, const Config &c, uint64_t schema, uint32_t lane) {
+uint64_t validate_hello(const Message &message, const Config &c, uint64_t schema, uint32_t &lane) {
   expect(message, Type::hello, 0);
   Reader r(message.body);
   require(r.u32() == online_contract && r.u64() == schema && r.u64() == c.rules_hash(),
           "online protocol/schema/feature settings mismatch");
   auto run = r.u64();
-  require(run && r.u32() == lane && r.u32() == c.inference_threads && r.u32() == c.sender_threads,
-          "online channel/thread mapping mismatch");
+  lane = r.u32();
+  auto inference_threads = r.u32();
+  auto sender_threads = r.u32();
+  require(run != 0, "online HELLO has an invalid zero run ID");
+  require(lane < c.inference_threads, "online channel ID out of range: received="+
+          std::to_string(lane)+", channel_count="+std::to_string(c.inference_threads));
+  require(inference_threads == c.inference_threads, "online inference thread count mismatch: frontend="+
+          std::to_string(inference_threads)+", backend="+std::to_string(c.inference_threads));
+  require(sender_threads == c.sender_threads, "online sender thread count mismatch: frontend="+
+          std::to_string(sender_threads)+", backend="+std::to_string(c.sender_threads));
   require(r.u32() == uint32_t(c.level) && r.u32() == c.max_body && r.u32() == c.compression_records &&
           r.u32() == c.inference_records && r.u32() == c.inference_timeout_us &&
           r.u32() == KTAG_DEMO_UB_FRAME_VERSION && r.u32() == KTAG_LEGACY_V1_VALUE_COUNT,
@@ -489,12 +497,19 @@ class OnlineBackend {
     Listener listener(c_);
     std::cout << "Online backend listening " << c_.local_ip << ':' << c_.port
               << " channels=" << c_.inference_threads << std::endl;
+    run_.channels.resize(c_.inference_threads);
     for (uint32_t i = 0; i < c_.inference_threads; ++i) {
-      run_.channels.push_back(std::make_unique<Channel>(listener.accept(c_.timeout_s), c_.timeout_s, c_.max_body, metrics_, false));
-      auto message = run_.channels.back()->receive();
-      auto session = validate_hello(message, c_, metrics_.schema_hash, i);
+      auto channel = std::make_unique<Channel>(listener.accept(c_.timeout_s), c_.timeout_s, c_.max_body, metrics_, false);
+      auto message = channel->receive();
+      uint32_t lane = 0;
+      auto session = validate_hello(message, c_, metrics_.schema_hash, lane);
       if (!i) session_ = session;
       require(session == session_, "connections belong to different frontend runs");
+      require(!run_.channels[lane], "duplicate online channel ID: "+std::to_string(lane));
+      // Accept order is a TCP connection property, not the logical worker ID.
+      // Use the explicit HELLO ID to retain frontend/backend ownership.
+      run_.channels[lane] = std::move(channel);
+      std::printf("TCP backend accepted: accept_index=%u, channel=%u, backend_worker=%u\n", i, lane, lane);
     }
     for (uint32_t i = 0; i < c_.inference_threads; ++i)
       run_.threads.emplace_back([this, i] {
