@@ -144,10 +144,7 @@ void Metrics::write(const Config &c, bool success, const std::string &error) con
   auto field = [&](const char *name, uint64_t value) { json << ",\n  " << json_quote(name) << ": " << value; };
   field("rx_threads", c.online ? c.rx_threads : 1); field("sender_threads", c.sender_threads);
   field("inference_threads", c.inference_threads); field("tcp_connections", c.online ? c.inference_threads : 1);
-  if (c.online) {
-    field("duration_s", c.duration_s); field("receiver_threads", c.receiver_threads);
-    field("inference_queue_capacity_per_worker", c.inference_queue);
-  }
+  if (c.online) field("duration_s", c.duration_s);
 #define COUNTER(name) field(#name, name.load())
   COUNTER(packets); COUNTER(bytes); COUNTER(original_bytes); COUNTER(short_captures);
   COUNTER(unsupported); COUNTER(processed); COUNTER(rejected); COUNTER(extracted);

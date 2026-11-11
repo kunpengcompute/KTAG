@@ -479,12 +479,6 @@ class OnlineFrontend {
 #endif
 
 struct BackendLane {
-  std::unique_ptr<Queue<Record>> input;
-  std::vector<Record> pending_records;
-  size_t pending_offset = 0;
-  bool ended = false;
-  Clock::time_point last_progress = Clock::now();
-  uint64_t queue_wait_started = 0, queue_wait_ns = 0, queue_full_waits = 0;
   std::vector<ktag_prediction_record> results;
   uint64_t records = 0, batches = 0, submitted = 0, filtered = 0, predictions = 0;
 };
@@ -494,10 +488,7 @@ class OnlineBackend {
   OnlineBackend(const Config &c, Metrics &metrics)
       : c_(c), metrics_(metrics), allowed_(allowed_cpus()), schema_(make_schema()), lanes_(c.inference_threads), rules_hash_(c.rules_hash()) {
     check_cpus(c.inference_cpus, allowed_);
-    check_cpus(c.receiver_cpus, allowed_);
     metrics_.schema_hash = ktag_feature_schema_get_hash(schema_.get());
-    for (auto &lane : lanes_) lane.input = std::make_unique<Queue<Record>>(c.inference_queue);
-    run_.cancel_input = [this] { for (auto &lane : lanes_) lane.input->close(); };
   }
   void execute() {
     // Open the result before accepting traffic, so an invalid path fails early.
@@ -518,18 +509,14 @@ class OnlineBackend {
       // Accept order is a TCP connection property, not the logical worker ID.
       // Use the explicit HELLO ID to retain frontend/backend ownership.
       run_.channels[lane] = std::move(channel);
-      std::printf("TCP backend accepted: accept_index=%u, channel=%u, inference_worker=%u\n", i, lane, lane);
+      std::printf("TCP backend accepted: accept_index=%u, channel=%u, backend_worker=%u\n", i, lane, lane);
     }
-    run_.threads.emplace_back([this] {
-      run_.guard("backend receiver", [&] { receive_features(); });
-      ++finished_; run_.changed.notify_all();
-    });
     for (uint32_t i = 0; i < c_.inference_threads; ++i)
       run_.threads.emplace_back([this, i] {
         run_.guard("backend worker="+std::to_string(i), [&] { worker(i); });
         ++finished_; run_.changed.notify_all();
       });
-    while (finished_ != c_.inference_threads+c_.receiver_threads && !run_.failed) {
+    while (finished_ != c_.inference_threads && !run_.failed) {
       if (interrupted) run_.fail("backend interrupted");
       std::unique_lock<std::mutex> lock(run_.mutex);
       run_.changed.wait_for(lock, std::chrono::milliseconds(50));
@@ -560,102 +547,12 @@ class OnlineBackend {
       std::printf("TCP backend drained: worker=%u, records=%llu, batches=%llu, submitted=%llu, predictions=%llu, filtered=%llu\n", i,
                   (unsigned long long)lane.records, (unsigned long long)lane.batches, (unsigned long long)lane.submitted,
                   (unsigned long long)lane.predictions, (unsigned long long)lane.filtered);
-      std::printf("Backend inference queue: worker=%u, peak=%zu, full_waits=%llu, wait_ns=%llu\n", i,
-                  lane.input->peak(), (unsigned long long)lane.queue_full_waits, (unsigned long long)lane.queue_wait_ns);
     }
     result.flush(); require(bool(result), "prediction output write failed: "+c_.result);
     metrics_.output_ns = now_ns()-start;
   }
 
  private:
-  bool enqueue_pending(BackendLane &lane) {
-    while (lane.pending_offset < lane.pending_records.size() && !run_.failed) {
-      if (!lane.input->try_push(lane.pending_records[lane.pending_offset])) {
-        if (!lane.queue_wait_started) { lane.queue_wait_started = now_ns(); ++lane.queue_full_waits; }
-        // Pause the network idle timeout while local inference applies backpressure.
-        lane.last_progress = Clock::now();
-        return false;
-      }
-      ++lane.pending_offset;
-    }
-    if (lane.queue_wait_started) {
-      lane.queue_wait_ns += now_ns()-lane.queue_wait_started; lane.queue_wait_started = 0;
-    }
-    lane.pending_records.clear(); lane.pending_offset = 0;
-    return true;
-  }
-  void decode_features(uint32_t index, const Message &message, Codec &codec) {
-    auto &lane = lanes_[index];
-    const auto frame_size = ktag_demo_ub_feature_frame_size(KTAG_LEGACY_V1_VALUE_COUNT);
-    expect(message, Type::features, session_);
-    require(message.sequence == lane.batches+1 && message.count <= c_.compression_records &&
-            uint64_t(message.count)*frame_size == message.raw_size, "online feature batch sequence/size mismatch");
-    metrics_.mark_first(now_ns());
-    auto start = now_ns(); auto raw = codec.decompress(message, c_.max_body);
-    metrics_.decompress_ns += now_ns()-start;
-    lane.pending_records.reserve(message.count);
-    for (uint32_t i = 0; i < message.count; ++i) {
-      Record record; ktag_demo_ub_frame_info info{}; std::string error; start = now_ns();
-      auto status = ktag_demo_ub_decode_feature_frame(raw.data()+i*frame_size, frame_size, &info, &record, &error);
-      require(status, "feature decode: "+error);
-      require(info.frame_size == frame_size && info.record_count == 1 && info.value_count == KTAG_LEGACY_V1_VALUE_COUNT &&
-              info.flags == 0 && info.contract.frontend_id_hash == 1 && info.contract.epoch == session_ &&
-              info.contract.sequence == lane.records+1 && info.contract.schema_hash == metrics_.schema_hash &&
-              info.contract.ruleset_hash == rules_hash_ && record.source_index == 0, "online feature contract mismatch");
-      metrics_.decode_ns += now_ns()-start;
-      lane.pending_records.push_back(std::move(record)); ++lane.records;
-    }
-    ++lane.batches; metrics_.raw_bytes += raw.size(); metrics_.compressed_bytes += message.body.size();
-  }
-  void receive_features() {
-    bind_worker("decode", 0, c_.receiver_cpus, allowed_);
-    Codec codec(c_.level); auto cpu = thread_cpu_ns();
-    std::vector<pollfd> sockets(lanes_.size());
-    uint32_t ended = 0;
-    for (auto &lane : lanes_) lane.last_progress = Clock::now();
-    while (ended < lanes_.size() && !run_.failed) {
-      bool progressed = false;
-      for (uint32_t index = 0; index < lanes_.size() && !run_.failed; ++index) {
-        auto &lane = lanes_[index];
-        if (lane.ended) continue;
-        if (!enqueue_pending(lane)) continue;
-        Message message; bool received_bytes = false;
-        bool received = run_.channels[index]->receive_available(message, received_bytes);
-        if (received_bytes) { progressed = true; lane.last_progress = Clock::now(); }
-        if (!received) {
-          require(Clock::now()-lane.last_progress < std::chrono::seconds(c_.timeout_s),
-                  "online feature progress timeout: channel="+std::to_string(index));
-          continue;
-        }
-        progressed = true;
-        if (message.type == Type::progress) {
-          expect(message, Type::progress, session_); Reader reader(message.body); reader.finish();
-        } else if (message.type == Type::features) {
-          decode_features(index, message, codec);
-        } else {
-          expect(message, Type::end, session_); Reader reader(message.body);
-          require(reader.u64() == lane.records && reader.u64() == lane.batches, "online END counters mismatch");
-          auto summary = reader.u32();
-          require(summary == (index == 0 ? 1U : 0U), "summary on wrong channel");
-          if (summary) { summary_ = read_source(reader); summary_.name = "DPDK online frontend"; }
-          reader.finish(); lane.ended = true; ++ended;
-          lane.input->close();
-        }
-      }
-      if (!progressed && !run_.failed && ended < lanes_.size()) {
-        for (size_t i = 0; i < lanes_.size(); ++i) {
-          // Full inference queues retry after a bounded sleep. Poll the other
-          // sockets so one stalled worker cannot block every connection.
-          bool can_read = !lanes_[i].ended && lanes_[i].pending_records.empty();
-          sockets[i] = {can_read ? run_.channels[i]->fd() : -1, POLLIN, 0};
-        }
-        auto status = poll(sockets.data(), sockets.size(), 1);
-        require(status >= 0 || errno == EINTR, "backend receiver poll failed");
-      }
-    }
-    metrics_.backend_data_cpu_ns += thread_cpu_ns()-cpu;
-    for (const auto &lane : lanes_) metrics_.queue_wait_ns += lane.queue_wait_ns;
-  }
   void worker(uint32_t index) {
     bind_worker("infer", index, c_.inference_cpus, allowed_);
     ktag_inference_config ic{}; ic.struct_size = sizeof(ic); ic.api_version = KTAG_API_VERSION;
@@ -665,14 +562,13 @@ class OnlineBackend {
     FeatureBatch input(ktag_feature_batch_create(schema_.get(), c_.inference_records), ktag_feature_batch_destroy);
     Predictions output(ktag_prediction_batch_create(c_.inference_records), ktag_prediction_batch_destroy);
     require(bool(input) && bool(output), "cannot allocate inference batches");
-    auto &channel = *run_.channels[index]; auto &lane = lanes_[index];
+    auto &channel = *run_.channels[index]; auto &lane = lanes_[index]; Codec codec(c_.level);
     Writer ready; ready.u32(index); channel.control(Type::ready, session_, ready);
     if (ready_.fetch_add(1) == c_.inference_threads-1) {
       metrics_.initialization_ns = now_ns()-metrics_.started; metrics_.first_read = now_ns();
-      std::cout << "Online backend ready: receivers=" << c_.receiver_threads
-                << ", inference_workers=" << c_.inference_threads << std::endl;
+      std::cout << "Online backend ready: workers=" << c_.inference_threads << std::endl;
     }
-    auto cpu = thread_cpu_ns();
+    auto cpu = thread_cpu_ns(); Clock::time_point batch_started{};
     auto flush = [&] {
       auto count = ktag_feature_batch_get_count(input.get());
       if (!count) return;
@@ -692,18 +588,50 @@ class OnlineBackend {
         lane.results.push_back(p);
       }
       lane.submitted += count; lane.predictions += count_out; lane.filtered += count-count_out;
-      ktag_feature_batch_clear(input.get());
+      ktag_feature_batch_clear(input.get()); batch_started = {};
     };
-    Record record;
-    while (lane.input->pop(record) && !run_.failed) {
-      auto deadline = Clock::now()+std::chrono::microseconds(c_.inference_timeout_us);
-      do {
-        require(ktag_feature_batch_append(input.get(), &record.details.metadata, record.values.data(), uint32_t(record.values.size())) == KTAG_SUCCESS,
-                "cannot append inference input");
-        record = Record{};
-      } while (!run_.failed && ktag_feature_batch_get_count(input.get()) < c_.inference_records &&
-               Clock::now() < deadline && lane.input->pop_until(record, deadline));
-      if (!run_.failed) flush();
+    const auto frame_size = ktag_demo_ub_feature_frame_size(KTAG_LEGACY_V1_VALUE_COUNT);
+    auto last_progress = Clock::now(); bool ended = false;
+    while (!run_.failed && !ended) {
+      if (ktag_feature_batch_get_count(input.get()) && Clock::now()-batch_started >= std::chrono::microseconds(c_.inference_timeout_us)) flush();
+      Message message;
+      if (!channel.receive_for(message, c_.inference_timeout_us)) {
+        require(Clock::now()-last_progress < std::chrono::seconds(c_.timeout_s), "online feature progress timeout");
+        continue;
+      }
+      last_progress = Clock::now();
+      if (message.type == Type::progress) {
+        expect(message, Type::progress, session_); Reader r(message.body); r.finish();
+      } else if (message.type == Type::features) {
+        expect(message, Type::features, session_);
+        require(message.sequence == lane.batches+1 && message.count <= c_.compression_records &&
+                uint64_t(message.count)*frame_size == message.raw_size, "online feature batch sequence/size mismatch");
+        metrics_.mark_first(now_ns());
+        auto start = now_ns(); auto raw = codec.decompress(message, c_.max_body); metrics_.decompress_ns += now_ns()-start;
+        for (uint32_t i = 0; i < message.count; ++i) {
+          Record record; ktag_demo_ub_frame_info info{}; std::string error; start = now_ns();
+          require(ktag_demo_ub_decode_feature_frame(raw.data()+i*frame_size, frame_size, &info, &record, &error),
+                  "feature decode: "+error);
+          require(info.frame_size == frame_size && info.record_count == 1 && info.value_count == KTAG_LEGACY_V1_VALUE_COUNT &&
+                  info.flags == 0 && info.contract.frontend_id_hash == 1 && info.contract.epoch == session_ &&
+                  info.contract.sequence == lane.records+1 && info.contract.schema_hash == metrics_.schema_hash &&
+                  info.contract.ruleset_hash == rules_hash_ && record.source_index == 0, "online feature contract mismatch");
+          metrics_.decode_ns += now_ns()-start;
+          if (!ktag_feature_batch_get_count(input.get())) batch_started = Clock::now();
+          require(ktag_feature_batch_append(input.get(), &record.details.metadata, record.values.data(), uint32_t(record.values.size())) == KTAG_SUCCESS,
+                  "cannot append inference input");
+          ++lane.records;
+          if (ktag_feature_batch_get_count(input.get()) >= c_.inference_records ||
+              Clock::now()-batch_started >= std::chrono::microseconds(c_.inference_timeout_us)) flush();
+        }
+        ++lane.batches; metrics_.raw_bytes += raw.size(); metrics_.compressed_bytes += message.body.size();
+      } else {
+        expect(message, Type::end, session_); Reader r(message.body);
+        require(r.u64() == lane.records && r.u64() == lane.batches, "online END counters mismatch");
+        auto summary = r.u32(); require(summary == (index == 0 ? 1U : 0U), "summary on wrong channel");
+        if (summary) { summary_ = read_source(r); summary_.name = "DPDK online frontend"; }
+        r.finish(); flush(); ended = true;
+      }
     }
     if (run_.failed) return;
     require(lane.records == lane.submitted && lane.submitted == lane.filtered+lane.predictions, "online worker counts mismatch");

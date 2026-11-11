@@ -1,6 +1,6 @@
 # Same file on frontend and backend. Worker counts and affinities are YAML-only.
-# Example CPU layout: frontend 30 RX + 60 feature + 6 compressed TCP senders.
-# Backend one receive/decompress thread + 16 independent inference workers.
+# Example CPU layout: frontend 64 RX + 30 feature + 2 compressed TCP senders.
+# Backend 16 independent TCP receive/decompress/inference workers.
 schema:
   name: ktag_legacy_v1
   version: 1
@@ -11,9 +11,9 @@ capture:
   duration_s: 60
   dpdk:
     device: "0000:a5:00.0"
-    rx_queue_count: 30
-    rx_threads: 30
-    rx_worker_cpus: "0-29"
+    rx_queue_count: 64
+    rx_threads: 64
+    rx_worker_cpus: "0-63"
     rx_queue_depth: 1024
     mbuf_pool_size: 0
     burst_size: 64
@@ -22,8 +22,8 @@ capture:
     # Merge in the NIC driver/plugin/IOVA/hugepage arguments verified on site.
     eal_args: "--lcores=0@(0-95) -a 0000:a5:00.0"
 feature:
-  threads: 60
-  worker_cpus: "30-89"
+  threads: 30
+  worker_cpus: "64-93"
   packet_queue_capacity: 65536
   feature_queue_capacity: 4096
   flow_hash_seed: 2026
@@ -31,9 +31,7 @@ feature:
   expire_interval_ms: 1000
 inference:
   threads: 16
-  worker_cpus: "1-16"
-  # Decoded records buffered per inference worker, independent of frontend queues.
-  queue_capacity: 4096
+  worker_cpus: "0-15"
   batch_size: 256
   batch_timeout_us: 1000
   intra_op_threads: 1
@@ -42,11 +40,8 @@ inference:
   prediction_limit: 10000000
 transport:
   port: 19090
-  sender_threads: 6
-  sender_worker_cpus: "90-95"
-  # One thread multiplexes every TCP connection and performs Zstd decompression.
-  receiver_threads: 1
-  receiver_worker_cpus: "0"
+  sender_threads: 2
+  sender_worker_cpus: "94-95"
   batch_records: 256
   batch_timeout_us: 1000
   max_uncompressed_bytes: 4194304

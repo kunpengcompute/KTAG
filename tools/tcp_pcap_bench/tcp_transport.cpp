@@ -130,33 +130,6 @@ Message Channel::receive() {
 bool Channel::receive_for(Message &m, uint32_t timeout_us) {
   return read_message(m, Clock::now()+std::chrono::microseconds(timeout_us), true);
 }
-size_t Channel::read_available(uint8_t *data, size_t size) {
-  auto count = recv(fd_, data, size, MSG_DONTWAIT);
-  if (count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) return 0;
-  syscheck(count >= 0, "recv"); require(count != 0, "TCP peer closed");
-  metrics_.socket_rx += uint64_t(count);
-  return size_t(count);
-}
-bool Channel::receive_available(Message &message, bool &progressed) {
-  progressed = false;
-  if (!header_decoded_) {
-    if (incoming_header_.empty()) incoming_header_.resize(header_size);
-    auto count = read_available(incoming_header_.data()+header_offset_, header_size-header_offset_);
-    progressed = count != 0; header_offset_ += count;
-    if (header_offset_ != header_size) return false;
-    uint32_t body_size = 0;
-    incoming_ = decode_header(incoming_header_, max_raw_, body_size);
-    incoming_.body.resize(body_size); header_decoded_ = true;
-  }
-  if (body_offset_ < incoming_.body.size()) {
-    auto count = read_available(incoming_.body.data()+body_offset_, incoming_.body.size()-body_offset_);
-    progressed |= count != 0; body_offset_ += count;
-    if (body_offset_ != incoming_.body.size()) return false;
-  }
-  message = std::move(incoming_);
-  header_offset_ = 0; body_offset_ = 0; header_decoded_ = false;
-  return true;
-}
 void Channel::start_send(const Message &m) {
   require(!pending(), "TCP connection already has a pending message");
   pending_bytes_ = encode_header(m);

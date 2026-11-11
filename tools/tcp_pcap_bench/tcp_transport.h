@@ -13,9 +13,6 @@ class Channel {
   // A timeout here means no header byte arrived. A partial header/body always
   // has a deadline and must complete or fail; no bytes are silently discarded.
   bool receive_for(Message &, uint32_t timeout_us);
-  // One receiver can multiplex sockets without waiting for a partial frame.
-  // progressed reports header/body bytes read even when the frame is incomplete.
-  bool receive_available(Message &, bool &progressed);
   void control(Type, uint64_t run, const Writer &body = Writer{});
   void stop();
   // Online senders own several sockets. Retain at most one bounded message
@@ -27,7 +24,6 @@ class Channel {
  private:
   bool read_message(Message &, Clock::time_point idle_deadline, bool allow_idle);
   void transfer(uint8_t *, size_t, bool write, Clock::time_point deadline);
-  size_t read_available(uint8_t *, size_t);
   int fd_;
   uint32_t timeout_s_, max_raw_;
   Metrics &metrics_;
@@ -36,10 +32,6 @@ class Channel {
   Bytes pending_bytes_;
   size_t pending_offset_ = 0;
   Clock::time_point send_deadline_{};
-  Bytes incoming_header_;
-  Message incoming_;
-  size_t header_offset_ = 0, body_offset_ = 0;
-  bool header_decoded_ = false;
 };
 class Listener {
  public:

@@ -39,22 +39,6 @@ int main() {
     rejects([&] { append({"--config", path.string()}); });
     { std::ofstream f(path); f << "compression:\n  target_ratio: .nan\n"; }
     rejects([&] { append({"--config", path.string()}); });
-    {
-      std::ofstream f(path);
-      f << "capture:\n  backend: dpdk\n  dpdk:\n    rx_threads: 30\n    rx_queue_count: 30\n"
-           "    rx_worker_cpus: 0-29\nfeature:\n  threads: 60\n  worker_cpus: 30-89\n"
-           "  feature_queue_capacity: 7\ninference:\n  threads: 16\n  worker_cpus: 1-16\n"
-           "  queue_capacity: 3\ntransport:\n  sender_threads: 6\n  sender_worker_cpus: 90-95\n"
-           "  receiver_threads: 1\n  receiver_worker_cpus: '0'\n";
-    }
-    auto online = parse({"--role", "frontend", "--local-ip", "127.0.0.1", "--connect", "127.0.0.1:19090",
-                         "--config", path.string(), "-i", "0000:a5:00.0"});
-    require(online.receiver_threads == 1 && online.receiver_cpus == std::vector<uint32_t>{0} &&
-            online.inference_threads == 16 && online.inference_queue == 3 && online.feature_queue == 7,
-            "receiver/inference configuration or independent queue capacities were lost");
-    { std::ofstream f(path); f << "capture:\n  backend: dpdk\ntransport:\n  receiver_threads: 2\n"; }
-    rejects([&] { parse({"--role", "backend", "--bind-ip", "127.0.0.1", "--model", "model", "--result", "out.csv",
-                        "--config", path.string()}); });
     std::filesystem::remove(path);
     std::cout << "PASS: role separation, UB YAML, owned pool, normalized rules, replay isolation and output protection\n"; return 0;
   } catch (const std::exception &e) { std::filesystem::remove(path); std::cerr << e.what() << '\n'; return 1; }
