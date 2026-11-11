@@ -57,8 +57,9 @@ struct Config {
   std::string device, eal_args;
   uint32_t rx_threads = 1, rx_queues = 1, rx_depth = 1024, mbuf_pool = 0, burst = 64;
   uint32_t rx_poll_us = 0, duration_s = 60, sender_threads = 1, inference_threads = 1;
+  uint32_t receiver_threads = 1, inference_queue = 4096;
   uint64_t rx_idle_eof_us = 0;
-  std::vector<uint32_t> rx_cpus, feature_cpus, sender_cpus, inference_cpus;
+  std::vector<uint32_t> rx_cpus, feature_cpus, sender_cpus, receiver_cpus, inference_cpus;
   uint64_t rules_hash() const;
 };
 Config parse_config(int argc, char **argv);
@@ -112,6 +113,12 @@ template<class T> class Queue {
   }
   bool try_pop(T &value) {
     std::lock_guard<std::mutex> lock(mutex_); return take(value);
+  }
+  bool try_push(T &value) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (closed_ || items_.size() >= capacity_) return false;
+    items_.push_back(std::move(value)); peak_ = std::max(peak_, items_.size());
+    available_.notify_one(); return true;
   }
   size_t peak() { std::lock_guard<std::mutex> lock(mutex_); return peak_; }
   uint64_t full_waits() { std::lock_guard<std::mutex> lock(mutex_); return full_waits_; }

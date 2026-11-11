@@ -58,6 +58,8 @@ Config parse_config(int argc, char **argv) {
   Config c;
   for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--config") {
     require(i+1 < argc, "--config needs a path"); c.config_path = argv[++i];
+  } else if (std::string(argv[i]) == "-i") {
+    require(i+1 < argc, "-i needs a device"); c.online = true; ++i;
   }
   if (!c.config_path.empty()) {
     auto root = YAML::LoadFile(c.config_path); auto n = root["pipeline"] ? root["pipeline"] : root;
@@ -73,7 +75,7 @@ Config parse_config(int argc, char **argv) {
       if (s[key]) require(s[key].size() == 0, "exact Legacy V1 schema required");
     std::string capture_backend = "pcap"; read(cap, "backend", capture_backend);
     require(capture_backend == "pcap" || capture_backend == "dpdk", "capture.backend must be pcap or dpdk");
-    c.online = capture_backend == "dpdk";
+    c.online = c.online || capture_backend == "dpdk";
     read(cap, "packet_pool_size", c.packet_pool);
     auto dpdk = section(cap, "dpdk");
     read(dpdk, "device", c.device); read(dpdk, "eal_args", c.eal_args);
@@ -92,7 +94,9 @@ Config parse_config(int argc, char **argv) {
     std::string lifecycle = "legacy"; read(f, "lifecycle_mode", lifecycle);
     require(lifecycle == "legacy" || lifecycle == "modern", "invalid lifecycle mode"); c.modern = lifecycle == "modern";
     read(inf, "batch_size", c.inference_records); read(inf, "batch_timeout_us", c.inference_timeout_us);
-    read(inf, "queue_capacity", c.feature_queue); read(inf, "prediction_limit", c.prediction_limit);
+    if (c.online) read(inf, "queue_capacity", c.inference_queue);
+    else read(inf, "queue_capacity", c.feature_queue);
+    read(inf, "prediction_limit", c.prediction_limit);
     read(inf, "threads", c.inference_threads);
     for (auto key : {"intra_op_threads", "inter_op_threads"})
       if (inf[key]) require(inf[key].as<unsigned>() == 1, "inference threads must be 1");
@@ -102,6 +106,8 @@ Config parse_config(int argc, char **argv) {
     read(t, "bind_ip", c.local_ip); read(t, "port", c.port);
     read(t, "sender_threads", c.sender_threads);
     c.sender_cpus = cpu_list(t, "sender_worker_cpus");
+    read(t, "receiver_threads", c.receiver_threads);
+    c.receiver_cpus = cpu_list(t, "receiver_worker_cpus");
     read(t, "batch_records", c.compression_records); read(t, "batch_timeout_us", c.compression_timeout_us);
     read(t, "max_uncompressed_bytes", c.max_body); read(t, "progress_timeout_s", c.timeout_s);
     read(z, "level", c.level); read(z, "target_ratio", c.target_ratio);
@@ -148,12 +154,15 @@ Config parse_config(int argc, char **argv) {
             c.sender_threads <= c.inference_threads && c.feature_queue >= c.sender_threads,
             "online worker counts must satisfy 1 <= senders <= inference threads <= 128");
     require(c.rx_depth && c.burst && c.burst <= 64, "invalid RX depth or burst size");
+    require(c.receiver_threads == 1 && c.inference_queue > 0,
+            "online backend requires receiver_threads=1 and positive inference.queue_capacity");
     require(c.audit.empty(), "online multi-channel feature audit is unsupported");
     auto check = [](const std::vector<uint32_t> &cpus, uint32_t count) {
       require(cpus.empty() || cpus.size() == count, "worker CPU count must equal thread count");
     };
     check(c.rx_cpus, c.rx_threads); check(c.feature_cpus, c.feature_threads);
     check(c.sender_cpus, c.sender_threads); check(c.inference_cpus, c.inference_threads);
+    check(c.receiver_cpus, c.receiver_threads);
     std::vector<uint32_t> front_cpus = c.rx_cpus;
     front_cpus.insert(front_cpus.end(), c.feature_cpus.begin(), c.feature_cpus.end());
     front_cpus.insert(front_cpus.end(), c.sender_cpus.begin(), c.sender_cpus.end());
