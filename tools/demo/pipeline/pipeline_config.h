@@ -76,6 +76,9 @@ struct ktag_demo_pipeline_config {
   std::string dpdk_eal_args;
   uint32_t dpdk_rx_queue_count = 1U;
   uint32_t dpdk_rx_threads = 1U;
+  /* Capture -> Feature handoff: queue keeps the mutex/condvar path,
+   * ring uses an rte_ring of mbuf pointers (no copy). */
+  bool dpdk_ring_handoff = false;
   std::vector<uint32_t> dpdk_rx_worker_cpus;
   // Runtime only: captured before the first EAL init narrows the main thread.
   std::vector<uint32_t> initial_allowed_cpus;

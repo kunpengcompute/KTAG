@@ -35,7 +35,11 @@ bool no_reta = false, missing_queue = false, registration_fails = false;
 thread_local unsigned mock_lcore = LCORE_ID_ANY;
 thread_local std::string dpdk_error;
 thread_local void *registered_capture = nullptr;
+thread_local bool worker_thread_registered = false;
+int rte_errno = 0;
 uint64_t ktag_dpdk_now_us_internal() { return clock_us.fetch_add(1); }
+const char *rte_strerror(int) { return "mock error"; }
+void rte_mempool_cache_flush(rte_mempool *, rte_mempool *) {}
 unsigned rte_lcore_id() { return mock_lcore; }
 int rte_thread_register() {
   if (registration_fails) { return -1; }
@@ -70,7 +74,7 @@ uint16_t rte_eth_rx_burst(uint16_t, uint16_t q, rte_mbuf **buffers, uint16_t cap
   --active;
   return count;
 }
-uint32_t rte_pktmbuf_pkt_len(rte_mbuf *m) { return static_cast<uint32_t>(m->bytes.size()); }
+uint32_t rte_pktmbuf_pkt_len(const rte_mbuf *m) { return static_cast<uint32_t>(m->bytes.size()); }
 void rte_pktmbuf_free(rte_mbuf *m) { delete m; ++freed; }
 #define rte_pktmbuf_mtod(m, type) reinterpret_cast<type>((m)->bytes.data())
 struct ktag_packet_buffer { std::vector<uint8_t> bytes; };

@@ -459,6 +459,20 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
     return false;
   }
   const bool online = pipeline.capture_backend == ktag_demo_capture_backend::dpdk;
+  /*
+   * The handoff ring sits on the Capture -> Feature path, which only the
+   * Frontend runs. A Backend node receives Feature frames over the UB ring and
+   * never captures, so a YAML shared by both roles may keep
+   * capture.dpdk.handoff: ring for the Frontend; it is ignored here instead of
+   * failing Backend startup.
+   */
+  if (pipeline.dpdk_ring_handoff && !online &&
+      config.role == ktag_demo_distributed_role::frontend) {
+    set_error(error,
+              "pipeline.capture.dpdk.handoff: ring requires "
+              "pipeline.capture.backend: dpdk");
+    return false;
+  }
   const bool parallel = config.sender_threads > 1U || (online && pipeline.dpdk_rx_threads > 1U);
   std::unordered_set<uint32_t> frontend_cpus;
   auto check_cpus = [&](const std::vector<uint32_t> &cpus, size_t count,
@@ -748,6 +762,17 @@ bool parse_enabled_config(const YAML::Node &pipeline,
       }
       if (has_value(dpdk["eal_args"])) {
         config->dpdk_eal_args = dpdk["eal_args"].as<std::string>();
+      }
+      const YAML::Node handoff = dpdk["handoff"];
+      if (has_value(handoff)) {
+        const std::string value = handoff.as<std::string>();
+        if (value == "ring") {
+          config->dpdk_ring_handoff = true;
+        } else if (value != "queue") {
+          set_error(error,
+                    "pipeline.capture.dpdk.handoff must be queue or ring");
+          return false;
+        }
       }
     }
   } catch (const YAML::Exception &exception) {

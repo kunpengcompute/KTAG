@@ -19,9 +19,58 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #endif
 #include "pipeline_worker.h"
 
+#ifdef KTAG_DEMO_HAVE_DPDK
+#include "dpdk_ring_handoff.h"
+#endif
+
 #include "ktag_capture.h"
 #include "ktag_feature.h"
 #include "ktag_inference.h"
+
+#ifdef KTAG_DEMO_HAVE_DPDK
+/* Releases the handed-off mbuf on every exit path of a Feature worker loop. */
+class demo_ring_item_guard {
+public:
+  explicit demo_ring_item_guard(demo_ring_item *item) : item_(item) {}
+  ~demo_ring_item_guard() {
+    if (item_ != nullptr && item_->mbuf != nullptr) {
+      ktag_dpdk_mbuf_release(item_->mbuf);
+      item_->mbuf = nullptr;
+    }
+  }
+  demo_ring_item_guard(const demo_ring_item_guard &) = delete;
+  demo_ring_item_guard &operator=(const demo_ring_item_guard &) = delete;
+
+private:
+  demo_ring_item *item_;
+};
+#endif
+
+/*
+ * Worker threads that touch mbufs must be registered with the capture backend
+ * so DPDK uses the mempool's per-lcore cache instead of the shared ring. The
+ * guard unregisters on every exit path, including exceptions.
+ */
+class worker_thread_scope {
+public:
+  explicit worker_thread_scope(demo_capture_source *source) : source_(source) {}
+  ~worker_thread_scope() {
+    if (active_ && source_ != nullptr) {
+      source_->worker_thread_leave();
+    }
+  }
+  worker_thread_scope(const worker_thread_scope &) = delete;
+  worker_thread_scope &operator=(const worker_thread_scope &) = delete;
+
+  bool enter(std::string *error) {
+    active_ = source_ != nullptr && source_->worker_thread_enter(error);
+    return active_;
+  }
+
+private:
+  demo_capture_source *source_;
+  bool active_ = false;
+};
 
 #include <arpa/inet.h>
 #include <signal.h>
@@ -185,6 +234,7 @@ struct capture_statistics {
   uint64_t bytes = 0U;
   uint64_t unsupported = 0U;
   uint64_t pool_waits = 0U;
+  uint64_t ring_drops = 0U;
   uint64_t read_nanoseconds = 0U;
 };
 
@@ -1026,8 +1076,9 @@ public:
       return false;
     }
     std::string capture_error;
-    capture_ =
-        create_demo_capture_source(config_, source, live, true, &capture_error);
+    const bool ring_mode = config_.dpdk_ring_handoff;
+    capture_ = create_demo_capture_source(
+        config_, source, live, !ring_mode, &capture_error);
     domain_store_ = create_domain_store();
     if (!capture_ || !domain_store_ || !create_contexts()) {
       *error =
@@ -1040,6 +1091,50 @@ public:
     }
 
     if (!capture_->prepare_readers(rx_workers_, error)) { return false; }
+#ifdef KTAG_DEMO_HAVE_DPDK
+    if (ring_mode) {
+      if (!capture_->supports_mbuf_handoff()) {
+        *error = "capture backend does not support ring handoff";
+        return false;
+      }
+      /*
+       * One SPSC ring per (RX worker, Feature worker) pair. A flow is pinned
+       * to one RX queue by RSS, so a Feature worker sees each flow from one
+       * producer only and packet order within a flow is preserved.
+       * The configured capacity is split across the producer shards so the
+       * total handoff buffering does not grow with the RX worker count.
+       */
+      const uint32_t ring_producers = rx_workers_;
+      const uint32_t ring_capacity =
+          std::max(2U, config_.packet_queue_capacity / ring_producers);
+      ring_handoffs_.resize(config_.feature_threads);
+      for (uint32_t worker = 0U; worker < config_.feature_threads; ++worker) {
+        ring_handoffs_[worker].reserve(ring_producers);
+        for (uint32_t producer = 0U; producer < ring_producers; ++producer) {
+          char name[40] = {};
+          std::snprintf(name, sizeof(name), "ktag_h2f_%u_%u_%u", source_index_,
+                        worker, producer);
+          dpdk_ring_handoff *ring = dpdk_ring_handoff::create(
+              name, ring_capacity, -1, true);
+          if (ring == nullptr) {
+            *error = "failed to create the DPDK handoff ring";
+            return false;
+          }
+          ring_handoffs_[worker].emplace_back(ring);
+        }
+      }
+    }
+#else
+    if (ring_mode) {
+      *error = "ring handoff requires a DPDK-enabled build";
+      return false;
+    }
+#endif
+    std::printf("capture: backend=dpdk device=%s rx_queues=%u rx_threads=%u "
+                "handoff=%s feature_threads=%u\n",
+                source, config_.dpdk_rx_queue_count, rx_workers_,
+                ring_mode ? "ring(mbuf, no copy)" : "queue(copy)",
+                config_.feature_threads);
     const auto execution_start = std::chrono::steady_clock::now();
     try {
       const uint32_t output_workers = config_.ub.enabled && config_.feature_only
@@ -1084,6 +1179,9 @@ public:
     }
     start_cv_.notify_all();
     for (auto &thread : capture_threads_) { if (thread.joinable()) { thread.join(); } }
+#ifdef KTAG_DEMO_HAVE_DPDK
+    rings_closed_.store(true, std::memory_order_release);
+#endif
     close_packet_queues();
     for (auto &thread : feature_threads_) {
       if (thread.joinable()) {
@@ -1174,11 +1272,24 @@ private:
     }
   }
 
+  bool ring_handoff() const {
+#ifdef KTAG_DEMO_HAVE_DPDK
+    return !ring_handoffs_.empty();
+#else
+    return false;
+#endif
+  }
+
   void capture_worker(uint32_t worker_index) {
     auto &stats = capture_stats_[worker_index];
     std::string worker_error;
     if (config_.ub.enabled && !ktag_demo_start_worker("rx", worker_index, config_.dpdk_rx_worker_cpus,
         config_.initial_allowed_cpus, &worker_error)) { fail(worker_error); return; }
+    worker_thread_scope thread_scope(capture_.get());
+    if (!thread_scope.enter(&worker_error)) {
+      fail("RX worker=" + std::to_string(worker_index) + ": " + worker_error);
+      return;
+    }
     if (!capture_->enter_reader(&worker_error)) { fail("RX worker=" + std::to_string(worker_index) + ": " + worker_error); return; }
     if (!await_start()) { return; }
     ktag_packet packet{};
@@ -1186,7 +1297,15 @@ private:
     while (!cancelled() &&
            pipeline_interrupted == 0) {
       const auto read_start = std::chrono::steady_clock::now();
-      const ktag_status status = (rx_workers_ > 1U ? capture_->next_queue(worker_index, &packet) : capture_->next(&packet));
+      const bool use_ring = ring_handoff();
+      void *ring_mbuf = nullptr;
+      const ktag_status status =
+          use_ring
+              ? capture_->next_mbuf(&packet, &ring_mbuf,
+                                    rx_workers_ > 1U ? worker_index
+                                                     : UINT32_MAX)
+              : (rx_workers_ > 1U ? capture_->next_queue(worker_index, &packet)
+                                  : capture_->next(&packet));
       stats.read_nanoseconds += elapsed_nanoseconds(read_start);
       if (status == KTAG_STATUS_TIMEOUT) {
         continue;
@@ -1218,17 +1337,54 @@ private:
       const ktag_status key_status = ktag_packet_get_flow_key(&packet, &key);
       if (key_status != KTAG_SUCCESS) {
         ++stats.unsupported;
-        ktag_packet_release(&packet);
+#ifdef KTAG_DEMO_HAVE_DPDK
+        if (use_ring) { ktag_dpdk_mbuf_release(ring_mbuf); }
+        else
+#endif
+        { ktag_packet_release(&packet); }
         continue;
       }
       const uint32_t worker = ktag_flow_select_worker(
           &key, config_.feature_threads, config_.flow_hash_seed);
       if (worker == KTAG_WORKER_INDEX_INVALID ||
           worker >= packet_queues_.size()) {
-        ktag_packet_release(&packet);
+#ifdef KTAG_DEMO_HAVE_DPDK
+        if (use_ring) { ktag_dpdk_mbuf_release(ring_mbuf); }
+        else
+#endif
+        { ktag_packet_release(&packet); }
         fail("dispatcher returned an invalid Feature worker");
         break;
       }
+
+#ifdef KTAG_DEMO_HAVE_DPDK
+      if (use_ring) {
+        demo_ring_item item{};
+        item.mbuf = ring_mbuf;
+        item.packet = packet;
+        dpdk_ring_handoff *const ring =
+            ring_handoffs_[worker][worker_index].get();
+        uint32_t spins = 0U;
+        bool queued = false;
+        while (!(queued = ring->enqueue(item))) {
+          if (cancelled() || pipeline_interrupted != 0) { break; }
+          if (config_.backpressure == ktag_demo_backpressure_policy::block) {
+            if (++spins >= 4096U) { std::this_thread::yield(); spins = 0U; }
+            continue;
+          }
+          break;
+        }
+        if (!queued) {
+          ktag_dpdk_mbuf_release(ring_mbuf);
+          ++stats.ring_drops;
+          if (config_.backpressure == ktag_demo_backpressure_policy::fail) {
+            fail("handoff ring reached capacity with fail policy");
+            break;
+          }
+        }
+        continue;
+      }
+#endif
 
       owned_packet item(&packet);
       const auto result =
@@ -1282,6 +1438,12 @@ private:
         config_.initial_allowed_cpus, &worker_error)) {
       fail(worker_error); finish_feature_worker(worker_index, start); return;
     }
+    worker_thread_scope thread_scope(capture_.get());
+    if (!thread_scope.enter(&worker_error)) {
+      fail("Feature worker=" + std::to_string(worker_index) + ": " + worker_error);
+      finish_feature_worker(worker_index, start);
+      return;
+    }
     feature_batch_ptr output(ktag_feature_batch_create(schema_, 64U));
     if (!output) {
       fail("failed to create Feature worker output batch");
@@ -1292,19 +1454,60 @@ private:
     if (!await_start()) { finish_feature_worker(worker_index, start); return; }
     uint64_t last_expire_us = 0U;
     owned_packet packet;
-    while (packet_queues_[worker_index]->pop(&packet)) {
+    const bool use_ring = ring_handoff();
+#ifdef KTAG_DEMO_HAVE_DPDK
+    /* This Feature worker owns one SPSC ring per RX producer. */
+    const std::vector<std::unique_ptr<dpdk_ring_handoff>> *const rings =
+        use_ring ? &ring_handoffs_[worker_index] : nullptr;
+    uint32_t ring_cursor = 0U;
+#endif
+    while (true) {
+#ifdef KTAG_DEMO_HAVE_DPDK
+      demo_ring_item ring_item{};
+#endif
+      if (!use_ring) {
+        if (!packet_queues_[worker_index]->pop(&packet)) {
+          break;
+        }
+      }
+#ifdef KTAG_DEMO_HAVE_DPDK
+      else {
+        bool dequeued = false;
+        const uint32_t ring_count = static_cast<uint32_t>(rings->size());
+        for (uint32_t offset = 0U; offset < ring_count; ++offset) {
+          const uint32_t slot = (ring_cursor + offset) % ring_count;
+          if ((*rings)[slot]->dequeue(&ring_item)) {
+            /* Rotate so one busy producer cannot starve the others. */
+            ring_cursor = (slot + 1U) % ring_count;
+            dequeued = true;
+            break;
+          }
+        }
+        if (!dequeued) {
+          if (rings_closed_.load(std::memory_order_acquire)) {
+            break;
+          }
+          continue; /* hot spin: no futex, no wakeup */
+        }
+      }
+      demo_ring_item_guard ring_guard(use_ring ? &ring_item : nullptr);
+      const ktag_packet *const current =
+          use_ring ? &ring_item.packet : packet.get();
+#else
+      const ktag_packet *const current = packet.get();
+#endif
       if (cancelled()) {
         break;
       }
       ++feature_stats_[worker_index].packets;
-      const uint64_t now_us = timestamp_us(packet.get()->timestamp);
+      const uint64_t now_us = timestamp_us(current->timestamp);
       const auto process_start = std::chrono::steady_clock::now();
       if (feature_stats_[worker_index].first_process_at ==
           std::chrono::steady_clock::time_point{}) {
         feature_stats_[worker_index].first_process_at = process_start;
       }
       const ktag_status status = ktag_feature_process_packet(
-          feature_contexts_[worker_index].get(), packet.get(), output.get());
+          feature_contexts_[worker_index].get(), current, output.get());
       feature_stats_[worker_index].work_nanoseconds +=
           elapsed_nanoseconds(process_start);
       packet = owned_packet();
@@ -1583,6 +1786,12 @@ private:
   std::vector<feature_worker_statistics> feature_stats_;
   std::vector<inference_worker_statistics> inference_stats_;
   std::vector<std::thread> capture_threads_;
+#ifdef KTAG_DEMO_HAVE_DPDK
+  /* [Feature worker][RX producer] SPSC rings; empty when handoff is the
+   * mutex queue. */
+  std::vector<std::vector<std::unique_ptr<dpdk_ring_handoff>>> ring_handoffs_;
+  std::atomic<bool> rings_closed_{false};
+#endif
   std::vector<std::thread> feature_threads_;
   std::vector<std::thread> inference_threads_;
   std::mutex prediction_mutex_;
