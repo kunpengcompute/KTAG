@@ -5,9 +5,6 @@ on: # 自动触发工作流运行的触发条件
   pull_request_target: # MR 事件触发默认分支配置文件
     types: ["open", "reopen", "update"]
     branches: [ "*" ]
-  #pull_request: # 阶段一验证用，基分支暂无工作流文件时临时启用（fork 跨仓 PR 拿不到 Secret，不可用于上游 MR 验证）
-  #  types: ["open", "reopen", "update"]
-  #  branches: [ "*" ]
   pr_comment: # PR 评论触发
     types: [ created ]
     keyword: '^(?:\/)?compile*'
@@ -26,7 +23,7 @@ concurrency: # 并发控制（GitCode 原生语法）
 
 permissions:
   repository: read
-  id-token: write
+  pr: read
 
 env:
   pr_id: ${{ atomgit.event.pull_request.number }}
@@ -78,7 +75,6 @@ stages:
               base: ${{ env.branch }}
               repo: ${{ atomgit.repository }}
               number: ${{ env.pr_id }}
-              token: ${{ secrets.GIT_TOKEN }}
               list-files: json
               predicate-quantifier: every
               filters: |
@@ -106,26 +102,19 @@ stages:
       sca-pr:
         name: sca-pr
         runs-on: ["ubuntu-latest", "x64", "slim"]
+        permissions:
+          id-token: write     # 仅本作业需要 OIDC 令牌
         steps:
-          - name: Checkout
-            uses: checkout
-            with:
-              # fork PR 预合并引用会被安全拦截，需显式放行
-              allow-unsafe-pr-checkout: true
-              ref: refs/merge-requests/${{ env.pr_id }}/merge
           - name: SCA scan
             uses: openlibing/sca-action/sca-pr-action@v1.0.0
             with:
               project-name: "boostkit"
-      malicious-scan:
-        name: malicious-scan
-        runs-on: ["ubuntu-latest", "x64", "slim"]
+      antipoison-scan:
+        name: antipoison-scan
+        runs-on: ["ubuntu-latest", "x64", "slim" ]
+        permissions:
+          id-token: write     # 仅本作业需要 OIDC 令牌
         steps:
-          - name: Checkout
-            uses: checkout
-            with:
-              allow-unsafe-pr-checkout: true
-              ref: refs/merge-requests/${{ env.pr_id }}/merge
           - name: Malicious code scan
             uses: openlibing/malicious-code-scan-action/malicious-code-pr-scan-action@v1.0.0
             with:
@@ -143,22 +132,29 @@ stages:
             uses: setup-python
             with:
               python-version: "3.14"
-          # .pre-commit-config.yaml 含 golangci-lint-full hook，hosted runner 需补 Go 环境
+          # .pre-commit-config.yaml 含 golangci-lint / gitleaks hook，hosted runner 需补 Go 环境
           - name: Setup Go
             uses: setup-go
             with:
-              go-version: '1.21'
-          # pre-commit action 内部会执行 git fetch，需先配置凭证（裸 fetch 无凭证会认证失败）
-          - name: Setup Git credentials
+              go-version: '1.26.1'
+          # gitleaks hook 运行期依赖本机可执行文件，需预装二进制
+          - name: install gitleaks
             run: |
-              git config --global credential.helper store
-              echo "https://oauth2:${{ secrets.PR_LABEL_TOKEN }}@gitcode.com" > "${HOME}/.git-credentials"
+              export GO111MODULE=on
+              export GOPROXY=https://mirrors.huaweicloud.com/repository/goproxy/
+              export GONOSUMDB=*
+              cd ${ATOMGIT_WORKSPACE}
+              wget --no-host-directories -c --no-check-certificate https://pytorch-package.obs.cn-north-4.myhuaweicloud.com/pta-codecheck/gitleaks
+              chmod +x gitleaks
+              cd -
           - name: Run pre-commit
-            uses: openlibing/pre-commit-action@v1.0.0
+            uses: openlibing/pre-commit-action@v1.0.1
+            with:
+              gc_token: ${{ secrets.PR_LABEL_TOKEN }}
       build:
         name: build
         if: ${{ jobs.Detect_file_changes.outputs.need_build == 'yes' }}
-        needs: [ Detect_file_changes, sca-pr, malicious-scan, pre-commit ]
+        needs: [ Detect_file_changes, sca-pr, antipoison-scan, pre-commit ]
         uses: .gitcode/workflows/build_job.yml
         with:
           runs_on_flavor: "flavor=small"
@@ -169,7 +165,7 @@ stages:
       ut:
         name: ut
         if: ${{ jobs.Detect_file_changes.outputs.need_build == 'yes' }}
-        needs: [ Detect_file_changes, sca-pr, malicious-scan, pre-commit ]
+        needs: [ Detect_file_changes, sca-pr, antipoison-scan, pre-commit ]
         uses: .gitcode/workflows/ut_job.yml
         with:
           runs_on_flavor: "flavor=small"

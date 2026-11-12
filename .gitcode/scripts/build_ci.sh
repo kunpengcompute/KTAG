@@ -13,8 +13,8 @@ unzip yaml-cpp-0.8.0.zip
 cd yaml-cpp-0.8.0
 mkdir -p build
 cd build
-cmake .. -DYAML_BUILD-SHARED_LIBS=ON
-make -j32
+cmake .. -DYAML_BUILD_SHARED_LIBS=ON
+make -j$(nproc)
 make install
 
 
