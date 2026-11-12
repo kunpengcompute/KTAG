@@ -18,7 +18,10 @@ int main(int argc, char **argv) {
     std::cout << "role=" << config.role << " feature_threads=" << config.feature_threads
       << " zstd_level=" << config.level << " compression_records=" << config.compression_records
       << " inference_records=" << config.inference_records << std::endl;
-    if (config.role == "frontend") tcp_bench::run_frontend(config, metrics);
+    if (config.online) {
+      if (config.role == "frontend") tcp_bench::run_online_frontend(config, metrics);
+      else tcp_bench::run_online_backend(config, metrics);
+    } else if (config.role == "frontend") tcp_bench::run_frontend(config, metrics);
     else tcp_bench::run_backend(config, metrics);
     metrics.write(config, true, ""); return 0;
   } catch (const std::exception &e) {

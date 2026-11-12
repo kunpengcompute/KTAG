@@ -77,6 +77,7 @@ pipeline:
     expire_interval_ms: 1000
 
   inference:
+    # 单机默认保持 1；启用下面 3:1 UB 拓扑时需改为 3（前端数 × 每前端队列数）。
     threads: 1
     batch_size: 256
     batch_timeout_us: 1000
@@ -101,7 +102,8 @@ pipeline:
       queues_per_provider: 1
       queue_depth: 1024
       data_element_size: 4096
-      credits_per_provider: 256
+      credits_per_queue: 64
+      backend_worker_cpus: "0-2"
       poll_us: 50
       # 可选：3:1 PCAP 验收时，为每个 Frontend 的 -p 参数给出全局类别标签。
       # 一旦配置，必须覆盖全部 provider_nodes，且各数组长度等于该节点的 -p 数量。

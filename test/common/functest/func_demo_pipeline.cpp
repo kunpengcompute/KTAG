@@ -6,11 +6,13 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -509,6 +511,89 @@ TEST(KTAGDemoPipelineQueue, AppliesAllCapacityPolicies)
     EXPECT_EQ(1U, fail.statistics().failures);
 }
 
+TEST(KTAGDemoPipelineQueue, CancelsProducerBlockedOnFullQueue)
+{
+    ktag_demo_bounded_queue<int> queue(1U);
+    ASSERT_EQ(ktag_demo_queue_push_result::pushed,
+              queue.push(1, ktag_demo_backpressure_policy::block));
+    std::atomic<bool> cancelled{false};
+    std::atomic<bool> finished{false};
+    auto result = ktag_demo_queue_push_result::failed;
+    std::thread producer([&]() {
+        result = queue.push_interruptible(
+            2, [&]() { return cancelled.load(); });
+        finished.store(true);
+    });
+    const auto deadline = std::chrono::steady_clock::now() +
+        std::chrono::seconds(2);
+    while (queue.statistics().block_count == 0U &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    EXPECT_EQ(1U, queue.statistics().block_count);
+    cancelled.store(true);
+    while (!finished.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    EXPECT_TRUE(finished.load());
+    queue.close(); // Also release the producer if cancellation regresses.
+    producer.join();
+    EXPECT_EQ(ktag_demo_queue_push_result::closed, result);
+    EXPECT_EQ(1U, queue.statistics().pushed);
+}
+
+TEST(KTAGDemoPipelineQueue, MultipleConsumersDrainEveryItemExactlyOnce)
+{
+    ktag_demo_bounded_queue<uint32_t> queue(2U);
+    std::array<std::vector<uint32_t>, 4U> consumed;
+    std::vector<std::thread> workers;
+    for (size_t index = 0U; index < consumed.size(); ++index) {
+        workers.emplace_back([&, index]() {
+            uint32_t value = 0U;
+            while (queue.pop(&value)) {
+                consumed[index].push_back(value);
+            }
+        });
+    }
+    for (uint32_t value = 0U; value < 257U; ++value) {
+        EXPECT_EQ(ktag_demo_queue_push_result::pushed,
+                  queue.push(value, ktag_demo_backpressure_policy::block));
+    }
+    queue.close();
+    std::vector<uint32_t> values;
+    for (size_t index = 0U; index < workers.size(); ++index) {
+        workers[index].join();
+        values.insert(values.end(), consumed[index].begin(),
+                      consumed[index].end());
+    }
+    std::sort(values.begin(), values.end());
+    ASSERT_EQ(257U, values.size());
+    for (uint32_t value = 0U; value < values.size(); ++value) {
+        EXPECT_EQ(value, values[value]);
+    }
+}
+
+TEST(KTAGDemoPipelineQueue, InterruptiblePushOwnsMoveOnlyItems)
+{
+    ktag_demo_bounded_queue<std::unique_ptr<int>> queue(1U);
+    auto item = std::make_unique<int>(42);
+    const int *original = item.get();
+    EXPECT_EQ(ktag_demo_queue_push_result::pushed,
+              queue.push_interruptible(std::move(item), []() { return false; }));
+    EXPECT_EQ(nullptr, item.get());
+    std::unique_ptr<int> received;
+    ASSERT_TRUE(queue.pop(&received));
+    EXPECT_EQ(original, received.get());
+    EXPECT_EQ(42, *received);
+    EXPECT_EQ(ktag_demo_queue_push_result::closed,
+              queue.push_interruptible(std::make_unique<int>(7),
+                                       []() { return true; }));
+    EXPECT_EQ(1U, queue.statistics().pushed);
+    EXPECT_EQ(0U, queue.statistics().current_depth);
+    queue.close();
+    EXPECT_FALSE(queue.pop(&received));
+}
+
 TEST(KTAGDemoPipelineQueue, BlockPolicyWakesWhenConsumerMakesRoom)
 {
     ktag_demo_bounded_queue<int> queue(1U);
@@ -776,227 +861,281 @@ TEST(KTAGDemoPipelineConfig, FeatureOnlyDoesNotRequireModelOrInference)
     std::remove(path.c_str());
 }
 
-TEST(KTAGDemoPipelineConfig, ParsesSharedTopologyForDistributedFrontend)
-{
-    const std::string path = write_config(
-        "pipeline:\n"
-        "  enabled: false\n"
-        "  mode: feature_parallel\n"
-        "  feature:\n"
-        "    threads: 3\n"
-        "  backpressure:\n"
-        "    policy: block\n"
-        "  distributed:\n"
-        "    ub_ring:\n"
-        "      enabled: false\n"
-        "      provider_nodes: [fe-01, fe-02, fe-03]\n"
-        "      user_nodes: [be-01]\n"
-        "      region: ktag-test-region\n"
-        "      shm_prefix: ktag-test-feature\n"
-        "      provider_shm_size: 134217728\n"
-        "      queues_per_provider: 1\n"
-        "      queue_depth: 1024\n"
-        "      data_element_size: 4096\n"
-        "      credits_per_provider: 256\n"
-        "      poll_us: 50\n"
-        "      ground_truth_labels:\n"
-        "        fe-01: [0, 3]\n"
-        "        fe-02: [1, 4]\n"
-        "        fe-03: [2]\n"
-        "      eal_arguments: [kdadk_demo, --no-huge, -l, \"0\"]\n"
-        "  schema:\n"
-        "    name: ktag_legacy_v1\n"
-        "    version: 1\n");
-    ktag_demo_pipeline_config_overrides overrides;
-    overrides.force_enable = true;
-    overrides.distributed_role_set = true;
-    overrides.distributed_role = ktag_demo_distributed_role::frontend;
-    overrides.node_id = "fe-02";
-    ktag_demo_pipeline_config config;
-    std::string error;
-    ASSERT_EQ(
-        ktag_demo_pipeline_config_result::enabled,
-        ktag_demo_load_pipeline_config_with_overrides(
-            path.c_str(), &overrides, &config, &error))
-        << error;
-    EXPECT_TRUE(config.feature_only);
-    EXPECT_TRUE(config.model_package_path.empty());
-    EXPECT_TRUE(config.ub.configured);
-    EXPECT_TRUE(config.ub.enabled);
-    EXPECT_EQ(ktag_demo_distributed_role::frontend, config.ub.role);
-    EXPECT_EQ("fe-02", config.ub.node_id);
-    ASSERT_EQ(3U, config.ub.provider_nodes.size());
-    ASSERT_EQ(1U, config.ub.user_nodes.size());
-    EXPECT_EQ("be-01", config.ub.user_nodes.front());
-    EXPECT_EQ(134217728U, config.ub.provider_shm_size);
-    EXPECT_EQ(256U, config.ub.credits_per_provider);
-    ASSERT_EQ(3U, config.ub.ground_truth_labels.size());
-    EXPECT_EQ((std::vector<uint32_t>{1U, 4U}),
-              config.ub.ground_truth_labels.at("fe-02"));
-    ASSERT_EQ(4U, config.ub.eal_arguments.size());
-    EXPECT_EQ("0", config.ub.eal_arguments.back());
-    EXPECT_NE(0U, config.ub.ruleset_hash);
-    std::remove(path.c_str());
-}
-
-TEST(KTAGDemoPipelineConfig, ParsesDistributedBackendWithModel)
-{
-    const std::string path = write_config(
-        "pipeline:\n"
+namespace {
+std::string ub_queue_test_yaml(uint32_t threads = 4U, uint32_t queues = 2U,
+                               const std::string &cpus = "0-3") {
+    return "pipeline:\n"
         "  enabled: false\n"
         "  mode: feature_parallel\n"
         "  model_package_path: model_package\n"
+        "  feature: {threads: 3}\n"
         "  inference:\n"
-        "    threads: 1\n"
+        "    threads: " + std::to_string(threads) + "\n"
         "    batch_timeout_us: 2500\n"
-        "  backpressure:\n"
-        "    policy: block\n"
-        "  distributed:\n"
-        "    ub_ring:\n"
-        "      provider_nodes: [fe-01, fe-02, fe-03]\n"
-        "      user_nodes: [be-01]\n"
-        "      queue_depth: 1024\n"
-        "      data_element_size: 4096\n"
-        "      credits_per_provider: 256\n");
-    ktag_demo_pipeline_config_overrides overrides;
-    overrides.force_enable = true;
-    overrides.distributed_role_set = true;
-    overrides.distributed_role = ktag_demo_distributed_role::backend;
-    overrides.node_id = "be-01";
-    ktag_demo_pipeline_config config;
-    std::string error;
-    ASSERT_EQ(
-        ktag_demo_pipeline_config_result::enabled,
-        ktag_demo_load_pipeline_config_with_overrides(
-            path.c_str(), &overrides, &config, &error))
-        << error;
-    EXPECT_FALSE(config.feature_only);
-    EXPECT_FALSE(config.model_package_path.empty());
-    EXPECT_EQ(ktag_demo_distributed_role::backend, config.ub.role);
-    EXPECT_EQ("be-01", config.ub.node_id);
-    EXPECT_EQ(2500U, config.inference_batch_timeout_us);
-    std::remove(path.c_str());
-}
-
-TEST(KTAGDemoPipelineConfig, RejectsDistributedRoleOrBackpressureMismatch)
-{
-    const std::string path = write_config(
-        "pipeline:\n"
-        "  enabled: false\n"
-        "  mode: feature_parallel\n"
-        "  feature:\n"
-        "    threads: 3\n"
-        "  backpressure:\n"
-        "    policy: drop_newest\n"
-        "  distributed:\n"
-        "    ub_ring:\n"
-        "      provider_nodes: [fe-01, fe-02, fe-03]\n"
-        "      user_nodes: [be-01]\n"
-        "      queue_depth: 1024\n"
-        "      data_element_size: 4096\n"
-        "      credits_per_provider: 256\n");
-    ktag_demo_pipeline_config_overrides overrides;
-    overrides.force_enable = true;
-    overrides.distributed_role_set = true;
-    overrides.distributed_role = ktag_demo_distributed_role::frontend;
-    overrides.node_id = "be-01";
-    ktag_demo_pipeline_config config;
-    std::string error;
-    EXPECT_EQ(
-        ktag_demo_pipeline_config_result::error,
-        ktag_demo_load_pipeline_config_with_overrides(
-            path.c_str(), &overrides, &config, &error));
-    EXPECT_NE(std::string::npos, error.find("selected distributed role"));
-
-    overrides.node_id = "fe-01";
-    error.clear();
-    EXPECT_EQ(
-        ktag_demo_pipeline_config_result::error,
-        ktag_demo_load_pipeline_config_with_overrides(
-            path.c_str(), &overrides, &config, &error));
-    EXPECT_NE(std::string::npos, error.find("requires pipeline.backpressure"));
-    std::remove(path.c_str());
-}
-
-TEST(KTAGDemoPipelineConfig, RestrictsFirstDistributedFrontendTopology)
-{
-    ktag_demo_pipeline_config_overrides overrides;
-    overrides.force_enable = true;
-    overrides.distributed_role_set = true;
-    overrides.distributed_role = ktag_demo_distributed_role::frontend;
-    overrides.node_id = "fe-01";
-    ktag_demo_pipeline_config config;
-    std::string error;
-
-    std::string path = write_config(
-        "pipeline:\n"
-        "  enabled: false\n"
-        "  mode: full_parallel\n"
-        "  backpressure: {policy: block}\n"
-        "  distributed:\n"
-        "    ub_ring:\n"
-        "      provider_nodes: [fe-01]\n"
-        "      user_nodes: [be-01]\n"
-        "      queues_per_provider: 1\n"
-        "      queue_depth: 1024\n"
-        "      data_element_size: 4096\n"
-        "      credits_per_provider: 256\n");
-    EXPECT_EQ(
-        ktag_demo_pipeline_config_result::error,
-        ktag_demo_load_pipeline_config_with_overrides(
-            path.c_str(), &overrides, &config, &error));
-    EXPECT_NE(std::string::npos, error.find("feature_parallel"));
-
-    path = write_config(
-        "pipeline:\n"
-        "  enabled: false\n"
-        "  mode: feature_parallel\n"
-        "  backpressure: {policy: block}\n"
-        "  distributed:\n"
-        "    ub_ring:\n"
-        "      provider_nodes: [fe-01]\n"
-        "      user_nodes: [be-01]\n"
-        "      queues_per_provider: 2\n"
-        "      queue_depth: 1024\n"
-        "      data_element_size: 4096\n"
-        "      credits_per_provider: 256\n");
-    error.clear();
-    EXPECT_EQ(
-        ktag_demo_pipeline_config_result::error,
-        ktag_demo_load_pipeline_config_with_overrides(
-            path.c_str(), &overrides, &config, &error));
-    EXPECT_NE(std::string::npos, error.find("one UB queue"));
-    std::remove(path.c_str());
-}
-
-TEST(KTAGDemoPipelineConfig, RejectsIncompleteGroundTruthTopology)
-{
-    const std::string path = write_config(
-        "pipeline:\n"
-        "  enabled: false\n"
-        "  mode: feature_parallel\n"
+        "    intra_op_threads: 1\n"
+        "    inter_op_threads: 1\n"
         "  backpressure: {policy: block}\n"
         "  distributed:\n"
         "    ub_ring:\n"
         "      provider_nodes: [fe-01, fe-02]\n"
         "      user_nodes: [be-01]\n"
-        "      queues_per_provider: 1\n"
+        "      queues_per_provider: " + std::to_string(queues) + "\n"
         "      queue_depth: 1024\n"
-        "      data_element_size: 4096\n"
-        "      credits_per_provider: 256\n"
-        "      ground_truth_labels:\n"
-        "        fe-01: [0]\n");
+        "      credits_per_queue: 64\n"
+        "      backend_worker_cpus: \"" + cpus + "\"\n";
+}
+ktag_demo_pipeline_config_overrides ub_queue_test_role(bool frontend) {
     ktag_demo_pipeline_config_overrides overrides;
     overrides.force_enable = true;
     overrides.distributed_role_set = true;
-    overrides.distributed_role = ktag_demo_distributed_role::frontend;
-    overrides.node_id = "fe-01";
+    overrides.distributed_role = frontend ? ktag_demo_distributed_role::frontend : ktag_demo_distributed_role::backend;
+    overrides.node_id = frontend ? "fe-01" : "be-01";
+    return overrides;
+}
+} // namespace
+
+TEST(KTAGDemoPipelineConfig, ParsesSharedTopologyForDistributedFrontend)
+{
+    const auto path = write_config(ub_queue_test_yaml());
+    auto overrides = ub_queue_test_role(true);
     ktag_demo_pipeline_config config;
     std::string error;
-    EXPECT_EQ(
-        ktag_demo_pipeline_config_result::error,
-        ktag_demo_load_pipeline_config_with_overrides(
-            path.c_str(), &overrides, &config, &error));
+    ASSERT_EQ(ktag_demo_pipeline_config_result::enabled,
+              ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error)) << error;
+    EXPECT_TRUE(config.feature_only);
+    EXPECT_TRUE(config.model_package_path.empty());
+    EXPECT_EQ(3U, config.feature_threads);
+    EXPECT_EQ(4U, config.inference_threads);
+    EXPECT_EQ(2U, config.ub.queues_per_provider);
+    EXPECT_EQ(64U, config.ub.credits_per_queue);
+    EXPECT_EQ((std::vector<uint32_t>{0, 1, 2, 3}), config.ub.backend_worker_cpus);
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, ParsesDistributedBackendWithModel)
+{
+    const auto path = write_config(ub_queue_test_yaml(4U, 2U, "0-1,8-9"));
+    auto overrides = ub_queue_test_role(false);
+    ktag_demo_pipeline_config config;
+    std::string error;
+    ASSERT_EQ(ktag_demo_pipeline_config_result::enabled,
+              ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error)) << error;
+    EXPECT_FALSE(config.feature_only);
+    EXPECT_FALSE(config.model_package_path.empty());
+    EXPECT_EQ(4U, config.inference_threads);
+    EXPECT_EQ(2500U, config.inference_batch_timeout_us);
+    EXPECT_EQ((std::vector<uint32_t>{0, 1, 8, 9}), config.ub.backend_worker_cpus);
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, SharedYamlRejectsDistributedExecutionOverrides)
+{
+    const auto path = write_config(ub_queue_test_yaml());
+    ktag_demo_pipeline_config config;
+    std::string error;
+    for (const bool frontend : {false, true}) {
+        for (unsigned field = 0; field < 4; ++field) {
+            auto overrides = ub_queue_test_role(frontend);
+            if (field == 0) overrides.feature_threads = 3U;
+            if (field == 1) overrides.inference_threads = 4U;
+            if (field == 2) overrides.mode_set = true;
+            if (field == 3) overrides.dpdk_eal_args = "";
+            EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+                      ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error));
+            EXPECT_NE(std::string::npos, error.find("YAML-only"));
+        }
+    }
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsDistributedWorkerQueueMismatch)
+{
+    for (const bool frontend : {false, true}) {
+        auto overrides = ub_queue_test_role(frontend);
+        for (const uint32_t threads : {1U, 3U, 5U, 8U}) {
+            const auto path = write_config(ub_queue_test_yaml(threads));
+            ktag_demo_pipeline_config config;
+            std::string error;
+            EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+                      ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error));
+            EXPECT_NE(std::string::npos, error.find("expected_workers=4"));
+            std::remove(path.c_str());
+        }
+    }
+}
+
+TEST(KTAGDemoPipelineConfig, RequiresExplicitThreadsEvenForOneQueue)
+{
+    auto body = ub_queue_test_yaml(1U, 1U, "0");
+    const std::string providers = "[fe-01, fe-02]";
+    body.replace(body.find(providers), providers.size(), "[fe-01]");
+    const std::string threads = "    threads: 1\n";
+    body.erase(body.find(threads), threads.size());
+    const auto path = write_config(body);
+    auto overrides = ub_queue_test_role(true);
+    ktag_demo_pipeline_config config;
+    std::string error;
+    EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+              ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error));
+    EXPECT_NE(std::string::npos, error.find("explicitly configured"));
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, ParsesOfficialUbSampleForBothRoles)
+{
+    auto sample = fs::path("tools/demo/config-ub-1to1.yaml");
+    if (!fs::exists(sample)) { sample = fs::path("../../../tools/demo/config-ub-1to1.yaml"); }
+    for (const bool frontend : {false, true}) {
+        auto overrides = ub_queue_test_role(frontend);
+        overrides.node_id = frontend ? "computer01" : "controller";
+        ktag_demo_pipeline_config config;
+        std::string error;
+        ASSERT_EQ(ktag_demo_pipeline_config_result::enabled,
+                  ktag_demo_load_pipeline_config_with_overrides(sample.string().c_str(), &overrides, &config, &error)) << error;
+        EXPECT_EQ(16U, config.inference_threads);
+        EXPECT_EQ(16U, config.feature_threads);
+        EXPECT_EQ(16U, config.ub.sender_threads);
+        EXPECT_EQ(4U, config.dpdk_rx_threads);
+        EXPECT_EQ(64U, config.ub.credits_per_queue);
+        EXPECT_EQ(16U, config.ub.backend_worker_cpus.size());
+        EXPECT_EQ(15U, config.ub.backend_worker_cpus.back());
+    }
+}
+
+TEST(KTAGDemoPipelineConfig, ParsesFrontendRxAndSenderParallelism)
+{
+    auto body = ub_queue_test_yaml(4U, 2U);
+    const auto feature = body.find("  feature: {threads: 3}");
+    body.replace(feature, std::string("  feature: {threads: 3}").size(),
+        "  capture:\n    dpdk: {rx_queue_count: 2, rx_threads: 2, rx_worker_cpus: '0-1'}\n"
+        "  feature: {threads: 3, worker_cpus: '2-4'}");
+    body += "      sender_threads: 2\n      sender_worker_cpus: '5-6'\n";
+    const auto path = write_config(body);
+    for (const bool frontend : {true, false}) {
+        auto overrides = ub_queue_test_role(frontend);
+        overrides.force_dpdk = frontend;
+        ktag_demo_pipeline_config config;
+        std::string error;
+        ASSERT_EQ(ktag_demo_pipeline_config_result::enabled,
+            ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error)) << error;
+        EXPECT_EQ(2U, config.dpdk_rx_threads);
+        EXPECT_EQ(2U, config.ub.sender_threads);
+        EXPECT_EQ((std::vector<uint32_t>{2, 3, 4}), config.feature_worker_cpus);
+        EXPECT_EQ(4U, config.inference_threads);
+    }
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsInvalidFrontendParallelConfiguration)
+{
+    auto valid = ub_queue_test_yaml(4U, 2U);
+    valid.replace(valid.find("  feature: {threads: 3}"), std::string("  feature: {threads: 3}").size(),
+        "  capture:\n    dpdk: {rx_queue_count: 2, rx_threads: 2, rx_worker_cpus: '0-1'}\n"
+        "  feature: {threads: 3, worker_cpus: '2-4'}");
+    valid += "      sender_threads: 2\n      sender_worker_cpus: '5-6'\n";
+    const std::vector<std::pair<std::string, std::string>> mutations = {
+        {"rx_threads: 2", "rx_threads: 3"},
+        {"sender_threads: 2", "sender_threads: 3"},
+        {"sender_threads: 2", "sender_threads: 0"},
+        {"rx_worker_cpus: '0-1'", "rx_worker_cpus: ''"},
+        {"worker_cpus: '2-4'", "worker_cpus: '1-3'"},
+        {"sender_worker_cpus: '5-6'", "sender_worker_cpus: '4-5'"},
+        {"sender_worker_cpus: '5-6'", "sender_worker_cpus: '5'"},
+        {"sender_worker_cpus: '5-6'", "sender_worker_cpus: '5,5'"},
+        {"    threads: 4", "    queue_capacity: 1\n    threads: 4"}
+    };
+    for (const auto &mutation : mutations) {
+        auto body = valid;
+        body.replace(body.find(mutation.first), mutation.first.size(), mutation.second);
+        const auto path = write_config(body);
+        auto overrides = ub_queue_test_role(true);
+        overrides.force_dpdk = true;
+        ktag_demo_pipeline_config config;
+        std::string error;
+        EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+            ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error));
+        EXPECT_FALSE(error.empty());
+        std::remove(path.c_str());
+    }
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsFrontendThreadSettingsOutsideUb)
+{
+    const auto path = write_config("pipeline:\n  enabled: true\n  model_package_path: model_package\n"
+        "  mode: feature_parallel\n  capture:\n    dpdk: {rx_threads: 2, rx_queue_count: 2}\n");
+    ktag_demo_pipeline_config config;
+    std::string error;
+    EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+        ktag_demo_load_pipeline_config(path.c_str(), &config, &error));
+    EXPECT_NE(std::string::npos, error.find("require distributed UB"));
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsInvalidDistributedCpuLists)
+{
+    auto overrides = ub_queue_test_role(false);
+    for (const auto *cpus : {"", "0-2", "0-4", "0,1,1,2", "3-0", "0-3,", "0,,1", "+0-3", "0-3x", "4294967296", "0-4294967295"}) {
+        const auto path = write_config(ub_queue_test_yaml(4, 2, cpus));
+        ktag_demo_pipeline_config config;
+        std::string error;
+        EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+                  ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error));
+        EXPECT_NE(std::string::npos, error.find("backend_worker_cpus"));
+        std::remove(path.c_str());
+    }
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsInvalidDistributedSettings)
+{
+    const std::vector<std::pair<std::string, std::string>> mutations = {
+        {"mode: feature_parallel", "mode: full_parallel"},
+        {"credits_per_queue: 64", "credits_per_provider: 64"},
+        {"credits_per_queue: 64", "credits_per_queue: 64\n      credits_per_provider: 64"},
+        {"credits_per_queue: 64", "credits_per_queue: 1024"},
+        {"intra_op_threads: 1", "intra_op_threads: 2"},
+        {"inter_op_threads: 1", "inter_op_threads: 2"},
+        {"policy: block", "policy: drop_newest"},
+        {"    threads: 4\n", ""},
+        {"backend_worker_cpus: \"0-3\"", "backend_worker_cpus: null"},
+        {"queues_per_provider: 2", "queues_per_provider: 512"}
+    };
+    for (const auto &mutation : mutations) {
+        auto body = ub_queue_test_yaml();
+        body.replace(body.find(mutation.first), mutation.first.size(), mutation.second);
+        const auto path = write_config(body);
+        for (const bool frontend : {false, true}) {
+            auto overrides = ub_queue_test_role(frontend);
+            ktag_demo_pipeline_config config;
+            std::string error;
+            EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+                      ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error)) << mutation.second;
+            EXPECT_FALSE(error.empty());
+        }
+        std::remove(path.c_str());
+    }
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsDistributedRoleOrBackpressureMismatch)
+{
+    const auto path = write_config(ub_queue_test_yaml());
+    auto overrides = ub_queue_test_role(true);
+    overrides.node_id = "be-01";
+    ktag_demo_pipeline_config config;
+    std::string error;
+    EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+              ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error));
+    EXPECT_NE(std::string::npos, error.find("selected distributed role"));
+    std::remove(path.c_str());
+}
+
+TEST(KTAGDemoPipelineConfig, RejectsIncompleteGroundTruthTopology)
+{
+    const auto path = write_config(ub_queue_test_yaml() + "      ground_truth_labels: {fe-01: [0]}\n");
+    auto overrides = ub_queue_test_role(true);
+    ktag_demo_pipeline_config config;
+    std::string error;
+    EXPECT_EQ(ktag_demo_pipeline_config_result::error,
+              ktag_demo_load_pipeline_config_with_overrides(path.c_str(), &overrides, &config, &error));
     EXPECT_NE(std::string::npos, error.find("every Provider"));
     std::remove(path.c_str());
 }

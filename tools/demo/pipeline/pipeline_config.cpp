@@ -235,6 +235,57 @@ bool hash_config_file(const fs::path &path, uint64_t *hash,
   return true;
 }
 
+bool parse_worker_cpus(const std::string &text, std::vector<uint32_t> *cpus,
+                       std::string *error, const std::string &field = "backend_worker_cpus") {
+  std::unordered_set<uint32_t> unique;
+  size_t offset = 0U;
+  auto number = [&](uint32_t *value) {
+    if (offset >= text.size() || text[offset] < '0' || text[offset] > '9') {
+      return false;
+    }
+    uint64_t parsed = 0U;
+    while (offset < text.size() && text[offset] >= '0' && text[offset] <= '9') {
+      parsed = parsed * 10U + static_cast<unsigned>(text[offset++] - '0');
+      if (parsed > std::numeric_limits<uint32_t>::max()) {
+        return false;
+      }
+    }
+    *value = static_cast<uint32_t>(parsed);
+    return true;
+  };
+  while (offset < text.size()) {
+    uint32_t first = 0U, last = 0U;
+    if (!number(&first)) { break; }
+    last = first;
+    if (offset < text.size() && text[offset] == '-') {
+      ++offset;
+      if (!number(&last)) { break; }
+    }
+    if (last < first || static_cast<uint64_t>(last) - first + 1U > 512U - cpus->size()) {
+      break;
+    }
+    for (uint64_t cpu = first; cpu <= last; ++cpu) {
+      if (!unique.insert(static_cast<uint32_t>(cpu)).second) {
+        set_error(error, field + " contains duplicate CPU " + std::to_string(cpu));
+        return false;
+      }
+      cpus->push_back(static_cast<uint32_t>(cpu));
+    }
+    if (offset == text.size()) { return true; }
+    if (text[offset++] != ',' || offset == text.size()) { break; }
+  }
+  set_error(error, field + " must be a non-empty CPU list/range (at most 512 CPUs), for example 0-3,8-11");
+  return false;
+}
+
+bool read_worker_cpus(const YAML::Node &node, const char *field,
+                      std::vector<uint32_t> *cpus, std::string *error) {
+  if (!has_value(node) || !has_value(node[field])) { return true; }
+  std::string value;
+  return read_string(node, field, &value, error) &&
+      parse_worker_cpus(value, cpus, error, field);
+}
+
 bool parse_ub_config(const YAML::Node &pipeline, ktag_demo_ub_config *config,
                      std::string *error) {
   const YAML::Node distributed = pipeline["distributed"];
@@ -254,6 +305,17 @@ bool parse_ub_config(const YAML::Node &pipeline, ktag_demo_ub_config *config,
     return false;
   }
   config->configured = true;
+  config->legacy_credit_configured = has_value(ub["credits_per_provider"]);
+  const auto inference = pipeline["inference"];
+  config->inference_threads_configured =
+      inference.IsMap() && has_value(inference["threads"]);
+  std::string cpu_list;
+  if (!read_string(ub, "backend_worker_cpus", &cpu_list, error) ||
+      (!cpu_list.empty() && !parse_worker_cpus(cpu_list, &config->backend_worker_cpus, error)) ||
+      !read_worker_cpus(ub, "sender_worker_cpus", &config->sender_worker_cpus, error) ||
+      !read_u32(ub, "sender_threads", &config->sender_threads, error)) {
+    return false;
+  }
   if (!read_bool(ub, "enabled", &config->enabled, error) ||
       !read_string(ub, "region", &config->region, error) ||
       !read_string(ub, "shm_prefix", &config->shm_prefix, error) ||
@@ -262,7 +324,7 @@ bool parse_ub_config(const YAML::Node &pipeline, ktag_demo_ub_config *config,
                 error) ||
       !read_u32(ub, "queue_depth", &config->queue_depth, error) ||
       !read_u32(ub, "data_element_size", &config->data_element_size, error) ||
-      !read_u32(ub, "credits_per_provider", &config->credits_per_provider,
+      !read_u32(ub, "credits_per_queue", &config->credits_per_queue,
                 error) ||
       !read_u32(ub, "poll_us", &config->poll_us, error) ||
       !read_string_list(ub["provider_nodes"],
@@ -329,9 +391,8 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
       config.queue_depth < 2U ||
       (config.queue_depth & (config.queue_depth - 1U)) != 0U ||
       config.data_element_size < ktag_demo_ub_feature_frame_size(0U) ||
-      config.credits_per_provider == 0U ||
-      config.credits_per_provider >= config.queue_depth ||
-      config.credits_per_provider > 1023U) {
+      config.credits_per_queue == 0U ||
+      config.credits_per_queue >= config.queue_depth) {
     set_error(error,
               "distributed UB memory, queue, element or credit values are "
               "invalid");
@@ -362,25 +423,79 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
       }
     }
   }
-  if (config.role == ktag_demo_distributed_role::frontend &&
-      pipeline.mode != ktag_demo_pipeline_mode::feature_parallel) {
-    set_error(error, "the first distributed Frontend implementation requires "
-                     "feature_parallel mode");
+  if (pipeline.mode != ktag_demo_pipeline_mode::feature_parallel) {
+    set_error(error, "distributed UB requires YAML pipeline.mode: feature_parallel; backend workers are configured with inference.threads");
     return false;
   }
-  if (config.queues_per_provider != 1U) {
+  if (config.legacy_credit_configured) {
+    set_error(error, "credits_per_provider is no longer supported; configure credits_per_queue in YAML");
+    return false;
+  }
+  const size_t expected = config.provider_nodes.size() * config.queues_per_provider;
+  if (!config.inference_threads_configured || pipeline.inference_threads != expected) {
+    set_error(error, "UB worker count mismatch: providers=" + std::to_string(config.provider_nodes.size()) +
+        ", queues_per_provider=" + std::to_string(config.queues_per_provider) +
+        ", expected_workers=" + std::to_string(expected) +
+        ", inference.threads=" + std::to_string(pipeline.inference_threads) +
+        " (inference.threads must be explicitly configured in YAML)");
+    return false;
+  }
+  if (config.backend_worker_cpus.size() != expected) {
+    set_error(error, "backend_worker_cpus must specify exactly " + std::to_string(expected) + " distinct CPUs");
+    return false;
+  }
+  if (pipeline.inference_intra_op_threads != 1U || pipeline.inference_inter_op_threads != 1U) {
+    set_error(error, "distributed UB requires intra_op_threads: 1 and inter_op_threads: 1");
+    return false;
+  }
+  if (config.sender_threads == 0U || config.sender_threads > config.queues_per_provider ||
+      pipeline.feature_queue_capacity < config.sender_threads) {
+    set_error(error, "UB sender_threads must be 1..queues_per_provider and not exceed inference.queue_capacity");
+    return false;
+  }
+  if (pipeline.dpdk_rx_threads == 0U || pipeline.dpdk_rx_threads > 256U ||
+      (pipeline.dpdk_rx_threads > 1U && pipeline.dpdk_rx_threads != pipeline.dpdk_rx_queue_count)) {
+    set_error(error, "UB rx_threads must be 1, or equal rx_queue_count (at most 256)");
+    return false;
+  }
+  const bool online = pipeline.capture_backend == ktag_demo_capture_backend::dpdk;
+  /*
+   * The handoff ring sits on the Capture -> Feature path, which only the
+   * Frontend runs. A Backend node receives Feature frames over the UB ring and
+   * never captures, so a YAML shared by both roles may keep
+   * capture.dpdk.handoff: ring for the Frontend; it is ignored here instead of
+   * failing Backend startup.
+   */
+  if (pipeline.dpdk_ring_handoff && !online &&
+      config.role == ktag_demo_distributed_role::frontend) {
     set_error(error,
-              "the first distributed implementation requires exactly one "
-              "UB queue per Provider");
+              "pipeline.capture.dpdk.handoff: ring requires "
+              "pipeline.capture.backend: dpdk");
     return false;
   }
-  if (config.role == ktag_demo_distributed_role::backend &&
-      pipeline.inference_threads != 1U) {
-    set_error(error,
-              "the first distributed Backend implementation requires one "
-              "Inference worker");
-    return false;
-  }
+  const bool parallel = config.sender_threads > 1U || (online && pipeline.dpdk_rx_threads > 1U);
+  std::unordered_set<uint32_t> frontend_cpus;
+  auto check_cpus = [&](const std::vector<uint32_t> &cpus, size_t count,
+                         const char *field, bool required, size_t used) {
+    if (cpus.empty() && !required) { return true; }
+    if (cpus.size() != count) {
+      set_error(error, std::string(field) + " must specify exactly " + std::to_string(count) + " CPUs");
+      return false;
+    }
+    for (size_t i = 0; i < used; ++i) {
+      if (!frontend_cpus.insert(cpus[i]).second) {
+        set_error(error, std::string(field) + " overlaps another Frontend worker CPU: " + std::to_string(cpus[i]));
+        return false;
+      }
+    }
+    return true;
+  };
+  if (!check_cpus(pipeline.dpdk_rx_worker_cpus, pipeline.dpdk_rx_threads, "rx_worker_cpus",
+                   parallel && online, online ? pipeline.dpdk_rx_threads : 1U) ||
+      !check_cpus(pipeline.feature_worker_cpus, pipeline.feature_threads, "feature.worker_cpus",
+                   parallel, pipeline.feature_threads) ||
+      !check_cpus(config.sender_worker_cpus, config.sender_threads, "sender_worker_cpus",
+                   parallel, config.sender_threads)) { return false; }
   return true;
 }
 
@@ -544,6 +659,7 @@ bool validate_frozen_schema_selection(const ktag_demo_pipeline_config &config,
 
 bool parse_enabled_config(const YAML::Node &pipeline,
                           const fs::path &config_directory, bool feature_only,
+                          bool distributed_requested,
                           ktag_demo_pipeline_config *config,
                           std::string *error) {
   if (!parse_mode(pipeline["mode"], &config->mode, error)) {
@@ -552,6 +668,7 @@ bool parse_enabled_config(const YAML::Node &pipeline,
   if (!parse_ub_config(pipeline, &config->ub, error)) {
     return false;
   }
+  const bool read_inference = !feature_only || config->ub.enabled || distributed_requested;
   const YAML::Node model_package_path = pipeline["model_package_path"];
   if (!feature_only && has_value(model_package_path)) {
     if (!resolve_path(config_directory, model_package_path.as<std::string>(),
@@ -570,7 +687,7 @@ bool parse_enabled_config(const YAML::Node &pipeline,
   const YAML::Node schema = pipeline["schema"];
   if ((has_value(capture) && !capture.IsMap()) ||
       (has_value(feature) && !feature.IsMap()) ||
-      (!feature_only && has_value(inference) && !inference.IsMap()) ||
+      (read_inference && has_value(inference) && !inference.IsMap()) ||
       (has_value(backpressure) && !backpressure.IsMap()) ||
       (has_value(schema) && !schema.IsMap())) {
     set_error(error, "pipeline nested configuration must use maps");
@@ -579,6 +696,7 @@ bool parse_enabled_config(const YAML::Node &pipeline,
 
   if (!read_u32(capture, "packet_pool_size", &config->packet_pool_size,
                 error) ||
+      !read_worker_cpus(feature, "worker_cpus", &config->feature_worker_cpus, error) ||
       !read_u32(feature, "threads", &config->feature_threads, error) ||
       !read_u32(feature, "queue_capacity", &config->packet_queue_capacity,
                 error) ||
@@ -600,7 +718,7 @@ bool parse_enabled_config(const YAML::Node &pipeline,
                           &config->backpressure, error)) {
     return false;
   }
-  if (!feature_only &&
+  if (read_inference &&
       (!read_u32(inference, "threads", &config->inference_threads, error) ||
        !read_u32(inference, "batch_size", &config->inference_batch_size,
                  error) ||
@@ -645,12 +763,25 @@ bool parse_enabled_config(const YAML::Node &pipeline,
       if (has_value(dpdk["eal_args"])) {
         config->dpdk_eal_args = dpdk["eal_args"].as<std::string>();
       }
+      const YAML::Node handoff = dpdk["handoff"];
+      if (has_value(handoff)) {
+        const std::string value = handoff.as<std::string>();
+        if (value == "ring") {
+          config->dpdk_ring_handoff = true;
+        } else if (value != "queue") {
+          set_error(error,
+                    "pipeline.capture.dpdk.handoff must be queue or ring");
+          return false;
+        }
+      }
     }
   } catch (const YAML::Exception &exception) {
     set_error(error, exception.what());
     return false;
   }
   if (!read_u32(dpdk, "rx_queue_count", &config->dpdk_rx_queue_count, error) ||
+      !read_u32(dpdk, "rx_threads", &config->dpdk_rx_threads, error) ||
+      !read_worker_cpus(dpdk, "rx_worker_cpus", &config->dpdk_rx_worker_cpus, error) ||
       !read_u32(dpdk, "rx_queue_depth", &config->dpdk_rx_queue_depth, error) ||
       !read_u32(dpdk, "mbuf_pool_size", &config->dpdk_mbuf_pool_size, error) ||
       !read_u32(dpdk, "burst_size", &config->dpdk_burst_size, error) ||
@@ -732,6 +863,12 @@ bool apply_overrides_and_normalize(
       config->ub.role = overrides->distributed_role;
       config->ub.node_id = overrides->node_id;
     }
+    if (config->ub.enabled &&
+        (overrides->mode_set || overrides->feature_threads != 0U ||
+         overrides->inference_threads != 0U || overrides->dpdk_eal_args != nullptr)) {
+      set_error(error, "distributed UB execution settings are YAML-only; remove -n/--feature-threads, --inference-threads, --pipeline-mode and --dpdk-eal-args");
+      return false;
+    }
     config->feature_only =
         overrides->feature_only ||
         (overrides->distributed_role_set &&
@@ -753,7 +890,7 @@ bool apply_overrides_and_normalize(
       config->dpdk_eal_args = overrides->dpdk_eal_args;
     }
 
-    if ((config->mode == ktag_demo_pipeline_mode::single_thread ||
+    if (!config->ub.enabled && (config->mode == ktag_demo_pipeline_mode::single_thread ||
          config->mode == ktag_demo_pipeline_mode::staged) &&
         ((overrides->feature_threads != 0U &&
           overrides->feature_threads != 1U) ||
@@ -763,7 +900,7 @@ bool apply_overrides_and_normalize(
                        "one Inference worker");
       return false;
     }
-    if (config->mode == ktag_demo_pipeline_mode::feature_parallel &&
+    if (!config->ub.enabled && config->mode == ktag_demo_pipeline_mode::feature_parallel &&
         overrides->inference_threads != 0U &&
         overrides->inference_threads != 1U) {
       set_error(error,
@@ -773,6 +910,15 @@ bool apply_overrides_and_normalize(
     }
   }
 
+  if (config->ub.enabled) {
+    return validate_ub_config(*config, error);
+  }
+  if (config->dpdk_rx_threads != 1U || config->ub.sender_threads != 1U ||
+      !config->dpdk_rx_worker_cpus.empty() || !config->feature_worker_cpus.empty() ||
+      !config->ub.sender_worker_cpus.empty()) {
+    set_error(error, "Frontend RX/sender threads and worker CPU lists require distributed UB");
+    return false;
+  }
   if (config->feature_only) {
     if (config->mode == ktag_demo_pipeline_mode::single_thread ||
         config->mode == ktag_demo_pipeline_mode::staged) {
@@ -851,10 +997,13 @@ ktag_demo_pipeline_config_result ktag_demo_load_pipeline_config_with_overrides(
          (overrides->distributed_role_set &&
           overrides->distributed_role == ktag_demo_distributed_role::frontend));
     if (!parse_enabled_config(pipeline, absolute_config.parent_path(),
-                              feature_only, config, error)) {
+                              feature_only, overrides != nullptr && overrides->distributed_role_set,
+                              config, error)) {
+      if (error != nullptr) { *error = absolute_config.string() + ": " + *error; }
       return ktag_demo_pipeline_config_result::error;
     }
     if (!apply_overrides_and_normalize(overrides, config, error)) {
+      if (error != nullptr) { *error = absolute_config.string() + ": " + *error; }
       return ktag_demo_pipeline_config_result::error;
     }
     return ktag_demo_pipeline_config_result::enabled;

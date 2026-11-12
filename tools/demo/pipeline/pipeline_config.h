@@ -38,7 +38,12 @@ struct ktag_demo_ub_config {
   uint32_t queue_depth = 1024U;
   /* YAML payload capacity; rte_ub_ring may report a larger internal stride. */
   uint32_t data_element_size = 4096U;
-  uint32_t credits_per_provider = 256U;
+  uint32_t credits_per_queue = 64U;
+  std::vector<uint32_t> backend_worker_cpus;
+  uint32_t sender_threads = 1U;
+  std::vector<uint32_t> sender_worker_cpus;
+  bool legacy_credit_configured = false;
+  bool inference_threads_configured = false;
   uint32_t poll_us = 50U;
   uint64_t ruleset_hash = 0U;
   std::vector<std::string> eal_arguments;
@@ -53,6 +58,7 @@ struct ktag_demo_pipeline_config {
 
   uint32_t packet_pool_size = 65536U;
   uint32_t feature_threads = 4U;
+  std::vector<uint32_t> feature_worker_cpus;
   uint32_t packet_queue_capacity = 65536U;
   uint64_t flow_hash_seed = 2026U;
   uint32_t expire_interval_ms = 1000U;
@@ -69,6 +75,13 @@ struct ktag_demo_pipeline_config {
   std::string dpdk_device_name;
   std::string dpdk_eal_args;
   uint32_t dpdk_rx_queue_count = 1U;
+  uint32_t dpdk_rx_threads = 1U;
+  /* Capture -> Feature handoff: queue keeps the mutex/condvar path,
+   * ring uses an rte_ring of mbuf pointers (no copy). */
+  bool dpdk_ring_handoff = false;
+  std::vector<uint32_t> dpdk_rx_worker_cpus;
+  // Runtime only: captured before the first EAL init narrows the main thread.
+  std::vector<uint32_t> initial_allowed_cpus;
   uint32_t dpdk_rx_queue_depth = 1024U;
   uint32_t dpdk_mbuf_pool_size = 0U;
   uint32_t dpdk_burst_size = 64U;

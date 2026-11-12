@@ -48,6 +48,12 @@ struct ktag_demo_ub_copy_receipt {
  */
 uint32_t ktag_demo_ub_runtime_data_element_size(uint32_t payload_size);
 
+// Capture before EAL narrows the main thread's affinity; bind workers before
+// allocating their model/batch storage. No DPDK lcore registration is needed
+// for workers that only receive/copy/send and reuse preallocated CREDITs.
+bool ktag_demo_ub_allowed_cpus(std::vector<uint32_t> *cpus, std::string *error);
+bool ktag_demo_ub_bind_cpu(uint32_t cpu, std::string *error);
+
 /*
  * Thin RAII wrapper over the installed DPDK rte_ub_ring public API. It owns
  * one EAL instance and one UB Ring handle but never calls ubs-mem directly.

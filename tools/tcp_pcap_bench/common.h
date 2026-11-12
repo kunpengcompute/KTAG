@@ -53,6 +53,12 @@ struct Config {
   int level = 1;
   double target_ratio = 10;
   bool modern = false;
+  bool online = false;
+  std::string device, eal_args;
+  uint32_t rx_threads = 1, rx_queues = 1, rx_depth = 1024, mbuf_pool = 0, burst = 64;
+  uint32_t rx_poll_us = 0, duration_s = 60, sender_threads = 1, inference_threads = 1;
+  uint64_t rx_idle_eof_us = 0;
+  std::vector<uint32_t> rx_cpus, feature_cpus, sender_cpus, inference_cpus;
   uint64_t rules_hash() const;
 };
 Config parse_config(int argc, char **argv);
@@ -79,6 +85,7 @@ struct Metrics {
   std::atomic<uint64_t> feature_ns{0}, encode_ns{0}, compress_ns{0}, send_ns{0};
   std::atomic<uint64_t> decompress_ns{0}, decode_ns{0}, inference_ns{0};
   std::atomic<uint64_t> output_ns{0}, initialization_ns{0}, inference_cpu_ns{0};
+  std::atomic<uint64_t> capture_received{0}, capture_delivered{0}, capture_pending{0}, capture_drops{0};
   std::atomic<uint64_t> feature_cpu_ns{0}, read_cpu_ns{0}, output_cpu_ns{0}, backend_data_cpu_ns{0};
   void mark_first(uint64_t value);
   void write(const Config &, bool success, const std::string &error) const;
@@ -96,11 +103,18 @@ template<class T> class Queue {
   bool push(T value, std::atomic<uint64_t> &wait_ns) {
     std::unique_lock<std::mutex> lock(mutex_);
     auto start = now_ns();
+    if (items_.size() >= capacity_) ++full_waits_;
     space_.wait(lock, [&] { return closed_ || items_.size() < capacity_; });
     wait_ns += now_ns() - start;
     if (closed_) return false;
-    items_.push_back(std::move(value)); available_.notify_one(); return true;
+    items_.push_back(std::move(value)); peak_ = std::max(peak_, items_.size());
+    available_.notify_one(); return true;
   }
+  bool try_pop(T &value) {
+    std::lock_guard<std::mutex> lock(mutex_); return take(value);
+  }
+  size_t peak() { std::lock_guard<std::mutex> lock(mutex_); return peak_; }
+  uint64_t full_waits() { std::lock_guard<std::mutex> lock(mutex_); return full_waits_; }
   bool pop(T &value) {
     std::unique_lock<std::mutex> lock(mutex_);
     available_.wait(lock, [&] { return closed_ || !items_.empty(); });
@@ -125,6 +139,8 @@ template<class T> class Queue {
     return true;
   }
   size_t capacity_;
+  size_t peak_ = 0;
+  uint64_t full_waits_ = 0;
   bool closed_ = false;
   std::mutex mutex_;
   std::condition_variable available_, space_;
@@ -147,4 +163,6 @@ struct Packet {
 Schema make_schema();
 void run_frontend(const Config &, Metrics &);
 void run_backend(const Config &, Metrics &);
+void run_online_frontend(const Config &, Metrics &);
+void run_online_backend(const Config &, Metrics &);
 } // namespace tcp_bench

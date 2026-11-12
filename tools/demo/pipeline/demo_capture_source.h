@@ -41,6 +41,25 @@ struct demo_capture_stats {
 struct demo_capture_source {
   virtual ~demo_capture_source() = default;
   virtual ktag_status next(ktag_packet *packet) = 0;
+  virtual bool prepare_readers(uint32_t count, std::string *error) {
+    if (count == 1U) { return true; }
+    *error = "capture source does not support multiple readers";
+    return false;
+  }
+  virtual bool enter_reader(std::string *) { return true; }
+  virtual void leave_reader() {}
+  /* Called once per worker thread at start/exit. The DPDK backend registers
+   * the thread as an EAL lcore here so mbuf get/put use the pool's per-lcore
+   * cache instead of hitting the shared ring from every worker. */
+  virtual bool worker_thread_enter(std::string *) { return true; }
+  virtual void worker_thread_leave() {}
+  virtual ktag_status next_queue(uint32_t, ktag_packet *) { return KTAG_ERROR_NOT_SUPPORTED; }
+  /* MBUF handoff: no copy, the caller owns the mbuf until it releases it.
+   * queue_id == UINT32_MAX means "drive all queues round-robin". */
+  virtual bool supports_mbuf_handoff() const { return false; }
+  virtual ktag_status next_mbuf(ktag_packet *, void **, uint32_t) {
+    return KTAG_ERROR_NOT_SUPPORTED;
+  }
   virtual void interrupt() = 0;
   virtual uint32_t link_type() const = 0;
   virtual const char *last_error() const = 0;

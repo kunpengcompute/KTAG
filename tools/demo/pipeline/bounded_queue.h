@@ -99,6 +99,36 @@ public:
         return ktag_demo_queue_push_result::pushed;
     }
 
+    // Used only by the parallel UB batch producer. Ordinary packet queues
+    // retain the original push() path, with no callback or cancellation checks.
+    template <typename Cancelled>
+    ktag_demo_queue_push_result push_interruptible(T value, Cancelled cancelled)
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (closed_ || capacity_ == 0U || cancelled()) {
+            return ktag_demo_queue_push_result::closed;
+        }
+        if (queue_.size() >= capacity_) {
+            ++statistics_.block_count;
+            const auto wait_start = std::chrono::steady_clock::now();
+            // Signal handlers cannot notify this condition variable. Normal
+            // consumers still wake this producer immediately when room opens.
+            while (!closed_ && queue_.size() >= capacity_ && !cancelled()) {
+                not_full_.wait_for(lock, std::chrono::milliseconds(10));
+            }
+            statistics_.blocked_nanoseconds += static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - wait_start).count());
+            if (closed_ || cancelled()) {
+                return ktag_demo_queue_push_result::closed;
+            }
+        }
+        queue_.push_back(std::move(value));
+        record_push_locked();
+        not_empty_.notify_one();
+        return ktag_demo_queue_push_result::pushed;
+    }
+
     bool pop(T *value)
     {
         if (value == nullptr) {
