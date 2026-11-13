@@ -167,3 +167,55 @@ TEST(KTAG_FEATURE_EXTRACT, FrozenIntervalStatisticsKeepLogarithmicRules) {
     EXPECT_DOUBLE_EQ(std::log2(3.0), result.mean_value);
     EXPECT_DOUBLE_EQ(std::log2(3.0), result.var_value);
 }
+
+TEST(KTAG_FEATURE_EXTRACT, MergedHistogramsMatchIndividualCalculations)
+{
+    std::vector<std::vector<uint32_t>> cases{
+        {0U},
+        {5U},
+        {0U, 0U, 0U},
+        {5U, 5U, 5U},
+        {1U, 3U},
+        {0U, 1U, 2U, 3U, 4U, 8U, 16U},
+        {0U, 1U, 3U, 7U, 15U, 31U, 63U, 127U, 255U, 256U},
+        {1000000U, 1000001U},
+        {0U, 1U, 65535U, std::numeric_limits<uint32_t>::max()},
+    };
+    std::vector<uint32_t> bin_boundaries;
+    for (uint32_t value = 0U; value <= 16U; ++value) {
+        bin_boundaries.push_back(value);
+    }
+    cases.push_back(bin_boundaries);
+    std::vector<uint32_t> mixed_samples;
+    uint32_t seed = 2026U;
+    for (uint32_t index = 0U; index < 1024U; ++index) {
+        seed = seed * 1664525U + 1013904223U;
+        mixed_samples.push_back(seed % 1000001U);
+    }
+    cases.push_back(mixed_samples);
+
+    statistics_info result{};
+    for (bool logarithmic : {false, true}) {
+        for (const auto &samples : cases) {
+            SCOPED_TRACE(::testing::Message()
+                         << "logarithmic=" << logarithmic
+                         << ", sample_count=" << samples.size()
+                         << ", first_sample=" << samples.front());
+            ASSERT_TRUE(cal_statistics_info(samples, result, logarithmic));
+            std::array<double, HISTOGRAM_NUMS> relative{};
+            std::array<double, HISTOGRAM_NUMS> absolute{};
+            std::array<double, HISTOGRAM_NUMS> normalized{};
+            calculate_hist(samples, result.min_value, result.max_value,
+                           relative.data(), HISTOGRAM_NUMS, logarithmic);
+            calculate_hist_abs(samples, result.max_value, absolute.data(),
+                               HISTOGRAM_NUMS, logarithmic);
+            calculate_hist_nor(samples, result.mean_value, result.var_value,
+                               normalized.data(), HISTOGRAM_NUMS, logarithmic);
+            for (int bin = 0; bin < HISTOGRAM_NUMS; ++bin) {
+                EXPECT_DOUBLE_EQ(relative[bin], result.hist_array[bin]);
+                EXPECT_DOUBLE_EQ(absolute[bin], result.hist_array_abs[bin]);
+                EXPECT_DOUBLE_EQ(normalized[bin], result.hist_array_nor[bin]);
+            }
+        }
+    }
+}

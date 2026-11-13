@@ -37,8 +37,11 @@ constexpr size_t TCP_SEGMENT_GAP_COUNT = 4U;
 constexpr size_t TCP_RETRANSMISSION_COUNT = 5U;
 constexpr size_t TCP_OUT_OF_ORDER_COUNT = 6U;
 constexpr size_t TCP_FORWARD_ENTROPY = 7U;
+constexpr size_t TCP_REVERSE_ENTROPY = 8U;
 constexpr size_t TCP_FORWARD_PRINTABLE_RATIO = 9U;
+constexpr size_t TCP_REVERSE_PRINTABLE_RATIO = 10U;
 constexpr size_t TCP_FORWARD_ZERO_RATIO = 11U;
+constexpr size_t TCP_REVERSE_ZERO_RATIO = 12U;
 constexpr size_t TLS_RECORD_CANDIDATE = 13U;
 constexpr size_t TLS_CLIENT_HELLO_COMPLETE = 14U;
 constexpr size_t TLS_LEGACY_VERSION = 15U;
@@ -1405,6 +1408,48 @@ TEST(KTAGProxyTcpSignature, ParsesTlsAcrossSegmentsAndIpVersions)
         tls12.feature(TLS_SUPPORTED_VERSION_MAX);
     ASSERT_NE(nullptr, tls12_supported);
     EXPECT_FLOAT_EQ(771.0F, tls12_supported[0U]);
+}
+
+TEST(KTAGProxyTcpSignature, SummarizesByteDistributionInBothDirections)
+{
+    const std::array<size_t, 6U> features{{
+        TCP_FORWARD_ENTROPY, TCP_REVERSE_ENTROPY,
+        TCP_FORWARD_PRINTABLE_RATIO, TCP_REVERSE_PRINTABLE_RATIO,
+        TCP_FORWARD_ZERO_RATIO, TCP_REVERSE_ZERO_RATIO,
+    }};
+    const std::array<float, 6U> expected{{
+        8.0F, 2.5F, 95.0F / 256.0F, 0.25F, 1.0F / 256.0F, 0.25F,
+    }};
+    std::vector<uint8_t> uniform;
+    for (uint32_t value = 0U; value < 256U; ++value) {
+        uniform.push_back(static_cast<uint8_t>(value));
+    }
+    const std::vector<uint8_t> mixed{
+        0U, 0U, 0x1fU, 0x20U, 0x7eU, 0x7fU, 0xffU, 0xffU,
+    };
+    tcp_signature_harness distribution;
+    ASSERT_TRUE(distribution.valid());
+    ASSERT_TRUE(distribution.process(
+        make_tcp_frame_with_payload(false, false, uniform, 1000U), 1U));
+    ASSERT_TRUE(distribution.process(
+        make_tcp_frame_with_payload(false, true, mixed, 2000U), 2U));
+    ASSERT_TRUE(distribution.finish());
+    for (size_t index = 0U; index < features.size(); ++index) {
+        const float *value = distribution.feature(features[index]);
+        ASSERT_NE(nullptr, value);
+        EXPECT_FLOAT_EQ(expected[index], value[0U]) << features[index];
+    }
+
+    tcp_signature_harness empty;
+    ASSERT_TRUE(empty.valid());
+    ASSERT_TRUE(empty.process(
+        make_tcp_frame_with_payload(false, false, {}, 3000U), 1U));
+    ASSERT_TRUE(empty.finish());
+    for (size_t feature : features) {
+        const float *value = empty.feature(feature);
+        ASSERT_NE(nullptr, value);
+        EXPECT_FLOAT_EQ(0.0F, value[0U]) << feature;
+    }
 }
 
 TEST(KTAGProxyTcpSignature, TracksTcpPrefixOrderingAndResourceCaps)

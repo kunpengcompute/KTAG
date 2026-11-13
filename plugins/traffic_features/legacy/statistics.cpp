@@ -175,10 +175,45 @@ bool cal_statistics_info(const std::vector<uint32_t> &array, statistics_info &ar
         array_si.var_value = log2(array_si.var_value + 1);  // 防止方差为0
     }
 
-    calculate_hist(array, array_si.min_value, array_si.max_value, array_si.hist_array, HISTOGRAM_NUMS, isTimeInterval);
-    calculate_hist_abs(array, array_si.max_value, array_si.hist_array_abs, HISTOGRAM_NUMS, isTimeInterval);
-    calculate_hist_nor(array, array_si.mean_value, array_si.var_value, array_si.hist_array_nor, HISTOGRAM_NUMS,
-                       isTimeInterval);
+    const double epsilon = 1e-5;
+    const double range = array_si.max_value - array_si.min_value;
+    const double absolute_bin_width = array_si.max_value / HISTOGRAM_NUMS;
+    const bool relative_degenerate = range < epsilon;
+    const bool absolute_degenerate = absolute_bin_width < epsilon;
+    const bool normalized_degenerate = array_si.var_value < epsilon;
+    if (relative_degenerate) {
+        array_si.hist_array[0] += array.size();
+    }
+    if (absolute_degenerate) {
+        array_si.hist_array_abs[0] += array.size();
+    }
+    if (normalized_degenerate) {
+        array_si.hist_array_nor[0] += array.size();
+    }
+    if (relative_degenerate && absolute_degenerate && normalized_degenerate) {
+        return true;
+    }
+
+    // Reuse each transformed sample across all three original binning formulas.
+    for (double num : array) {
+        if (isTimeInterval) {
+            num = log2(num + 1);
+        }
+        if (!relative_degenerate) {
+            const int bin = static_cast<int>(floor(
+                (num - array_si.min_value) / range * HISTOGRAM_NUMS));
+            array_si.hist_array[std::clamp(bin, 0, HISTOGRAM_NUMS - 1)]++;
+        }
+        if (!absolute_degenerate) {
+            const int bin = static_cast<int>(floor(num / absolute_bin_width));
+            array_si.hist_array_abs[std::clamp(bin, 0, HISTOGRAM_NUMS - 1)]++;
+        }
+        if (!normalized_degenerate) {
+            const int bin = static_cast<int>(floor(
+                (num - array_si.mean_value) / array_si.var_value * HISTOGRAM_NUMS));
+            array_si.hist_array_nor[std::clamp(bin, 0, HISTOGRAM_NUMS - 1)]++;
+        }
+    }
     return true;
 }
 
