@@ -229,7 +229,6 @@ struct pipeline_run_statistics {
     uint64_t feature_cpu_nanoseconds = 0U;
     uint64_t inference_nanoseconds = 0U;
     uint64_t inference_cpu_nanoseconds = 0U;
-    uint64_t file_io_nanoseconds = 0U;
     uint64_t elapsed_nanoseconds = 0U;
     uint64_t queue_drops = 0U;
     uint64_t queue_failures = 0U;
@@ -719,9 +718,11 @@ bool run_inference_batch(ktag_inference_context *inference,
                          ktag_prediction_batch *prediction_batch,
                          uint32_t source_index,
                          std::vector<pipeline_prediction> *predictions,
-                         std::string *error) {
+                         uint64_t *inference_nanoseconds, std::string *error) {
+    const auto inference_start = std::chrono::steady_clock::now();
     const ktag_status status =
         ktag_inference_predict(inference, features, prediction_batch);
+    *inference_nanoseconds += elapsed_nanoseconds(inference_start);
     if (status != KTAG_SUCCESS) {
         *error =
             std::string("inference failed: ") + ktag_inference_get_last_error();
@@ -757,11 +758,10 @@ bool process_feature_output_single(
     }
     statistics->inference_inputs += input_count;
     const size_t prediction_start = predictions->size();
-    const auto inference_start = std::chrono::steady_clock::now();
     const bool success =
         run_inference_batch(inference, features, prediction_batch, source_index,
-                            predictions, error);
-    statistics->inference_nanoseconds += elapsed_nanoseconds(inference_start);
+                            predictions, &statistics->inference_nanoseconds,
+                            error);
     statistics->predictions += predictions->size() - prediction_start;
     return success;
 }
@@ -2753,7 +2753,6 @@ int ktag_demo_run_pipeline_internal(
     }
   }
   if (success) {
-    const auto io_start = std::chrono::steady_clock::now();
     if (distributed_frontend) {
       /* Frontend output is the UB Feature stream; only Backend writes
        * Prediction files. */
@@ -2774,7 +2773,6 @@ int ktag_demo_run_pipeline_internal(
                     : ktag_demo_write_pipeline_predictions(
                           output_file, output_format, predictions, &error);
     }
-    run_statistics.file_io_nanoseconds += elapsed_nanoseconds(io_start);
   }
   run_statistics.elapsed_nanoseconds = elapsed_nanoseconds(run_start);
   if (!success) {
@@ -2798,11 +2796,6 @@ int ktag_demo_run_pipeline_internal(
         run_statistics.inference_nanoseconds / nanoseconds_per_second;
     performance.inference_cpu_time =
         run_statistics.inference_cpu_nanoseconds / nanoseconds_per_second;
-    performance.file_io_time =
-        run_statistics.file_io_nanoseconds / nanoseconds_per_second;
-    performance.total_time = performance.feature_extraction_time +
-                             performance.inference_time +
-                             performance.file_io_time;
     performance.end_to_end_time =
         run_statistics.elapsed_nanoseconds / nanoseconds_per_second;
     performance.total_packets = run_statistics.packets;

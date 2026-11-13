@@ -2,6 +2,7 @@
 #include "feature_session.h"
 #include "ktag_traffic_features.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -83,7 +84,8 @@ int ktag_demo_feature_session::copy_record(uint32_t index, feature_vector *out, 
     return KTAG_SUCCESS;
 }
 int ktag_demo_feature_session::process_record(const unsigned char *data, uint32_t length,
-    const timeval *timestamp, feature_vector *out, rawbow *text, int *ready) {
+    const timeval *timestamp, feature_vector *out, rawbow *text, int *ready,
+    double *compute_seconds) {
     if (!data || !length || !timestamp || !out || !ready || timestamp->tv_sec < 0 ||
         timestamp->tv_usec < 0 || timestamp->tv_usec > 999999 ||
         sequence_ == std::numeric_limits<uint64_t>::max()) return KTAG_ERROR_INVALID_ARGUMENT;
@@ -95,7 +97,14 @@ int ktag_demo_feature_session::process_record(const unsigned char *data, uint32_
     packet.link_type = link_type_; packet.sequence = sequence_++;
     packet.timestamp.seconds = timestamp->tv_sec;
     packet.timestamp.microseconds = static_cast<int32_t>(timestamp->tv_usec);
+    const auto compute_start = compute_seconds != nullptr
+        ? std::chrono::steady_clock::now()
+        : std::chrono::steady_clock::time_point{};
     const auto status = ktag_feature_process_packet(context_, &packet, batch_);
+    if (compute_seconds != nullptr) {
+        *compute_seconds += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - compute_start).count();
+    }
     if (status != KTAG_SUCCESS) return status;
     const auto count = ktag_feature_batch_get_count(batch_);
     if (!count) return KTAG_SUCCESS;
@@ -104,18 +113,27 @@ int ktag_demo_feature_session::process_record(const unsigned char *data, uint32_
     if (copied == KTAG_SUCCESS) *ready = 1;
     return copied;
 }
-int ktag_demo_feature_session::process(const unsigned char *p, uint32_t n, const timeval *t, feature_vector *v, int *ready) {
-    return process_record(p, n, t, v, nullptr, ready);
+int ktag_demo_feature_session::process(const unsigned char *p, uint32_t n, const timeval *t, feature_vector *v, int *ready,
+    double *compute_seconds) {
+    return process_record(p, n, t, v, nullptr, ready, compute_seconds);
 }
 int ktag_demo_feature_session::process_with_rawbow(const unsigned char *p, uint32_t n, const timeval *t, feature_vector *v, rawbow *s, int *ready) {
     if (!s) return KTAG_ERROR_INVALID_ARGUMENT;
-    return process_record(p, n, t, v, s, ready);
+    return process_record(p, n, t, v, s, ready, nullptr);
 }
-int ktag_demo_feature_session::flush_records(feature_vector_list *out, rawbow_list *text) {
+int ktag_demo_feature_session::flush_records(feature_vector_list *out, rawbow_list *text,
+    double *compute_seconds) {
     if (!out) return KTAG_ERROR_INVALID_ARGUMENT;
     out->count = 0U;
     if (text) text->count = 0U;
+    const auto compute_start = compute_seconds != nullptr
+        ? std::chrono::steady_clock::now()
+        : std::chrono::steady_clock::time_point{};
     const auto status = ktag_feature_flush(context_, batch_);
+    if (compute_seconds != nullptr) {
+        *compute_seconds += std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - compute_start).count();
+    }
     if (status != KTAG_SUCCESS) return status;
     const auto count = ktag_feature_batch_get_count(batch_);
     if (count > SIZE_MAX / sizeof(feature_vector) || count > SIZE_MAX / sizeof(rawbow)) return KTAG_ERROR_CAPACITY;
@@ -136,7 +154,9 @@ int ktag_demo_feature_session::flush_records(feature_vector_list *out, rawbow_li
     }
     return KTAG_SUCCESS;
 }
-int ktag_demo_feature_session::flush(feature_vector_list *out) { return flush_records(out, nullptr); }
+int ktag_demo_feature_session::flush(feature_vector_list *out, double *compute_seconds) {
+    return flush_records(out, nullptr, compute_seconds);
+}
 int ktag_demo_feature_session::flush_with_rawbow(feature_vector_list *out, rawbow_list *text) {
-    return text ? flush_records(out, text) : KTAG_ERROR_INVALID_ARGUMENT;
+    return text ? flush_records(out, text, nullptr) : KTAG_ERROR_INVALID_ARGUMENT;
 }

@@ -26,15 +26,14 @@ typedef struct {
 
 typedef struct {
     double pcap_read_time;
-    /* Parallel stages use the busiest worker's compute time. */
+    /* Timed Feature API calls; parallel stages use the busiest worker. */
     double feature_extraction_time;
     /* Sum of compute time across all Feature workers (CPU-seconds). */
     double feature_cpu_time;
+    /* Timed Inference API calls, excluding Demo input/output conversion. */
     double inference_time;
     /* Sum of compute time across all Inference workers (CPU-seconds). */
     double inference_cpu_time;
-    double file_io_time;
-    double total_time;
     double end_to_end_time;
     uint64_t total_bytes;
     uint64_t total_packets;

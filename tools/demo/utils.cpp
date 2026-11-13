@@ -438,6 +438,9 @@ void print_performance_stats(const PerformanceStats *stats) {
 
 void print_performance_stats_ex(const PerformanceStats *stats,
                                 int stages_overlap) {
+  /* Use one definition for every mode; I/O and queue/transport waits stay out. */
+  const double core_time =
+      stats->feature_extraction_time + stats->inference_time;
   printf("\n======================= 性能统计 =======================\n");
   printf(stages_overlap ? "PCAP读取累计耗时: %10.4f 秒\n"
                         : "PCAP读取耗时:       %10.4f 秒\n",
@@ -458,11 +461,10 @@ void print_performance_stats_ex(const PerformanceStats *stats,
            stats->feature_extraction_time);
     printf("推理耗时:           %10.4f 秒\n", stats->inference_time);
   }
-  printf("文件IO耗时:         %10.4f 秒\n", stats->file_io_time);
   printf(stages_overlap
-             ? "核心累计耗时:   %10.4f 秒 (多线程阶段可并行重叠)\n"
-             : "总耗时:           %10.4f 秒 (特征提取 + 推理 + 文件IO)\n",
-         stats->total_time);
+             ? "核心计算耗时:   %10.4f 秒 (特征处理 + 推理处理，多线程阶段可重叠)\n"
+             : "核心计算耗时:   %10.4f 秒 (特征处理 + 推理处理)\n",
+         core_time);
   printf("端到端总耗时:       %10.4f 秒 (包含PCAP读取等所有开销)\n",
          stats->end_to_end_time);
   printf("处理包数:           %10lu 个\n", stats->total_packets);
@@ -498,13 +500,11 @@ void print_performance_stats_ex(const PerformanceStats *stats,
     printf("推理计算样本率: %10.4f samples/s\n", samples_per_second);
   }
 
-  if (stats->total_time > 0) {
-    double mbps = (stats->total_bytes / (1024.0 * 1024.0)) / stats->total_time;
+  if (core_time > 0) {
+    double mbps = (stats->total_bytes / (1024.0 * 1024.0)) / core_time;
     double gbps = (stats->total_bytes * 8.0) / (1024.0 * 1024.0 * 1024.0) /
-                  stats->total_time;
-    printf(stages_overlap ? "核心处理吞吐量: %10.4f MB/s (%10.4f Gbps)\n"
-                          : "核心处理吞吐量: %10.4f MB/s (%10.4f Gbps)\n",
-           mbps, gbps);
+                  core_time;
+    printf("核心处理吞吐量: %10.4f MB/s (%10.4f Gbps)\n", mbps, gbps);
   }
 
   if (stats->end_to_end_time > 0) {

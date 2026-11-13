@@ -6,14 +6,24 @@
 # 都允许训练；缺少地址族只告警，不阻止训练。
 
 training_data_paths:
-  # 标签 0：VMess / WebSocket / TLS
+  - [
+      /data2/proxy_data/class-03-ssr-auth-aes128-md5/sample-01.csv,
+      /data2/proxy_data/class-03-ssr-auth-aes128-md5/sample-02.csv,
+      /data2/proxy_data/class-03-ssr-auth-aes128-md5/sample-05.csv,
+      /data2/proxy_data/class-03-ssr-auth-aes128-md5/sample-04.csv,
+    ]
+  - [
+      /data2/proxy_data/class-04-ssr-auth-aes128-sha1/sample-01.csv,
+      /data2/proxy_data/class-04-ssr-auth-aes128-sha1/sample-05.csv,
+      /data2/proxy_data/class-04-ssr-auth-aes128-sha1/sample-03.csv,
+      /data2/proxy_data/class-04-ssr-auth-aes128-sha1/sample-04.csv,
+    ]
   - [
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-01.csv,
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-02.csv,
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-03.csv,
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-04.csv,
     ]
-  # 标签 1：VMess / XHTTP(H2) / TLS
   - [
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-01.csv,
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-02.csv,
@@ -24,6 +34,12 @@ training_data_paths:
 evaluation_data_paths:
   # 与 training_data_paths 保持相同外层组顺序。评估文件不能复用训练 CSV；服务器
   # 端点重叠会告警但继续执行，需要结合采集记录人工判断泛化风险。
+  - [
+      /data2/proxy_data/class-03-ssr-auth-aes128-md5/sample-03.csv,
+    ]
+  - [
+      /data2/proxy_data/class-04-ssr-auth-aes128-sha1/sample-02.csv,
+    ]
   - [
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-05.csv,
     ]
