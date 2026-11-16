@@ -14,6 +14,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <utility>
 
 #include "ub_feature_wire.h"
+#include "ub_node_validation.h"
 
 #include <yaml-cpp/yaml.h>
 
@@ -372,6 +373,10 @@ bool validate_ub_config(const ktag_demo_pipeline_config &pipeline,
                                             config.provider_nodes.end());
   if (!all_nodes.insert(config.user_nodes.front()).second) {
     set_error(error, "distributed UB Provider/User hostnames must be unique");
+    return false;
+  }
+  if (!ktag_demo_validate_ub_hostname_order(
+          config.provider_nodes, config.user_nodes.front(), error)) {
     return false;
   }
   const bool is_provider =

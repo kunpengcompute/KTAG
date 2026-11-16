@@ -913,7 +913,7 @@ std::string ub_queue_test_yaml(uint32_t threads = 4U, uint32_t queues = 2U,
         "  distributed:\n"
         "    ub_ring:\n"
         "      provider_nodes: [fe-01, fe-02]\n"
-        "      user_nodes: [be-01]\n"
+        "      user_nodes: [user-01]\n"
         "      queues_per_provider: " + std::to_string(queues) + "\n"
         "      queue_depth: 1024\n"
         "      credits_per_queue: 64\n"
@@ -924,7 +924,7 @@ ktag_demo_pipeline_config_overrides ub_queue_test_role(bool frontend) {
     overrides.force_enable = true;
     overrides.distributed_role_set = true;
     overrides.distributed_role = frontend ? ktag_demo_distributed_role::frontend : ktag_demo_distributed_role::backend;
-    overrides.node_id = frontend ? "fe-01" : "be-01";
+    overrides.node_id = frontend ? "fe-01" : "user-01";
     return overrides;
 }
 } // namespace
@@ -1154,7 +1154,7 @@ TEST(KTAGDemoPipelineConfig, RejectsDistributedRoleOrBackpressureMismatch)
 {
     const auto path = write_config(ub_queue_test_yaml());
     auto overrides = ub_queue_test_role(true);
-    overrides.node_id = "be-01";
+    overrides.node_id = "user-01";
     ktag_demo_pipeline_config config;
     std::string error;
     EXPECT_EQ(ktag_demo_pipeline_config_result::error,

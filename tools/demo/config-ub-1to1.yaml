@@ -8,6 +8,7 @@
 # 按字典序排序计算 index，而 User 映射/find_peer_by_buf 使用原始数组下标；
 # 只有排序后顺序与原始顺序一致（后端排在所有前端之后）时两套 index 才重合。
 # 违反规则的后果是首个 CREDIT 即段错误（崩溃，不是 queue 报错）。
+# 程序现已在配置及transport初始化前检查此规则；不满足时明确报错退出，不进入SDK。
 #
 # 启动顺序：先启动 Frontend（等待 wait_shms 映射 User 内存），后启动
 # Backend（wait_shms 60 秒超时，Frontend 必须在此之前初始化完成）。

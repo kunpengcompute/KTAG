@@ -926,7 +926,6 @@ packets=128 parsed=126
 
 BORROWED模式的数据只在下一次 `next()` 或Context关闭前有效；OWNED模式复制数据后立即释放mbuf，调用方通过 `ktag_packet_release()` 释放报文副本。
 
-
 ### `ktag_dpdk_eal_init`
 
 #### 功能说明

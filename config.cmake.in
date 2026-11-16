@@ -52,9 +52,9 @@ if(KTAG_ENABLE_PERF_PROFILING)
     set(KTAG_STRIP_FLAG "")
 endif()
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DKTAG_APPID_CPU_LIMIT=${KTAG_APPID_CPU_LIMIT} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KTAG_VISIBILITY_FLAG} -Wl,-z,relro,-z,now,-z,noexecstack -fPIC ${KTAG_STRIP_FLAG} ${KTAG_PERF_COMPILE_FLAGS} -fcommon")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DKTAG_APPID_CPU_LIMIT=${KTAG_APPID_CPU_LIMIT} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KTAG_VISIBILITY_FLAG} -Wl,-z,relro,-z,now,-z,noexecstack -fPIC ${KTAG_STRIP_FLAG} ${KTAG_PERF_COMPILE_FLAGS} -fcommon")
-set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KTAG_VISIBILITY_FLAG} -fPIC -fcommon -march=armv8-a+sve")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DKTAG_APPID_CPU_LIMIT=${KTAG_APPID_CPU_LIMIT} -Wall -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KTAG_VISIBILITY_FLAG} -Wl,-z,relro,-z,now,-z,noexecstack -fPIC ${KTAG_STRIP_FLAG} ${KTAG_PERF_COMPILE_FLAGS} -fcommon")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DKTAG_APPID_CPU_LIMIT=${KTAG_APPID_CPU_LIMIT} -Wall -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KTAG_VISIBILITY_FLAG} -Wl,-z,relro,-z,now,-z,noexecstack -fPIC ${KTAG_STRIP_FLAG} ${KTAG_PERF_COMPILE_FLAGS} -fcommon")
+set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wall -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KTAG_VISIBILITY_FLAG} -fPIC -fcommon -march=armv8-a+sve")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,relro,-z,now,-z,noexecstack ${KTAG_STRIP_FLAG}")
 
 # 添加选项以启用 SVE256 指令集

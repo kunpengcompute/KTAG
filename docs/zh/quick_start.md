@@ -6,7 +6,7 @@
 
 ## 环境准备
 
-按照《[安装指南](installation_guide.md#快速安装)》完成KTAG编译。环境要求如下，其他依赖见[检查安装环境](installation_guide.md#检查安装环境)。
+按照《[安装指南](installation_guide.md)》完成KTAG编译。环境要求如下，其他依赖见[检查安装环境](installation_guide.md)。
 
 - Linux/AArch64，配套系统和编译器见[版本配套表](release_notes.md#ZH-CN_TOPIC_0000002518245458)。
 - 支持C++17的GCC/G++。
@@ -19,7 +19,7 @@ ls -l /opt/KTAG/output/KFlowLens \
   /opt/KTAG/output/plugins/libktag_traffic_features.so
 ```
 
-仅使用已有模型推理时不需要Python；要训练自己的模型（[第四步](#第四步生成训练特征可选)、[第五步](#第五步训练评估并使用新模型可选)），先安装依赖。
+仅使用已有模型推理时不需要Python；要训练自己的模型，先安装依赖。
 
 ```bash
 python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
@@ -78,7 +78,7 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 可使用 `-p a.pcap -p b.pcap --pcap-labels 0,0`，表示两个文件均属于类别0；
 数字标签需以实际训练和采集记录为准，不会覆盖模型预测的 `label`。
 省略时程序按文件顺序假定真实标签为0、1、2……并打印WARNING；模型包必须包含有效的
-`class_labels`，缺少时先使用当前版本 `-t` 重新导出。完整要求见[指定PCAP真实标签](user_guide.md#%E6%8C%87%E5%AE%9A-pcap-%E7%9C%9F%E5%AE%9E%E6%A0%87%E7%AD%BE)。
+`class_labels`，缺少时先使用当前版本 `-t` 重新导出。完整要求见[指定PCAP真实标签](user_guide.md)。
 
 **结果说明**
 
@@ -109,7 +109,6 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 **结果说明**
 
 实时推理结果写入 `/opt/KTAG/work/result/live_prediction.json`。
-
 
 ### 4. 生成训练特征（可选）
 
@@ -151,7 +150,7 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 
 **结果说明**
 
-训练命令退出码为0后，检查 `pipeline.model_package_path` 下的 `manifest.json`、`model.onnx` 和 `scaler.json`。评估命令退出码为0并生成配置指定的分类报告表示评估流程完成。回到[第二步](#第二步pcap-离线推理)，即可用新模型执行推理。
+训练命令退出码为0后，检查 `pipeline.model_package_path` 下的 `manifest.json`、`model.onnx` 和 `scaler.json`。评估命令退出码为0并生成配置指定的分类报告表示评估流程完成。回到pcap离线推理，即可用新模型执行推理。
 
 ## 更多功能
 

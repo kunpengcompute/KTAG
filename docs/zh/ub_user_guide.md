@@ -426,6 +426,7 @@ KTAG自身的CREDIT、空buffer及发送重试循环没有配置固定秒数的�
 | librte_ub_ring.so 不存在 | ldconfig -p、pkg-config --libs libdpdk，确认实际安装的是24.11运行库 |
 | Backend初始化超时或持续等待Provider | 3台Frontend是否都启动、hostname是否可解析、4台 region/shm_prefix 是否一致 |
 | --node-id does not belong... 或hostname错误 | hostname、provider_nodes/user_nodes 和 --node-id 是否完全匹配 |
+| UB hostname order invalid | 错误中列出的Provider名称必须按区分大小写的字典序小于User名称；核对真实hostname和拓扑配置 |
 | Schema/ruleset/hash不一致 | 4台配置SHA256、模型包、Schema、规则配置是否一致 |
 | Frontend长时间等待CREDIT | Backend是否已启动，Provider/User列表顺序是否一致，是否有旧进程占用同一共享内存 |
 | 只启动1个或2个Provider | Backend会等待所有3个Provider；检查3台Frontend的日志和进程状态 |
