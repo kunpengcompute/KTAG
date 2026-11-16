@@ -100,6 +100,7 @@ DPDK_PC_LIBS := $(shell pkg-config --libs libdpdk)
 CPPFLAGS += $(DPDK_PC_CFLAGS) -DKTAG_DEMO_HAVE_DPDK=1
 LD_LIBRARIES += -lktag_capture_dpdk $(DPDK_PC_LIBS)
 SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/demo_capture_dpdk_source.cpp
+SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/dpdk_ring_handoff.cpp
 else
 # Matched on the suffix: wildcard() yields "../..//common/functest//<file>",
 # so a literal prefix pattern never matches.
