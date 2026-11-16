@@ -24,6 +24,7 @@ output/ktag_demo -r tools/demo/proxy_config.yaml \
 ## 目录结构
 
 - `demo`：用于特征提取、训练、评估和在线推理的 C++ 示例程序。
+- [`tcp_pcap_bench`](tcp_pcap_bench/README.md)：前端本地读取 PCAP、提取及 Zstd 压缩、TCP 回传后端推理；沿用原 PCAP 读取语义，使用独立构建开关并输出计时 / 吞吐统计。
 - `demo/python`：demo 在模型训练和评估时调用的 Python 辅助脚本。
 - `demo/config.yaml`：现有应用分类的完整训练、评估和推理示例。
 - `demo/proxy_config.yaml`：`ktag_proxy_v1` 的训练、评估、特征提取和推理配置；
@@ -248,6 +249,8 @@ output/ktag_demo -r config.yaml -i 0000:03:00.0 --dpdk \
   `--dpdk-eal-args` 优先于 YAML 中的 `capture.dpdk.eal_args`。
 - 单线程模式（BORROWED）零拷贝指向 mbuf；并行模式（OWNED）复用
   `ktag_packet_make_owned` 拷入引用计数 buffer。
+- UB Frontend还支持多RX及 `capture.dpdk.handoff: ring`：使用mbuf直通和按RX/Feature分片的SPSC交接；worker注册到EAL以使用mbuf cache。queue交接仍保留。多RX、绑核和多sender示例见 `demo/config-ub-1to1.yaml`。
+- 普通流量特征由 `pipeline.plugins` 中的 `libktag_traffic_features.so` 提供；单机和UB共享354维契约，UB后端按相同Schema通过公共Inference API推理。UB线程、队列、credits与绑核要求见[UB指南](../docs/zh/ub_user_guide.md)。
 
 离线验证（无需真实流量，用 DPDK net_pcap vdev 把 pcap 文件模拟成网卡）：
 

@@ -1,5 +1,23 @@
 # KTAG 测试说明
 
+## POC 与商用特征插件集成回归
+
+普通流量插件的真实 Provider、354维冻结契约、DFA、统计优化、特征提取到UB帧编解码，
+以及应用/代理/UB示例配置可通过以下独立入口验证。依赖源码由调用者提供，不自动下载：
+
+```bash
+python3 test/common/traffic_plugin_contract_check.py --cxx c++ \
+  --gtest test/googletest-release-1.8.0 --yaml-cpp /path/to/yaml-cpp
+python3 test/common/dpdk_rx_worker_check.py --cxx c++
+python3 test/common/ub_queue_worker_check.py --cxx c++
+```
+
+可用 `--zig /path/to/zig` 替代 `--cxx`；pcap头文件不在系统路径时，第一项增加
+`--pcap-include /path/to/pcap/include`。前两类Provider/契约测试使用实际产品算法；
+RX与UB执行器检查使用mock网卡/传输/推理，不能代替真实DPDK/UB多节点性能验收。
+Linux上的常规功能测试也会自动编译新增的 `func_traffic_ub_contract.cpp` 和
+`func_integration_config.cpp`。
+
 本文介绍 KTAG 的测试框架和使用方法，覆盖功能测试、性能测试、ASan 内存检测、
 Fuzz 测试和 Python 工具链测试。测试统一入口为 `/opt/KTAG/test/build/`，KTAG
 源码根目录以 `/opt/KTAG` 为例。

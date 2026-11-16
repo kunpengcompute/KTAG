@@ -16,14 +16,14 @@ PCAP 放前端，模型包放后端；前端不执行推理，后端不读取输
 
 两端需要 Linux、C++17、CMake、libpcap、yaml-cpp、libzstd（1.4.0+）、ONNX Runtime。直接复用已有 KTAG 依赖，不要求 tcpreplay、tcprewrite、DPDK、UB 库或服务。当前项目根构建配置按 aarch64；下面适用于现场的 ARM Linux 服务器。
 
-本目标仅复用 KTAG 公共库和 Demo 的纯内部帧编码，不编译实时抓包或打流实现。`KTAG_BUILD_TCP_PCAP_BENCH` 默认关闭，需要时单独启用。
+本目标复用 KTAG 公共库和 Demo 的内部帧编码，不依赖打流工具。离线模式无需DPDK；在线模式可启用DPDK收包后端。`KTAG_BUILD_TCP_PCAP_BENCH` 默认关闭，需要时单独启用。
 
 在 KTAG 根目录执行；ONNX 路径改为实际包含 `include/onnxruntime_c_api.h` 和 `lib/libonnxruntime.so` 的安装根目录：
 
 ```bash
 export KTAG_ORT=/actual/onnxruntime
 cmake -S . -B build/tcp-pcap-bench \
-  -DKDADK_APPID_VERSION_INFO=1.0.1 \
+  -DKTAG_APPID_VERSION_INFO=1.0.1 \
   -DONNXRUNTIME_ROOT="$KTAG_ORT" \
   -DKTAG_BUILD_TOOLS=OFF \
   -DKTAG_BUILD_TCP_PCAP_BENCH=ON \
@@ -37,7 +37,7 @@ ldd output/ktag_tcp_pcap_bench
 output/ktag_tcp_pcap_bench --help
 ```
 
-`KDADK_APPID_VERSION_INFO` 必须传入；上面的 `1.0.1` 对应当前 `dependence.xml` 中的 `KDADK_APPID_INFO_VERSION`。原 `build.sh` 会读取并传入此值，直接运行 CMake 时不会自动读取。项目版本变更时须同步使用 XML 中的版本号。
+`KTAG_APPID_VERSION_INFO` 必须传入；上面的 `1.0.1` 对应当前 `dependence.xml` 中的 `KTAG_APPID_INFO_VERSION`。原 `build.sh` 会读取并传入此值，直接运行 CMake 时不会自动读取。项目版本变更时须同步使用 XML 中的版本号。
 
 若非标准安装路径的动态库未找到，按实际位置设置运行库搜索路径；sudo 启动时需要显式传入，但本地模式通常不需要 sudo：
 
@@ -45,7 +45,7 @@ output/ktag_tcp_pcap_bench --help
 export LD_LIBRARY_PATH="$PWD/output:$KTAG_ORT/lib:/usr/local/lib:/usr/local/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-两角色使用同一个新可执行文件，所以前端不需要模型包，但仍需要可加载 ONNX Runtime 动态库。无需先编译 `kdadk_demo`。如果只构建主程序，测试目标需另外构建后才能执行 CTest；关闭测试可用 `-DKTAG_TCP_PCAP_BENCH_BUILD_TESTS=OFF`。
+两角色使用同一个新可执行文件，所以前端不需要模型包，但仍需要可加载 ONNX Runtime 动态库。无需先编译 `ktag_demo`。如果只构建主程序，测试目标需另外构建后才能执行 CTest；关闭测试可用 `-DKTAG_TCP_PCAP_BENCH_BUILD_TESTS=OFF`。
 
 ## 输入和配置
 
@@ -161,3 +161,13 @@ python3 tools/tcp_pcap_bench/tests/test_loopback.py \
 该测试生成少量 UDP PCAP（含空文件和截断尾部），启动真实前端、真实后端及 ONNX 模型，检查逐文件 / 全局计数、特殊收尾、CSV 数量和 audit。也可配置 `-DKTAG_TCP_PCAP_TEST_MODEL=/data/legacy_model_package` 把它加入 CTest；未设置模型时不会把未验证的推理测试标为通过。
 
 当前 Windows 开发机已完成所有新增 C++ 源码 / 测试的 Linux/ARM64 对象编译、真实 Zstd / 特征帧测试和 yaml-cpp 配置解析测试；Python 脚本已做语法检查。尚未在本机完成完整 Linux 链接构建，socketpair、实际 Capture / frontend 和现场模型 loopback 需在 Linux 执行。双机吞吐及实际压缩率尚无实测数据。新模式验证结果不代表原打流模式已通过。
+
+## 普通流量插件依赖
+
+本工具保留独立TCP/Zstd在线及离线链路，特征计算已迁移到公共Feature API与
+traffic Provider插件。Frontend默认从公共特征库旁的
+`plugins/libktag_traffic_features.so` 加载插件，可用
+`KTAG_TRAFFIC_FEATURE_PLUGIN` 指定路径，或在配置的 `pipeline.plugins`
+（无pipeline段时为顶层 `plugins`）中显式列出插件路径；相对路径按配置文件目录解析。
+Schema仍为冻结的 `ktag_legacy_v1`（354维）。Backend只接收特征并调用公共推理API。
+构建该工具时须启用 `KTAG_BUILD_FEATURE_PLUGINS`，安装时部署配套公共库和插件。

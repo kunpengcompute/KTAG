@@ -62,8 +62,8 @@ Backend先向各Frontend投递CREDIT空缓冲区；Frontend填入特征后发送
 | 节点 | 多个Provider、唯一User，总节点数不超过256；本文为3:1 |
 | 名称 | hostname、YAML和 --node-id 完全一致；Provider名称字典序小于User名称 |
 | 配置 | 4台机器保持Provider/User列表、顺序、region、shm_prefix、Schema及规则一致 |
-| 队列 | 每Provider固定1个队列；queue_depth为至少2的2次幂；credits为 1..min(queue_depth-1,1023) |
-| 执行 | Frontend固定使用feature_parallel，Backend固定1个Inference线程；背压策略必须为block |
+| 队列 | 每Provider支持多个队列；queue_depth为至少2的2次幂；每队列credits为 1..min(queue_depth-1,1023) |
+| 执行 | Frontend使用feature_parallel；Backend每个worker独占一个队列，inference.threads必须等于Provider数×queues_per_provider；背压策略必须为block |
 | 结果 | 只在Backend落地结果，不回传Frontend；不在运行中单独重启Backend恢复原有会话 |
 
 单机与UB流程的选择如下。
@@ -173,7 +173,7 @@ sha256sum tools/demo/config.yaml
 
 ### UB 配置示例
 
-下面是 `tools/demo/config.yaml` 中与3:1 UB测试相关的核心配置。仓库中的文件已经包含这些内容，测试时只需要确认节点名称与现场hostname一致。
+下面是3:1 UB测试的核心配置。`tools/demo/config.yaml` 默认兼顾单机使用，启用3:1 UB前须将 `inference.threads` 改为3，并按实际CPU拓扑设置绑核列表。4台机器使用同一份配置。另有多RX、多sender的1:1示例 `tools/demo/config-ub-1to1.yaml`，也已启用普通流量特征插件。
 
 ```yaml
 pipeline:
@@ -187,7 +187,7 @@ pipeline:
     lifecycle_mode: legacy
 
   inference:
-    threads: 1
+    threads: 3
     batch_size: 256
     batch_timeout_us: 1000
     queue_capacity: 4096
@@ -208,7 +208,8 @@ pipeline:
       queues_per_provider: 1
       queue_depth: 1024
       data_element_size: 4096
-      credits_per_provider: 256
+      credits_per_queue: 64
+      backend_worker_cpus: "0-2"
       poll_us: 50
       eal_arguments: [ktag_demo, --no-huge, -l, "0"]
 
@@ -223,7 +224,7 @@ pipeline:
 
 Backend的模型包由本项目训练生成：按[训练步骤](user_guide.md#训练)准备应用Schema CSV，再使用同一配置执行 `ktag_demo -t`，产物写入 `pipeline.model_package_path`。也可部署已有且契约一致的交付模型包。示例路径表示部署位置，不表示仓库必然附带预训练模型。
 
-`pipeline.enabled: true` 表示普通单机Pipeline默认启用；`distributed.ub_ring.enabled: false` 表示UB默认关闭。`--distributed-role frontend/backend` 会为本次运行启用对应的UB角色，因此测试命令必须同时指定该参数与 `--node-id`。Frontend当前要求 `feature_parallel`，Backend要求一个推理线程。
+`pipeline.enabled: true` 表示普通单机Pipeline默认启用；`distributed.ub_ring.enabled: false` 表示UB默认关闭。`--distributed-role frontend/backend` 会为本次运行启用对应的UB角色，因此测试命令必须同时指定该参数与 `--node-id`。Frontend要求 `feature_parallel`，Backend线程数为Provider数×每Provider队列数，且显式配置同等数量的 `backend_worker_cpus`。UB场景不能再通过命令行覆盖线程数或Pipeline模式。
 
 `tools/demo/proxy_config.yaml` 当前用于代理特征、训练和单机推理，文件中没有 `pipeline.distributed.ub_ring` 配置，因此本次UB 3:1验证直接使用 `config.yaml`。如果后续要验证代理模型通过UB传输，需要在代理配置中补充同一套 `distributed.ub_ring` 配置，并同时保证Backend的代理模型包和4台机器的Schema配置一致。
 
@@ -235,12 +236,14 @@ Backend的模型包由本项目训练生成：按[训练步骤](user_guide.md#�
 | user_nodes | 只能填写一个Backend hostname |
 | region、shm_prefix | 4台机器必须一致，用于发现和映射共享内存 |
 | provider_shm_size | 每个Provider创建的共享内存，单位字节；默认268435456（256MiB），必须大于0且不超过本机size_t范围；按内存和队列占用配置 |
-| queues_per_provider | 当前实现固定为 1 |
+| queues_per_provider | 每Provider队列数；Backend worker总数为Provider数×该值 |
 | queue_depth | Ring深度，必须为2的幂；当前建议 1024 |
 | data_element_size | 应用可见Feature Frame最大载荷，单位字节，默认4096；需容纳当前Schema编码帧及元数据，启动时校验 |
-| credits_per_provider | Backend为每个Provider预投递的空buffer数量，必须小于 queue_depth；当前建议 256 |
+| credits_per_queue | Backend为每个队列预投递的空buffer数量，范围1..min(queue_depth-1,1023)，默认64；旧credits_per_provider键已停用 |
+| backend_worker_cpus | Backend逐worker绑核的CPU列表，数量必须等于inference.threads，例如"0-2" |
+| sender_threads / sender_worker_cpus | Frontend发送线程数量及可选绑核列表；sender不超过每Provider队列数，各sender独占分配给自己的队列 |
 | backpressure.policy | 必须为 block，过载时阻塞，不主动丢弃Feature |
-| inference.threads | 当前Backend实现固定为 1 |
+| inference.threads | 必须在YAML中显式配置为Provider数×queues_per_provider；每个worker独占队列和推理Context |
 | model_package_path | Backend必须能访问匹配当前Schema的模型包；Frontend只做特征提取 |
 | poll_us | 空轮询退避间隔，单位微秒，默认50；uint32范围，0时让出线程调度，不表示超时时间 |
 | eal_arguments | 有序字符串列表；省略时为 [ktag_demo, --no-huge, -l, "0"]，首项为程序名； --no-huge 是此UB传输初始化的默认参数，不代表DPDK收包后端无需hugepage；现场调整需遵守配套DPDK/UB要求 |
@@ -436,7 +439,7 @@ KTAG自身的CREDIT、空buffer及发送重试循环没有配置固定秒数的�
 
 - 本测试验证的是“Frontend特征提取 → UB共享内存 → Backend接收 → 推理 → Backend落地”的链路，不验证模型训练过程。
 - 默认使用已有模型包；不配置 `ground_truth_labels` 也可以完成链路验证。
-- 本指南使用3个Provider、1个User；代码支持多个Provider与唯一User，节点总数不超过256。当前每个Provider固定1个队列、Backend固定1个推理线程。
+- 本指南使用3个Provider、1个User；代码支持多个Provider与唯一User，节点总数不超过256。支持每Provider多队列及Backend多worker独占队列推理。
 - Backend不把推理结果发送回Frontend。
 - 过载时允许阻塞，本文不把“处理速度下降”判定为UB丢包；需要重点区分主动丢弃、底层网卡丢包和正常背压等待。
 
