@@ -28,7 +28,7 @@ output/ktag_demo -r tools/demo/proxy_config.yaml \
 - `demo/python`：demo 在模型训练和评估时调用的 Python 辅助脚本。
 - `demo/config.yaml`：现有应用分类的完整训练、评估和推理示例。
 - `demo/proxy_config.yaml`：`ktag_proxy_v1` 的训练、评估、特征提取和推理配置；
-  当前启用两个 VMess 承载类别，13 类只是数据齐备后的参考训练规划。
+  当前启用两个 SSR 类别和两个 VMess 承载类别，13 类只是数据齐备后的参考训练规划。
 - `data/feature_filter.py`：CSV 特征过滤工具。
 - `data/dataset_preflight.py`：只读检查双栈 Schema CSV 和现有训练/评估配置。
 - `capture` 和 `labeling`：流量抓包和打标签工具。
@@ -126,10 +126,10 @@ python3 /opt/KTAG/tools/model_package/create_legacy_package.py \
 
 - `/opt/KTAG/tools/demo/config.yaml` 保持应用分类示例：`ktag_legacy_v1`，53 个 Feature
   Descriptor、354 个数值，Hash 为 `0xdd48882b53bebfa5`。
-- `/opt/KTAG/tools/demo/proxy_config.yaml` 是代理 Schema 完整结构和两分类数据示例配置：加载
+- `/opt/KTAG/tools/demo/proxy_config.yaml` 是代理 Schema 完整结构和四分类数据示例配置：加载
   `libktag_proxy_features.so`，组合 `ktag_proxy_v1`，118 个 Feature Descriptor、
   619 个数值，Hash 为 `0xca1eae5086b41ee5`；数字标签由当前启用的数据组顺序决定。
-  当前文件实际启用两个 VMess 承载类别，只是增量训练示例；普通流量和其余代理类别
+  当前文件实际启用两个 SSR 类别和两个 VMess 承载类别，只是增量训练示例；普通流量和其余代理类别
   需要在具备相应数据后作为新的外层组加入并重新训练。
 
 生成 Schema CSV：

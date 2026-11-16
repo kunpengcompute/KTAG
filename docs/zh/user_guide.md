@@ -22,7 +22,7 @@ KTAG提供两套正式特征契约。
 Schema已在组合阶段排除这三个Feature，并在351维通用特征基础上增加268维
 代理专用特征，因此Schema和模型输入均为619个数值。
 
-`proxy_config.yaml` 是可运行的两分类示例：标签0为VMess/WebSocket/TLS，标签1为VMess/XHTTP(H2)/TLS。若要识别普通流量或其余代理形态，必须把对应流量作为独立外层数据组参与训练；KTAG不在模型之前提供自动判断“普通流/VPN流”的规则引擎。
+`proxy_config.yaml` 是四分类示例：标签0/1为SSR/auth-aes128-md5和SSR/auth-aes128-sha1，标签2/3为VMess/WebSocket/TLS和VMess/XHTTP(H2)/TLS。若要识别普通流量或其余代理形态，必须把对应流量作为独立外层数据组参与训练；KTAG不在模型之前提供自动判断“普通流/VPN流”的规则引擎。
 
 本期“VPN识别”实际指应用代理或加密代理流量分类，包括Shadowsocks、
 ShadowsocksR、VMess、VLESS、Trojan、Hysteria2及其约定承载形态，不包含
@@ -58,7 +58,7 @@ Salamander等混淆后，标准QUIC Header可能无法解析；解析失败计�
 
 ## 约束与限制
 
-- 示例代理配置只启用两个VMess承载类别；识别其他类别需要准备对应数据并重新训练。
+- 示例代理配置启用两个SSR类别与两个VMess承载类别；识别其他类别需要准备对应数据并重新训练。
 - KTAG不内置 `unknown` 标签或confidence阈值；输出为模型数字标签。
 - 要区分普通流量和代理流量，训练数据中必须存在具有明确数字标签的普通流量类别。
 - 服务器地址跨训练/评估重叠只告警，需要数据侧人工判断是否会造成泄漏。

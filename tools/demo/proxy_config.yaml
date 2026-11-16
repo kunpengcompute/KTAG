@@ -1,6 +1,7 @@
 # ktag_proxy_v1 的 Schema CSV、训练、评估和在线推理配置。
-# 当前实际启用的是两分类增量示例：label 0 为 VMess/WebSocket/TLS，label 1 为
-# VMess/XHTTP(H2)/TLS。外层数据组顺序就是当前模型的数字标签，训练和评估必须对齐。
+# 当前启用四分类增量示例：label 0/1 分别为 SSR/auth-aes128-md5 和
+# SSR/auth-aes128-sha1，label 2/3 分别为 VMess/WebSocket/TLS 和 VMess/XHTTP(H2)/TLS。
+# 外层数据组顺序就是当前模型的数字标签，训练和评估必须对齐。
 # 若要形成“普通流量 + 完整代理形态”的新模型，应重新确定并冻结整套外层组顺序，
 # 不能假定当前两分类标签与未来模型保持相同含义。IPv4-only、IPv6-only 和混合数据
 # 都允许训练；缺少地址族只告警，不阻止训练。

@@ -22,7 +22,7 @@ KTAG（Kunpeng TAG，鲲鹏流量分类库）是鲲鹏数据分析开发套件�
 
 当前仓库还提供 IPv4/IPv6 双栈 Schema 特征提取和独立的应用/代理分类配置。代理
 分类使用可选的 `libktag_proxy_features.so` 插件和 619 维 `ktag_proxy_v1` Schema。
-仓库中的代理配置是两个 VMess 承载类别的可运行示例。完整范围、命令和限制请参见
+仓库中的代理配置是两个 SSR 类别与两个 VMess 承载类别的四分类示例。完整范围、命令和限制请参见
 《[用户指南](docs/zh/user_guide.md)》。
 
 ## 项目结构
