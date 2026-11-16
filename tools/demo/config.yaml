@@ -54,12 +54,11 @@ onnx_log_level: WARNING
 columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
 filter_packets: 16
 
-# 新 Pipeline 默认不启用，以保留原 online_inference_mode 和现有模型配置；命令行
-# 显式传入 --pipeline-mode 时，只为本次运行启用该 Pipeline。
+# -f/-r 统一使用 Schema/Provider Pipeline。
 pipeline:
-  enabled: false
+  enabled: true
   mode: feature_parallel
-  # 选择完整 Legacy V1 契约时，kdadk_demo -t 在写出旧 ONNX/Scaler 后自动生成
+  # 选择完整 Legacy V1 契约时，ktag_demo -t 在写出旧 ONNX/Scaler 后自动生成
   # 与该 Schema 绑定的模型包。
   model_package_path: ../../result/legacy_model_package
   # 在线 -c/-j 保留数字 label/confidence 和 IPv4/IPv6 流元数据。confidence=0
@@ -72,12 +71,11 @@ pipeline:
     threads: 4
     queue_capacity: 65536
     flow_hash_seed: 2026
-    # legacy 使四种新 Pipeline 拓扑复现现有训练数据/模型使用的旧固定向量流生命周期。
+    # legacy 复现现有训练数据/模型使用的流生命周期。
     lifecycle_mode: legacy
     expire_interval_ms: 1000
 
   inference:
-    # 单机默认保持 1；启用下面 3:1 UB 拓扑时需改为 3（前端数 × 每前端队列数）。
     threads: 1
     batch_size: 256
     batch_timeout_us: 1000
@@ -112,9 +110,10 @@ pipeline:
       #   fe-02: [1, 4]
       #   fe-03: [2]
       # 第一项是 EAL 的 argv[0]；现场根据 CPU 绑核和部署环境调整。
-      eal_arguments: [kdadk_demo, --no-huge, -l, "0"]
+      eal_arguments: [ktag_demo, --no-huge, -l, "0"]
 
-  plugins: []
+  plugins:
+    - ../../output/plugins/libktag_traffic_features.so
   schema:
     # 正式应用契约：53 个 Feature Descriptor / 354 个值，Hash
     # 0xdd48882b53bebfa5。自定义选择不能复用该名称。

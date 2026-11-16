@@ -145,8 +145,7 @@ class OnlineFrontend {
         active_rx_(c.rx_threads), active_features_(c.feature_threads), rules_hash_(c.rules_hash()), lanes_(c.inference_threads) {
     check_cpus(c.rx_cpus, allowed_); check_cpus(c.feature_cpus, allowed_); check_cpus(c.sender_cpus, allowed_);
     metrics_.schema_hash = ktag_feature_schema_get_hash(schema_.get());
-    require(bool(registry_) && ktag_feature_registry_register_legacy_builtins(registry_.get()) == KTAG_SUCCESS,
-            "cannot create builtin feature registry");
+    load_feature_plugins(c, registry_.get(), plugins_);
     ktag_domain_store_config dc{}; dc.struct_size = sizeof(dc); dc.api_version = KTAG_API_VERSION;
     dc.max_entries = KTAG_DOMAIN_DEFAULT_MAX_ENTRIES; dc.journal_capacity = KTAG_DOMAIN_DEFAULT_JOURNAL_CAPACITY;
     domain_.reset(ktag_domain_store_create(&dc)); require(bool(domain_), "cannot create domain store");
@@ -462,7 +461,7 @@ class OnlineFrontend {
   }
 
   const Config &c_; Metrics &metrics_; cpu_set_t allowed_;
-  Schema schema_; Registry registry_; Domain domain_;
+  Schema schema_; FeaturePlugins plugins_; Registry registry_; Domain domain_;
   std::vector<Feature> contexts_;
   std::unique_ptr<void, decltype(&ktag_dpdk_capture_close)> capture_;
   std::vector<std::unique_ptr<Queue<Packet>>> packets_;

@@ -15,12 +15,12 @@
 # 启动命令（--distributed-role 会强制启用本 distributed 段）：
 #
 #   Frontend (computer01):
-#     output/kdadk_demo -r tools/demo/config-ub-1to1.yaml \
+#     output/ktag_demo -r tools/demo/config-ub-1to1.yaml \
 #       -p /data/class0.pcap -p /data/class1.pcap \
 #       --distributed-role frontend --node-id "$(hostname)"
 #
 #   Backend (controller):
-#     output/kdadk_demo -r tools/demo/config-ub-1to1.yaml \
+#     output/ktag_demo -r tools/demo/config-ub-1to1.yaml \
 #       --distributed-role backend --node-id "$(hostname)" \
 #       -c /data/result/distributed-1to1.csv
 
@@ -91,9 +91,10 @@ pipeline:
       # 第一项是 EAL 的 argv[0]；这是离线 PCAP 的 UB EAL 参数。
       # 允许 SDK/控制线程在 CPU 0-95 调度；业务线程按各 worker_cpus 显式绑定。
       # 在线 --dpdk 首先使用 capture.dpdk.eal_args 初始化 EAL，应在该字段也设置合适的 CPU 掩码。
-      eal_arguments: [kdadk_demo, --no-huge, --no-pci, --iova-mode=va, "--lcores=0@(0-95)"]
+      eal_arguments: [ktag_demo, --no-huge, --no-pci, --iova-mode=va, "--lcores=0@(0-95)"]
 
-  plugins: []
+  plugins:
+    - ../../output/plugins/libktag_traffic_features.so
   schema:
     # 与单机基线一致：冻结契约 ktag_legacy_v1（354 值，Hash
     # 0xdd48882b53bebfa5；模型包按 manifest 选 351 个输入值）。

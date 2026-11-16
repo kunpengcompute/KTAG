@@ -143,7 +143,7 @@ TEST_F(InferenceContractTest, ResolvesFeatureIdsDimensionsAndIgnoresExtras)
     ASSERT_EQ(
         KTAG_SUCCESS,
         ktag_inference_validate_model_package(
-            package.c_str(), schema, &result))
+            package.string().c_str(), schema, &result))
         << ktag_inference_get_last_error();
     EXPECT_EQ(schema_hash, result.schema_hash);
     EXPECT_EQ(2U, result.input_feature_count);
@@ -167,7 +167,7 @@ TEST_F(InferenceContractTest, RejectsManifestSchemaMismatch)
     EXPECT_EQ(
         KTAG_ERROR_SCHEMA_MISMATCH,
         ktag_inference_validate_model_package(
-            package.c_str(), schema, &result));
+            package.string().c_str(), schema, &result));
     EXPECT_STRNE("", ktag_inference_get_last_error());
 }
 
@@ -185,7 +185,7 @@ TEST_F(InferenceContractTest, RejectsMissingRequiredFeature)
     EXPECT_EQ(
         KTAG_ERROR_NOT_FOUND,
         ktag_inference_validate_model_package(
-            package.c_str(), schema, &result));
+            package.string().c_str(), schema, &result));
 }
 
 TEST_F(InferenceContractTest, ExplicitZeroPolicyRequiresAndUsesDimension)
@@ -205,7 +205,7 @@ TEST_F(InferenceContractTest, ExplicitZeroPolicyRequiresAndUsesDimension)
     ASSERT_EQ(
         KTAG_SUCCESS,
         ktag_inference_validate_model_package(
-            package.c_str(), schema, &result))
+            package.string().c_str(), schema, &result))
         << ktag_inference_get_last_error();
     EXPECT_EQ(1U, result.input_feature_count);
     EXPECT_EQ(2U, result.input_value_count);
@@ -225,7 +225,7 @@ TEST_F(InferenceContractTest, ZeroPolicyRejectsMissingFeatureWithoutDimension)
     EXPECT_EQ(
         KTAG_ERROR_NOT_FOUND,
         ktag_inference_validate_model_package(
-            package.c_str(), schema, &result));
+            package.string().c_str(), schema, &result));
 }
 
 TEST_F(InferenceContractTest, RejectsScalerFeatureOrderMismatch)
@@ -244,7 +244,7 @@ TEST_F(InferenceContractTest, RejectsScalerFeatureOrderMismatch)
     EXPECT_EQ(
         KTAG_ERROR_SCHEMA_MISMATCH,
         ktag_inference_validate_model_package(
-            package.c_str(), schema, &result));
+            package.string().c_str(), schema, &result));
 }
 
 TEST_F(InferenceContractTest, RejectsScalerSchemaMismatch)
@@ -263,7 +263,7 @@ TEST_F(InferenceContractTest, RejectsScalerSchemaMismatch)
     EXPECT_EQ(
         KTAG_ERROR_SCHEMA_MISMATCH,
         ktag_inference_validate_model_package(
-            package.c_str(), schema, &result));
+            package.string().c_str(), schema, &result));
 }
 
 TEST(KTAGPredictionBatch, OwnsRecordsAndValidatesAccess)

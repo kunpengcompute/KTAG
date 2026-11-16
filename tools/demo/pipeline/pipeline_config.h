@@ -55,6 +55,8 @@ struct ktag_demo_pipeline_config {
   bool feature_only = false;
   ktag_demo_pipeline_mode mode = ktag_demo_pipeline_mode::single_thread;
   std::string model_package_path;
+  bool pcap_labels_specified = false;
+  std::string pcap_labels;
 
   uint32_t packet_pool_size = 65536U;
   uint32_t feature_threads = 4U;

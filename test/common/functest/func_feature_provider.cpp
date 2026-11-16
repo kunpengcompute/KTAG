@@ -132,6 +132,22 @@ ktag_status failing_finish(
     return KTAG_ERROR_INTERNAL;
 }
 
+ktag_status annotation_finish(
+    void *,
+    void *,
+    const ktag_flow_view *,
+    ktag_feature_output *output)
+{
+    const float value = 1.0F;
+    if (ktag_feature_output_set(output, "test.annotation", &value, 1U) !=
+            KTAG_SUCCESS ||
+        ktag_feature_output_annotations_enabled(output) == 0U) {
+        return KTAG_ERROR_INTERNAL;
+    }
+    return ktag_feature_output_set_annotation(
+        output, "test.note", "provider-owned text");
+}
+
 ktag_feature_provider_registration registration(
     const ktag_feature_descriptor *features,
     uint32_t feature_count,
@@ -186,11 +202,10 @@ TEST(KTAGFeatureProvider, RunsCustomCallbacksByFeatureIdAndSchemaOrder)
     ktag_feature_registry_destroy(registry);
     EXPECT_EQ(1U, counts.provider_create);
 
-    flow_hash_node node{};
-    node.raw_data.packets_cnt = 3;
     ktag_feature_flow_runtime runtime{};
     ASSERT_EQ(KTAG_SUCCESS,
-              ktag_feature_flow_runtime_create_internal(pipeline, &node, 77, &runtime));
+              ktag_feature_flow_runtime_create_internal(pipeline, 77, &runtime));
+    runtime.flow.directions[0U].packet_count = 3U;
     const uint8_t packet[] = {0x11U, 0x22U, 0x33U};
     const ktag_timestamp timestamp{7, 8};
     ASSERT_EQ(KTAG_SUCCESS, ktag_feature_flow_runtime_on_packet_internal(
@@ -238,15 +253,60 @@ TEST(KTAGFeatureProvider, FillZeroPolicyClearsPartialCallbackOutput)
     ktag_feature_pipeline *pipeline = ktag_feature_pipeline_create_internal(schema, registry);
     ASSERT_NE(nullptr, pipeline);
 
-    flow_hash_node node{};
     ktag_feature_flow_runtime runtime{};
     ASSERT_EQ(KTAG_SUCCESS,
-              ktag_feature_flow_runtime_create_internal(pipeline, &node, 1, &runtime));
+              ktag_feature_flow_runtime_create_internal(pipeline, 1, &runtime));
     float output = -1.0F;
     EXPECT_EQ(KTAG_SUCCESS,
               ktag_feature_flow_runtime_finish_internal(&runtime, &output, 1));
     EXPECT_FLOAT_EQ(0.0F, output);
 
+    ktag_feature_pipeline_destroy_internal(pipeline);
+    ktag_feature_schema_destroy(schema);
+    ktag_feature_registry_destroy(registry);
+}
+
+TEST(KTAGFeatureProvider, CollectsOptionalProviderAnnotations)
+{
+    auto feature = descriptor("test.annotation", "annotation", 1);
+    ktag_feature_provider_registration provider{};
+    provider.struct_size = sizeof(provider);
+    provider.api_version = KTAG_API_VERSION;
+    provider.provider_id = "test.lifecycle";
+    provider.provider_version = 1;
+    provider.features = &feature;
+    provider.feature_count = 1;
+    provider.callbacks.struct_size = sizeof(provider.callbacks);
+    provider.callbacks.api_version = KTAG_API_VERSION;
+    provider.callbacks.flow_finish = annotation_finish;
+
+    ktag_feature_registry *registry = ktag_feature_registry_create();
+    ktag_feature_schema *schema =
+        ktag_feature_schema_create("provider_annotation", 1);
+    ASSERT_NE(nullptr, registry);
+    ASSERT_NE(nullptr, schema);
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_registry_register(
+                                registry, &provider,
+                                KTAG_FEATURE_REGISTER_DEFAULT));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_add_registered(
+                                schema, registry, "test.annotation"));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(schema));
+
+    ktag_feature_pipeline *pipeline =
+        ktag_feature_pipeline_create_internal(schema, registry);
+    ASSERT_NE(nullptr, pipeline);
+    pipeline->collect_annotations = true;
+
+    ktag_feature_flow_runtime runtime{};
+    ASSERT_EQ(KTAG_SUCCESS,
+              ktag_feature_flow_runtime_create_internal(pipeline, 1, &runtime));
+    float output = 0.0F;
+    ASSERT_EQ(KTAG_SUCCESS,
+              ktag_feature_flow_runtime_finish_internal(&runtime, &output, 1));
+    ASSERT_EQ(1U, runtime.annotations.count("test.note"));
+    EXPECT_EQ("provider-owned text", runtime.annotations.at("test.note"));
+
+    ktag_feature_flow_runtime_destroy_internal(&runtime);
     ktag_feature_pipeline_destroy_internal(pipeline);
     ktag_feature_schema_destroy(schema);
     ktag_feature_registry_destroy(registry);

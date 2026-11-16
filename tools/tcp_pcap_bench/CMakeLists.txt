@@ -7,13 +7,14 @@ find_library(KTAG_PCAP_BENCH_ZSTD_LIB NAMES zstd REQUIRED)
 get_filename_component(KTAG_PCAP_BENCH_YAML_LIBDIR "${YAML_CPP_LIB}" DIRECTORY)
 get_filename_component(KTAG_PCAP_BENCH_ORT_LIBDIR "${ONNXRUNTIME_LIB}" DIRECTORY)
 add_executable(ktag_tcp_pcap_bench
-    main.cpp config.cpp protocol.cpp tcp_transport.cpp network_environment.cpp
+    main.cpp config.cpp protocol.cpp tcp_transport.cpp network_environment.cpp feature_plugins.cpp
     offline_input.cpp frontend.cpp backend.cpp online_pipeline.cpp metrics.cpp
     ../demo/pipeline/ub_feature_wire.cpp)
 target_include_directories(ktag_tcp_pcap_bench PRIVATE
     ${PROJECT_SOURCE_DIR}/include ../demo/pipeline ${YAML_CPP_INCLUDE} ${KTAG_PCAP_BENCH_ZSTD_INCLUDE})
 target_link_libraries(ktag_tcp_pcap_bench PRIVATE
-    ktag_capture ktag_feature ktag_inference Threads::Threads ${YAML_CPP_LIB} ${KTAG_PCAP_BENCH_ZSTD_LIB})
+    ktag_capture ktag_feature ktag_inference Threads::Threads ${YAML_CPP_LIB} ${KTAG_PCAP_BENCH_ZSTD_LIB} ${CMAKE_DL_LIBS})
+add_dependencies(ktag_tcp_pcap_bench ktag_traffic_features)
 if(KTAG_ENABLE_DPDK)
     target_compile_definitions(ktag_tcp_pcap_bench PRIVATE KTAG_TCP_BENCH_HAVE_DPDK=1)
     target_link_libraries(ktag_tcp_pcap_bench PRIVATE ktag_capture_dpdk)

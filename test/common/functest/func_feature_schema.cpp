@@ -3,11 +3,13 @@
  */
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstring>
 #include <string>
 #include <vector>
 
 #include "ktag_feature.h"
+#include "ktag_traffic_features.h"
 
 namespace {
 
@@ -132,7 +134,33 @@ TEST(KTAGFeatureSchema, HashIsStableAndOrderSensitive)
     ktag_feature_schema_destroy(schema_reordered);
 }
 
-TEST(KTAGFeatureSchema, LegacySchemaMatchesExistingContract)
+TEST(KTAGFeatureSchema, PublicProviderIdsRemainHashIdentities)
+{
+    auto split = make_descriptor("test.feature", "feature");
+    split.provider_id = "builtin.legacy.send.counters";
+    auto combined = split;
+    combined.provider_id = "builtin.legacy.traffic_statistics";
+
+    ktag_feature_schema *split_schema =
+        ktag_feature_schema_create("provider_identity", 1);
+    ktag_feature_schema *combined_schema =
+        ktag_feature_schema_create("provider_identity", 1);
+    ASSERT_NE(nullptr, split_schema);
+    ASSERT_NE(nullptr, combined_schema);
+
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_add(split_schema, &split));
+    ASSERT_EQ(KTAG_SUCCESS,
+              ktag_feature_schema_add(combined_schema, &combined));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(split_schema));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(combined_schema));
+    EXPECT_NE(ktag_feature_schema_get_hash(split_schema),
+              ktag_feature_schema_get_hash(combined_schema));
+
+    ktag_feature_schema_destroy(split_schema);
+    ktag_feature_schema_destroy(combined_schema);
+}
+
+TEST(KTAGFeatureSchema, SlottedLegacySchemaPreservesValueContract)
 {
     ktag_feature_schema *schema = ktag_feature_schema_create_legacy_v1();
     ASSERT_NE(nullptr, schema);
@@ -147,6 +175,10 @@ TEST(KTAGFeatureSchema, LegacySchemaMatchesExistingContract)
     EXPECT_EQ(0U, offset);
     ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_find(schema, "traffic.send.packet_count", &descriptor, &offset));
     EXPECT_EQ(7U, offset);
+    EXPECT_STREQ("builtin.legacy.send.counters", descriptor.provider_id);
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_find(schema, "traffic.send.header.minimum", &descriptor, &offset));
+    EXPECT_EQ(8U, offset);
+    EXPECT_STREQ("builtin.legacy.send.header", descriptor.provider_id);
     ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_find(schema, "traffic.receive.packet_count", &descriptor, &offset));
     EXPECT_EQ(165U, offset);
     ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_find(schema, "rawbow.crc_histogram", &descriptor, &offset));
@@ -324,7 +356,42 @@ TEST(KTAGFeatureRegistry, RegisterAddToSchemaReplaceAndUnregister)
     ktag_feature_registry_destroy(registry);
 }
 
-TEST(KTAGFeatureRegistry, LegacyBuiltinRegistrationRollsBackOnCollision)
+TEST(KTAGFeatureRegistry, AcceptsRegistrationWithoutContractIdentityField)
+{
+    ktag_feature_registry *registry = ktag_feature_registry_create();
+    ASSERT_NE(nullptr, registry);
+
+    auto feature = make_descriptor("compat.feature", "compat");
+    auto registration = make_registration("test.provider", 1, &feature, 1);
+    registration.struct_size = static_cast<uint32_t>(
+        offsetof(ktag_feature_provider_registration, contract_provider_id));
+    registration.contract_provider_id = "ignored.contract";
+    EXPECT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_registry_register(
+            registry, &registration, KTAG_FEATURE_REGISTER_DEFAULT));
+
+    ktag_feature_schema *schema = ktag_feature_schema_create("compat", 1);
+    ASSERT_NE(nullptr, schema);
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_schema_add_registered(
+            schema, registry, "compat.feature"));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_schema_freeze(schema));
+
+    ktag_feature_descriptor descriptor{};
+    uint32_t offset = 0U;
+    ASSERT_EQ(
+        KTAG_SUCCESS,
+        ktag_feature_schema_find(
+            schema, "compat.feature", &descriptor, &offset));
+    EXPECT_STREQ("test.provider", descriptor.provider_id);
+
+    ktag_feature_schema_destroy(schema);
+    ktag_feature_registry_destroy(registry);
+}
+
+TEST(KTAGFeatureRegistry, TrafficPluginRegistrationRollsBackOnCollision)
 {
     ktag_feature_registry *registry = ktag_feature_registry_create();
     ASSERT_NE(nullptr, registry);
@@ -335,7 +402,7 @@ TEST(KTAGFeatureRegistry, LegacyBuiltinRegistrationRollsBackOnCollision)
     ASSERT_EQ(KTAG_SUCCESS, ktag_feature_registry_register(
                                 registry, &occupied, KTAG_FEATURE_REGISTER_DEFAULT));
     EXPECT_EQ(KTAG_ERROR_ALREADY_EXISTS,
-              ktag_feature_registry_register_legacy_builtins(registry));
+              ktag_traffic_features_register(registry));
     EXPECT_EQ(1U, ktag_feature_registry_get_provider_count(registry));
     EXPECT_EQ(KTAG_ERROR_NOT_FOUND,
               ktag_feature_registry_unregister(registry, "builtin.legacy.metadata"));
@@ -345,18 +412,18 @@ TEST(KTAGFeatureRegistry, LegacyBuiltinRegistrationRollsBackOnCollision)
     ktag_feature_registry_destroy(registry);
 }
 
-TEST(KTAGFeatureRegistry, CustomerProviderCanReplaceBuiltinFeatureContract)
+TEST(KTAGFeatureRegistry, CustomerProviderCanReplaceTrafficFeatureContract)
 {
     ktag_feature_registry *registry = ktag_feature_registry_create();
     ASSERT_NE(nullptr, registry);
-    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_registry_register_legacy_builtins(registry));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_traffic_features_register(registry));
 
     auto feature = make_descriptor("legacy.flow_id", "customer_flow_id", 2, 2);
     feature.provider_id = "builtin.legacy.metadata";
     auto replacement = make_registration("builtin.legacy.metadata", 2, &feature, 1);
     ASSERT_EQ(KTAG_SUCCESS, ktag_feature_registry_register(
                                 registry, &replacement, KTAG_FEATURE_REGISTER_REPLACE));
-    EXPECT_EQ(4U, ktag_feature_registry_get_provider_count(registry));
+    EXPECT_EQ(11U, ktag_feature_registry_get_provider_count(registry));
 
     ktag_feature_schema *schema = ktag_feature_schema_create("replaced_builtin", 1);
     ASSERT_NE(nullptr, schema);
@@ -377,14 +444,15 @@ TEST(KTAGFeatureRegistry, CustomerProviderCanReplaceBuiltinFeatureContract)
     ktag_feature_registry_destroy(registry);
 }
 
-TEST(KTAGFeatureRegistry, LegacyBuiltinsCoverLegacySchema)
+TEST(KTAGFeatureRegistry, TrafficPluginCoversLegacySchema)
 {
     ktag_feature_registry *registry = ktag_feature_registry_create();
     ASSERT_NE(nullptr, registry);
-    ASSERT_EQ(KTAG_SUCCESS, ktag_feature_registry_register_legacy_builtins(registry));
-    EXPECT_EQ(4U, ktag_feature_registry_get_provider_count(registry));
+    ASSERT_EQ(KTAG_SUCCESS, ktag_traffic_features_register(registry));
+    EXPECT_EQ(11U, ktag_feature_registry_get_provider_count(registry));
 
-    ktag_feature_schema *schema = ktag_feature_schema_create("selected_builtin_features", 1);
+    ktag_feature_schema *schema =
+        ktag_feature_schema_create("selected_traffic_features", 1);
     ASSERT_NE(nullptr, schema);
     EXPECT_EQ(KTAG_SUCCESS,
               ktag_feature_schema_add_registered(schema, registry, "traffic.send.packet_count"));

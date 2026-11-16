@@ -1,6 +1,6 @@
-if(NOT KDADK_APPID_MODULES_PATH)
-set(KDADK_APPID_MODULES_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
-endif(NOT KDADK_APPID_MODULES_PATH)
+if(NOT KTAG_APPID_MODULES_PATH)
+set(KTAG_APPID_MODULES_PATH "${CMAKE_CURRENT_SOURCE_DIR}")
+endif(NOT KTAG_APPID_MODULES_PATH)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Threads REQUIRED)
 
 add_library(ktag_capture SHARED
-    ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
+    ${PROJECT_SOURCE_DIR}/src/core/packet_decode_internal.cpp
     ${PROJECT_SOURCE_DIR}/src/capture/capture.cpp
     ${PROJECT_SOURCE_DIR}/src/capture/packet_buffer.cpp
     ${PROJECT_SOURCE_DIR}/src/capture/flow_key.cpp
@@ -144,18 +144,15 @@ message(STATUS "yaml-cpp library directory: ${YAML_CPP_LIB_DIR}")
 
 # ============= 生成特征提取动态链接库 =============
 add_library(ktag_feature SHARED
-    ${PROJECT_SOURCE_DIR}/src/packet_decode_internal.cpp
-    ${PROJECT_SOURCE_DIR}/src/decode.cpp
-    ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
-    ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
-    ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
+    ${PROJECT_SOURCE_DIR}/src/core/packet_decode_internal.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/dns_observer.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_schema.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_batch.cpp
-    ${PROJECT_SOURCE_DIR}/src/feature/legacy_schema.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/traffic_schema.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/provider_registry.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_view.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_pipeline.cpp
-    ${PROJECT_SOURCE_DIR}/src/feature/builtin_features.cpp
+    ${PROJECT_SOURCE_DIR}/src/feature/feature_plugin_loader.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/domain_store.cpp
     ${PROJECT_SOURCE_DIR}/src/feature/feature_context.cpp
 )
@@ -170,6 +167,7 @@ target_link_libraries(ktag_feature PRIVATE
     ktag_capture
     pcap
     Threads::Threads
+    ${CMAKE_DL_LIBS}
 )
 
 target_include_directories(ktag_feature
@@ -178,44 +176,10 @@ target_include_directories(ktag_feature
     $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
     PRIVATE
     ${PROJECT_SOURCE_DIR}/
+    ${PROJECT_SOURCE_DIR}/src
 )
 set_target_properties(ktag_feature PROPERTIES
     EXPORT_NAME feature
-    BUILD_RPATH "$ORIGIN"
-    INSTALL_RPATH "$ORIGIN"
-)
-
-# Deprecated fixed-vector Feature compatibility layer. Keep adapter-only
-# sources under src/legacy; the shared algorithms above remain in the Feature
-# layer because they implement the verified Legacy V1 provider semantics.
-set(KTAG_LEGACY_FEATURE_ADAPTER_SOURCES
-    ${PROJECT_SOURCE_DIR}/src/decode.cpp
-    ${PROJECT_SOURCE_DIR}/src/flow_hash.cpp
-    ${PROJECT_SOURCE_DIR}/src/feature_extract.cpp
-    ${PROJECT_SOURCE_DIR}/src/domain_name_hash.cpp
-    ${PROJECT_SOURCE_DIR}/src/legacy/process_feature.cpp
-    ${PROJECT_SOURCE_DIR}/src/legacy/kdadk_feature_extract.cpp
-)
-add_library(KDADK_feature_extract SHARED
-    ${KTAG_LEGACY_FEATURE_ADAPTER_SOURCES}
-)
-
-target_compile_definitions(KDADK_feature_extract PRIVATE KDADK_BUILDING_DLL)
-
-target_link_libraries(KDADK_feature_extract PRIVATE
-    ktag_feature
-    pcap
-    Threads::Threads
-)
-
-target_include_directories(KDADK_feature_extract
-    PUBLIC
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
-    PRIVATE ${PROJECT_SOURCE_DIR}/
-)
-set_target_properties(KDADK_feature_extract PROPERTIES
-    EXPORT_NAME feature_compat
     BUILD_RPATH "$ORIGIN"
     INSTALL_RPATH "$ORIGIN"
 )
@@ -255,75 +219,26 @@ set_target_properties(ktag_inference PROPERTIES
     INSTALL_RPATH "$ORIGIN;${YAML_CPP_LIB_DIR};${ONNXRUNTIME_LIB_DIR}"
 )
 
-# ============= Deprecated fixed-vector inference adapter =============
-set(KTAG_LEGACY_INFERENCE_ADAPTER_SOURCES
-    ${PROJECT_SOURCE_DIR}/src/legacy/utils.cpp
-    ${PROJECT_SOURCE_DIR}/src/legacy/kdadk_inference.cpp
-)
-add_library(KDADK_inference SHARED
-    ${KTAG_LEGACY_INFERENCE_ADAPTER_SOURCES}
-)
-
-target_compile_definitions(KDADK_inference PRIVATE KDADK_BUILDING_DLL)
-
-# 直接使用库文件路径，不使用 -l 链接
-target_link_libraries(KDADK_inference PRIVATE 
-    ${ONNXRUNTIME_LIB}
-    ${YAML_CPP_LIB}
-)
-
-target_include_directories(KDADK_inference
-    PUBLIC
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${KTAG_INSTALL_INCLUDEDIR}>
-    PRIVATE
-    ${PROJECT_SOURCE_DIR}/
-    ${YAML_CPP_INCLUDE}
-    ${ONNXRUNTIME_INCLUDE_DIR}
-)
-
-set_target_properties(KDADK_inference PROPERTIES
-    EXPORT_NAME inference_compat
-    CXX_STANDARD 17
-    CXX_STANDARD_REQUIRED ON
-    BUILD_RPATH "${YAML_CPP_LIB_DIR};${ONNXRUNTIME_LIB_DIR}"
-    INSTALL_RPATH "${YAML_CPP_LIB_DIR};${ONNXRUNTIME_LIB_DIR}"
-)
-
-# ============= 生成动态库(可选) =============
+# ============= Product and component version queries =============
 if(ENABLE_BUILD_LIB)
-    add_library(kdadk_appidlib SHARED
-        ${PROJECT_SOURCE_DIR}/src/legacy/getProductVersion.c
+    add_library(ktag_appidlib SHARED
+        ${PROJECT_SOURCE_DIR}/src/core/version.c
     )
-
-    target_compile_definitions(kdadk_appidlib PRIVATE KDADK_BUILDING_DLL)
-
-    target_link_libraries(kdadk_appidlib PRIVATE
-        pcap
-        ktag_feature
-        KDADK_feature_extract
-        KDADK_inference
-        ${ONNXRUNTIME_LIB} 
-    )
-
-    target_include_directories(kdadk_appidlib PRIVATE
+    target_compile_definitions(ktag_appidlib PRIVATE KTAG_BUILDING_DLL)
+    target_include_directories(ktag_appidlib PRIVATE
         ${PROJECT_SOURCE_DIR}/
         ${PROJECT_SOURCE_DIR}/include
-        ${ONNXRUNTIME_INCLUDE_DIR}
     )
-    
-    set_target_properties(kdadk_appidlib PROPERTIES
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
+    set_target_properties(ktag_appidlib PROPERTIES
+        C_STANDARD 11
+        C_STANDARD_REQUIRED ON
         BUILD_RPATH "$ORIGIN"
         INSTALL_RPATH "$ORIGIN"
     )
-    if(KTAG_INSTALL_LEGACY_COMPAT)
-        install(TARGETS kdadk_appidlib
-                LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
-                ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
-                RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
-    endif()
+    install(TARGETS ktag_appidlib
+            LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
+            ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
+            RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
 endif()
 
 install(TARGETS ktag_capture ktag_feature ktag_inference
@@ -332,12 +247,5 @@ install(TARGETS ktag_capture ktag_feature ktag_inference
         ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
         RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
 
-if(KTAG_INSTALL_LEGACY_COMPAT)
-    install(TARGETS KDADK_feature_extract KDADK_inference
-            EXPORT KTAGTargets
-            LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}"
-            ARCHIVE DESTINATION "${KTAG_INSTALL_LIBDIR}"
-            RUNTIME DESTINATION "${KTAG_INSTALL_LIBDIR}")
-endif()
 
-KDADK_APPID_glob_modules(${KDADK_APPID_MODULES_PATH})
+KTAG_APPID_glob_modules(${KTAG_APPID_MODULES_PATH})

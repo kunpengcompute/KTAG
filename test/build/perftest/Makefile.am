@@ -3,25 +3,27 @@ GTEST_DIR = ../../googletest-release-1.8.0/googletest
 GMOCK_DIR = ../../googletest-release-1.8.0/googlemock
 
 # Source file of function
-KDADK_APPID_modules_DIR = ../../..
+KTAG_APPID_modules_DIR = ../../..
 TEST_modules_DIR = ../../
-KDADK_APPID_OUTPUT_DIR := $(abspath $(KDADK_APPID_modules_DIR)/output)
-ONNXRUNTIME_LIB_DIR := $(abspath $(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib)
+KTAG_APPID_OUTPUT_DIR := $(abspath $(KTAG_APPID_modules_DIR)/output)
+ONNXRUNTIME_LIB_DIR := $(abspath $(KTAG_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/lib)
 
 # Header files path
-KDADK_APPID_DIR += -I $(GTEST_DIR)/include/
-KDADK_APPID_DIR += -I $(GMOCK_DIR)/include/
+KTAG_APPID_DIR += -I $(GTEST_DIR)/include/
+KTAG_APPID_DIR += -I $(GMOCK_DIR)/include/
 
-KDADK_APPID_DIR += -I $(TEST_modules_DIR)/common/include/
-KDADK_APPID_DIR += -I $(TEST_modules_DIR)/common/perftest/
-KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/include/
-KDADK_APPID_DIR += -I $(KDADK_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/include/
-CFLAGS += -DLIB_KDADK_APPID_NAME=\"libkdadk_appidlib.so\"
-CXXFLAGS += -DLIB_KDADK_APPID_NAME=\"libkdadk_appidlib.so\"
+KTAG_APPID_DIR += -I $(TEST_modules_DIR)/common/include/
+KTAG_APPID_DIR += -I $(TEST_modules_DIR)/common/perftest/
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/include/
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/include/
+CFLAGS += -DLIB_KTAG_APPID_NAME=\"libktag_appidlib.so\"
+CXXFLAGS += -DLIB_KTAG_APPID_NAME=\"libktag_appidlib.so\"
 
 
 # Options for preprocessing stage, here are mainly header files.
-CPPFLAGS += $(KDADK_APPID_DIR)
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/plugins/traffic_features/
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/demo/
+CPPFLAGS += $(KTAG_APPID_DIR)
 
 # Flags passed to the C++ compiler.
 CXXFLAGS += -g -Wall -Wextra -pthread -std=c++17 -O2
@@ -32,11 +34,9 @@ SRC_FILES_DIRS += $(TEST_modules_DIR)/common/perftest/
 
 # Static and shared libraries that need to be linked to the program.
 LD_LIBRARIES := -L$(TEST_modules_DIR)/test_tool_bins/gtest \
-                -L$(KDADK_APPID_OUTPUT_DIR) \
-                -lkdadk_appidlib \
+                -L$(KTAG_APPID_OUTPUT_DIR) \
+                -lktag_appidlib \
 				-lktag_feature \
-                -lKDADK_feature_extract \
-				-lKDADK_inference \
 				-L$(ONNXRUNTIME_LIB_DIR) \
 				-lonnxruntime
 
@@ -44,7 +44,7 @@ LD_LIBRARIES += -pthread -lgtest -lgtest_main -lgmock -lgmock_main -lpcap
 
 
 # The name of the compiled executable file.
-PROGRAM = kdadk_appid_perftest
+PROGRAM = ktag_appid_perftest
 
 # The directories in which source files reside. At least one path should be specified.
 ifndef SILENCE
@@ -57,6 +57,8 @@ SRCEXTS   := .c .cc .cpp
 SOURCES_MUD = $(foreach d,$(SRC_FILES_DIRS),$(wildcard $(addprefix $(d)/*,$(SRCEXTS))))
 SOURCES = $(shell echo $(SOURCES_MUD) | \
 			awk -F ' ' '{for(i=1;i<=NF;i++)a[i]=$$i}END{for(i=1;i<=asort(a);i++)printf a[i]" "}')
+
+SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/statistics.cpp
 
 OBJS    = $(foreach x,$(SRCEXTS), \
       $(patsubst %$(x), %.o, $(filter %$(x),$(SOURCES))))
@@ -79,15 +81,16 @@ endif
 
 all : $(PROGRAM)
 run:
-	@test -f "$(KDADK_APPID_OUTPUT_DIR)/libkdadk_appidlib.so" || \
-		(echo "missing $(KDADK_APPID_OUTPUT_DIR)/libkdadk_appidlib.so; run 'sh build.sh -lib' from the repository root"; exit 1)
-	@test -f "$(KDADK_APPID_OUTPUT_DIR)/libktag_feature.so" || \
-		(echo "missing $(KDADK_APPID_OUTPUT_DIR)/libktag_feature.so; rebuild phase-8 libraries"; exit 1)
-	env LD_LIBRARY_PATH=$(KDADK_APPID_OUTPUT_DIR):$(ONNXRUNTIME_LIB_DIR):/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_perftest --gtest_filter=$(FILTER)
+	@test -f "$(KTAG_APPID_OUTPUT_DIR)/libktag_appidlib.so" || \
+		(echo "missing $(KTAG_APPID_OUTPUT_DIR)/libktag_appidlib.so; run 'sh build.sh -lib' from the repository root"; exit 1)
+	@test -f "$(KTAG_APPID_OUTPUT_DIR)/libktag_feature.so" || \
+		(echo "missing $(KTAG_APPID_OUTPUT_DIR)/libktag_feature.so; rebuild phase-8 libraries"; exit 1)
+	env LD_LIBRARY_PATH=$(KTAG_APPID_OUTPUT_DIR):$(ONNXRUNTIME_LIB_DIR):/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./ktag_appid_perftest --gtest_filter=$(FILTER)
 rrun:
-	env LD_LIBRARY_PATH=/usr/local/ksl/lib/:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./kdadk_appid_perftest --gtest_filter=$(FILTER)
+	env LD_LIBRARY_PATH=/usr/local/ksl/lib/:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./ktag_appid_perftest --gtest_filter=$(FILTER)
 
 clean :
+	@-$(RM) $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o.d
 	@-$(RM) *.d *.a *.so
 	@-$(RM)	./$(PROGRAM) $(SRC_DEPS)
 	@find $(TEST_modules_DIR)/common/perftest/ -name '*.o' -exec $(RM) {} \;

@@ -17,8 +17,8 @@ __pycache__/
 /test/fuzz/build/
 /test/common/**/*.o
 /test/common/**/*.o.d
-/test/build/functest/kdadk_appid_functest
-/test/build/perftest/kdadk_appid_perftest
+/test/build/functest/ktag_appid_functest
+/test/build/perftest/ktag_appid_perftest
 /test/build/*.csv
 /test/build/*.txt
 /tools/demo/**/*.o

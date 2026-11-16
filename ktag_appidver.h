@@ -1,0 +1,17 @@
+/*
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ */
+#ifndef KTAG_APPID_KTAG_APPIDVER_H
+#define KTAG_APPID_KTAG_APPIDVER_H
+
+#define KTAG_APPID_VERSION "1.1.0"
+#define KTAG_APPID_COMPONENT_NAME "BoostKit-KTAG_APPID"
+#define KTAG_APPID_TOOLCHAIN_INFO "gcc"
+#define KTAG_APPID_SOFTWARE_NAME "boostkit-KTAG_APPID"
+#define KTAG_APPID_PRODUCT_VERSION ""
+#define KTAG_APPID_VERSION_BUILDDATE "2026.01.14"
+#define KTAG_APPID_VERSION_MAJOR 1
+#define KTAG_APPID_VERSION_MINOR 1
+#define KTAG_APPID_VERSION_PATCH 0
+
+#endif

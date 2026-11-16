@@ -8,6 +8,8 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "demo_capture_source.h"
 #include "feature_plugin_loader.h"
 #include "schema_feature_writer.h"
+#include "../pcap_labels.h"
+#include <limits>
 
 #ifndef KTAG_ENABLE_DPDK_UB
 #define KTAG_ENABLE_DPDK_UB 0
@@ -279,9 +281,11 @@ struct pipeline_source_statistics {
   uint64_t predictions = 0U;
   uint64_t capture_nanoseconds = 0U;
   uint64_t feature_nanoseconds = 0U;
+  uint64_t feature_cpu_nanoseconds = 0U;
   uint64_t feature_wall_nanoseconds = 0U;
   uint64_t feature_work_sum_nanoseconds = 0U;
   uint64_t inference_nanoseconds = 0U;
+  uint64_t inference_cpu_nanoseconds = 0U;
   uint64_t elapsed_nanoseconds = 0U;
   uint64_t queue_drops = 0U;
   uint64_t queue_failures = 0U;
@@ -290,6 +294,8 @@ struct pipeline_source_statistics {
 };
 
 struct pipeline_run_statistics {
+  // Retained for the POC distributed diagnostics; excluded from core compute time.
+  uint64_t file_io_nanoseconds = 0U;
   bool capture_stats_available = false;
   uint64_t capture_received = 0U;
   uint64_t capture_delivered = 0U;
@@ -306,10 +312,11 @@ struct pipeline_run_statistics {
   uint64_t predictions = 0U;
   uint64_t capture_nanoseconds = 0U;
   uint64_t feature_nanoseconds = 0U;
+  uint64_t feature_cpu_nanoseconds = 0U;
   uint64_t feature_wall_nanoseconds = 0U;
   uint64_t feature_work_sum_nanoseconds = 0U;
   uint64_t inference_nanoseconds = 0U;
-  uint64_t file_io_nanoseconds = 0U;
+  uint64_t inference_cpu_nanoseconds = 0U;
   uint64_t elapsed_nanoseconds = 0U;
   uint64_t queue_drops = 0U;
   uint64_t queue_failures = 0U;
@@ -403,9 +410,11 @@ void add_source_statistics(pipeline_run_statistics *total,
   total->predictions += source.predictions;
   total->capture_nanoseconds += source.capture_nanoseconds;
   total->feature_nanoseconds += source.feature_nanoseconds;
+  total->feature_cpu_nanoseconds += source.feature_cpu_nanoseconds;
   total->feature_wall_nanoseconds += source.feature_wall_nanoseconds;
   total->feature_work_sum_nanoseconds += source.feature_work_sum_nanoseconds;
   total->inference_nanoseconds += source.inference_nanoseconds;
+  total->inference_cpu_nanoseconds += source.inference_cpu_nanoseconds;
   total->queue_drops += source.queue_drops;
   total->queue_failures += source.queue_failures;
 }
@@ -853,16 +862,18 @@ bool run_inference_batch(ktag_inference_context *inference,
                          ktag_prediction_batch *prediction_batch,
                          uint32_t source_index,
                          std::vector<pipeline_prediction> *predictions,
-                         std::string *error) {
-  const ktag_status status =
-      ktag_inference_predict(inference, features, prediction_batch);
-  if (status != KTAG_SUCCESS) {
-    *error =
-        std::string("inference failed: ") + ktag_inference_get_last_error();
-    return false;
-  }
-  return append_predictions(prediction_batch, features, nullptr, source_index,
-                            predictions, error);
+                         uint64_t *inference_nanoseconds, std::string *error) {
+    const auto inference_start = std::chrono::steady_clock::now();
+    const ktag_status status =
+        ktag_inference_predict(inference, features, prediction_batch);
+    *inference_nanoseconds += elapsed_nanoseconds(inference_start);
+    if (status != KTAG_SUCCESS) {
+        *error =
+            std::string("inference failed: ") + ktag_inference_get_last_error();
+        return false;
+    }
+    return append_predictions(prediction_batch, features, nullptr, source_index,
+                              predictions, error);
 }
 
 bool process_feature_output_single(
@@ -871,31 +882,32 @@ bool process_feature_output_single(
     uint32_t source_index, std::vector<pipeline_prediction> *predictions,
     std::vector<ktag_demo_schema_feature_record> *feature_records,
     pipeline_source_statistics *statistics, std::string *error) {
-  const uint32_t input_count = ktag_feature_batch_get_count(features);
-  if (input_count == 0U) {
-    return true;
-  }
-  statistics->emitted_flows += input_count;
-  if (feature_only) {
-    if (feature_records == nullptr) {
-      *error = "Schema Feature Record output is required";
-      return false;
+    const uint32_t input_count = ktag_feature_batch_get_count(features);
+    if (input_count == 0U) {
+        return true;
     }
-    return copy_feature_records(features, source_index, feature_records, error);
-  }
-  if (inference == nullptr || prediction_batch == nullptr ||
-      predictions == nullptr) {
-    *error = "Inference output contexts are required";
-    return false;
-  }
-  statistics->inference_inputs += input_count;
-  const size_t prediction_start = predictions->size();
-  const auto inference_start = std::chrono::steady_clock::now();
-  const bool success = run_inference_batch(
-      inference, features, prediction_batch, source_index, predictions, error);
-  statistics->inference_nanoseconds += elapsed_nanoseconds(inference_start);
-  statistics->predictions += predictions->size() - prediction_start;
-  return success;
+    statistics->emitted_flows += input_count;
+    if (feature_only) {
+        if (feature_records == nullptr) {
+            *error = "Schema Feature Record output is required";
+            return false;
+        }
+        return copy_feature_records(features, source_index, feature_records,
+                                    error);
+    }
+    if (inference == nullptr || prediction_batch == nullptr ||
+        predictions == nullptr) {
+        *error = "Inference output contexts are required";
+        return false;
+    }
+    statistics->inference_inputs += input_count;
+    const size_t prediction_start = predictions->size();
+    const bool success =
+        run_inference_batch(inference, features, prediction_batch, source_index,
+                            predictions, &statistics->inference_nanoseconds,
+                            error);
+    statistics->predictions += predictions->size() - prediction_start;
+    return success;
 }
 
 bool run_single_source(
@@ -1032,6 +1044,8 @@ bool run_single_source(
       statistics->unsupported_packets, feature_statistics.rejected_packets);
   statistics->packets = packet_count;
   statistics->elapsed_nanoseconds = elapsed_nanoseconds(execution_start);
+  statistics->feature_cpu_nanoseconds = statistics->feature_nanoseconds;
+  statistics->inference_cpu_nanoseconds = statistics->inference_nanoseconds;
   collect_capture_statistics(capture.get(), statistics);
   return true;
 }
@@ -1735,6 +1749,7 @@ private:
           std::max(statistics->feature_wall_nanoseconds,
                    worker.elapsed_nanoseconds);
       statistics->feature_work_sum_nanoseconds += worker.work_nanoseconds;
+      statistics->feature_cpu_nanoseconds += worker.work_nanoseconds;
       statistics->queue_drops += queue.dropped_newest + queue.dropped_oldest;
       statistics->queue_failures += queue.failures;
       if (config_.ub.enabled) {
@@ -1752,7 +1767,11 @@ private:
       const auto &worker = inference_stats_[index];
       statistics->inference_inputs += worker.input_records;
       statistics->predictions += worker.predictions;
-      statistics->inference_nanoseconds += worker.work_nanoseconds;
+      if (!config_.feature_only) {
+        statistics->inference_nanoseconds = std::max(
+            statistics->inference_nanoseconds, worker.work_nanoseconds);
+        statistics->inference_cpu_nanoseconds += worker.work_nanoseconds;
+      }
     }
     collect_capture_statistics(capture_.get(), statistics);
   }
@@ -2422,6 +2441,9 @@ public:
         statistics->packets += worker.statistics.packets;
         statistics->inference_inputs += worker.statistics.inference_inputs;
         statistics->predictions += worker.statistics.predictions;
+        statistics->inference_nanoseconds = std::max(
+            statistics->inference_nanoseconds, worker.statistics.inference_nanoseconds);
+        statistics->inference_cpu_nanoseconds += worker.statistics.inference_nanoseconds;
         features += worker.sequence;
         batches += worker.batches;
         if (worker.first_received != std::chrono::steady_clock::time_point{} &&
@@ -2656,7 +2678,9 @@ private:
     if (input_count == 0U) {
       return true;
     }
+    const auto inference_start = std::chrono::steady_clock::now();
     const ktag_status status = ktag_inference_predict(inference, input, output);
+    statistics->inference_nanoseconds += elapsed_nanoseconds(inference_start);
     *completed_at = std::chrono::steady_clock::now();
     if (status != KTAG_SUCCESS) {
       *error = std::string("distributed Backend inference failed: ") +
@@ -3043,14 +3067,26 @@ int ktag_demo_run_pipeline_internal(
     const ktag_demo_pipeline_config &config, const char *config_file,
     const char **pcap_files, int pcap_file_count, const char *interface_name,
     const char *output_file, ktag_demo_pipeline_output_format output_format) {
-  pipeline_interrupted = 0;
-  signal_scope signals;
-  const bool distributed_frontend =
+    pipeline_interrupted = 0;
+    signal_scope signals;
+    const bool distributed_frontend =
       config.ub.enabled &&
       config.ub.role == ktag_demo_distributed_role::frontend;
   const bool distributed_backend =
       config.ub.enabled &&
       config.ub.role == ktag_demo_distributed_role::backend;
+  const bool pcap_inference = !config.feature_only && !config.ub.enabled &&
+                              (interface_name == nullptr || interface_name[0] == '\0') &&
+                              pcap_file_count > 0;
+  ktag_demo_pcap_labels pcap_labels;
+  if (pcap_inference) {
+    pcap_labels = ktag_demo_load_pcap_labels(
+        config.model_package_path,
+        config.pcap_labels_specified ? config.pcap_labels.c_str() : nullptr,
+        pcap_files, pcap_file_count);
+  } else if (config.pcap_labels_specified) {
+    throw std::runtime_error("--pcap-labels 仅支持单机 PCAP 推理");
+  }
 #if !KTAG_ENABLE_DPDK_UB
   if (config.ub.enabled) {
     std::fprintf(stderr,
@@ -3059,132 +3095,134 @@ int ktag_demo_run_pipeline_internal(
   }
 #endif
   std::printf("========== %s ==========\n",
-              distributed_frontend
+                distributed_frontend
                   ? "UB Frontend 特征发送模式"
                   : (distributed_backend
                          ? "UB Backend 推理模式"
                          : (config.feature_only ? "Schema 特征提取模式"
                                                 : "在线推理模式")));
-  std::printf("配置文件: %s\n", config_file == nullptr ? "" : config_file);
-  std::printf("管线模式: %s\n", ktag_demo_pipeline_mode_name(config.mode));
-  std::printf("特征线程数: %u\n", config.feature_threads);
-  if (!config.feature_only) {
-    std::printf("推理线程数: %u\n", config.inference_threads);
-  }
-  std::printf("流生命周期: %s\n",
-              ktag_demo_feature_lifecycle_mode_name(config.lifecycle_mode));
-  std::printf("背压策略: %s\n",
-              ktag_demo_backpressure_name(config.backpressure));
-  if (config.ub.enabled) {
+    std::printf("配置文件: %s\n", config_file == nullptr ? "" : config_file);
+    std::printf("管线模式: %s\n", ktag_demo_pipeline_mode_name(config.mode));
+    std::printf("特征线程数: %u\n", config.feature_threads);
+    if (!config.feature_only) {
+        std::printf("推理线程数: %u\n", config.inference_threads);
+    }
+    std::printf("流生命周期: %s\n",
+                ktag_demo_feature_lifecycle_mode_name(config.lifecycle_mode));
+    std::printf("背压策略: %s\n",
+                ktag_demo_backpressure_name(config.backpressure));
+    if (config.ub.enabled) {
     std::printf("UB 角色: %s, node_id=%s\n",
                 ktag_demo_distributed_role_name(config.ub.role),
                 config.ub.node_id.c_str());
   }
   if (!config.feature_only) {
-    std::printf("模型包: %s\n", config.model_package_path.c_str());
-  }
-
-  ktag_demo_feature_plugin_loader plugin_loader;
-  registry_ptr registry(ktag_feature_registry_create());
-  if (!registry || ktag_feature_registry_register_legacy_builtins(
-                       registry.get()) != KTAG_SUCCESS) {
-    std::fprintf(stderr, "pipeline: failed to register built-in Providers\n");
-    return -1;
-  }
-
-  std::string error;
-  for (const auto &plugin : config.plugin_paths) {
-    if (!plugin_loader.load(plugin, registry.get(), &error)) {
-      std::fprintf(stderr, "pipeline: %s\n", error.c_str());
-      registry.reset();
-      plugin_loader.unload_all();
-      return -1;
+        std::printf("模型包: %s\n", config.model_package_path.c_str());
     }
-  }
-  schema_ptr schema = compose_schema(config, registry.get(), &error);
-  if (!schema) {
-    std::fprintf(stderr, "pipeline: %s\n", error.c_str());
-    registry.reset();
-    plugin_loader.unload_all();
-    return -1;
-  }
 
-  if (!validate_frozen_schema_contract(config, schema.get(), &error)) {
-    std::fprintf(stderr, "pipeline: %s\n", error.c_str());
-    schema.reset();
-    registry.reset();
-    plugin_loader.unload_all();
-    return -1;
-  }
-
-  const uint64_t schema_hash = ktag_feature_schema_get_hash(schema.get());
-  const uint32_t schema_feature_count =
-      ktag_feature_schema_get_feature_count(schema.get());
-  const uint32_t schema_value_count =
-      ktag_feature_schema_get_value_count(schema.get());
-  uint32_t model_input_value_count = 0U;
-  if (!config.feature_only) {
-    ktag_model_package_validation validation{};
-    validation.struct_size = sizeof(validation);
-    validation.api_version = KTAG_API_VERSION;
-    if (ktag_inference_validate_model_package(config.model_package_path.c_str(),
-                                              schema.get(),
-                                              &validation) != KTAG_SUCCESS) {
-      std::fprintf(stderr, "pipeline: model package validation failed: %s\n",
-                   ktag_inference_get_last_error());
-      schema.reset();
-      registry.reset();
-      plugin_loader.unload_all();
-      return -1;
+    ktag_demo_feature_plugin_loader plugin_loader;
+    registry_ptr registry(ktag_feature_registry_create());
+    if (!registry) {
+        std::fprintf(stderr, "pipeline: failed to create Feature Registry\n");
+        return -1;
     }
-    model_input_value_count = validation.input_value_count;
-    if (config.schema_name == "ktag_legacy_v1" &&
-        (validation.input_feature_count != 50U ||
-         model_input_value_count != 351U)) {
-      std::fprintf(stderr,
-                   "pipeline: ktag_legacy_v1 application model package must "
-                   "select the frozen 50 Features/351 values, but manifest "
-                   "selects %u/%u\n",
-                   validation.input_feature_count, model_input_value_count);
-      schema.reset();
-      registry.reset();
-      plugin_loader.unload_all();
-      return -1;
-    }
-    if (is_frozen_proxy_experiment(config.schema_name) &&
-        (validation.input_feature_count != schema_feature_count ||
-         model_input_value_count != schema_value_count)) {
-      std::fprintf(stderr,
-                   "pipeline: %s model package must use all %u Features/%u "
-                   "values, but manifest selects %u/%u\n",
-                   config.schema_name.c_str(), schema_feature_count,
-                   schema_value_count, validation.input_feature_count,
-                   model_input_value_count);
-      schema.reset();
-      registry.reset();
-      plugin_loader.unload_all();
-      return -1;
-    }
-  }
 
-  std::printf("Schema: %s v%u (feature_count=%u, value_count=%u, "
-              "hash=0x%016llx, 插件=%zu)\n",
-              ktag_feature_schema_get_name(schema.get()),
-              ktag_feature_schema_get_version(schema.get()),
-              schema_feature_count, schema_value_count,
-              static_cast<unsigned long long>(schema_hash),
-              plugin_loader.size());
-  if (!config.feature_only) {
-    std::printf("模型输入值数量: %u\n", model_input_value_count);
-  }
+    std::string error;
+    for (const auto &plugin : config.plugin_paths) {
+        if (!plugin_loader.load(plugin, registry.get(), &error)) {
+            std::fprintf(stderr, "pipeline: %s\n", error.c_str());
+            registry.reset();
+            plugin_loader.unload_all();
+            return -1;
+        }
+    }
+    schema_ptr schema = compose_schema(config, registry.get(), &error);
+    if (!schema) {
+        std::fprintf(stderr, "pipeline: %s\n", error.c_str());
+        registry.reset();
+        plugin_loader.unload_all();
+        return -1;
+    }
 
-  std::vector<pipeline_prediction> predictions;
-  std::vector<ktag_demo_schema_feature_record> feature_records;
-  std::vector<std::pair<std::string, std::string>> partial_captures;
-  pipeline_run_statistics run_statistics;
-  const auto run_start = std::chrono::steady_clock::now();
-  bool success = true;
-#if KTAG_ENABLE_DPDK_UB
+    if (!validate_frozen_schema_contract(config, schema.get(), &error)) {
+        std::fprintf(stderr, "pipeline: %s\n", error.c_str());
+        schema.reset();
+        registry.reset();
+        plugin_loader.unload_all();
+        return -1;
+    }
+
+    const uint64_t schema_hash = ktag_feature_schema_get_hash(schema.get());
+    const uint32_t schema_feature_count =
+        ktag_feature_schema_get_feature_count(schema.get());
+    const uint32_t schema_value_count =
+        ktag_feature_schema_get_value_count(schema.get());
+    uint32_t model_input_value_count = 0U;
+    if (!config.feature_only) {
+        ktag_model_package_validation validation{};
+        validation.struct_size = sizeof(validation);
+        validation.api_version = KTAG_API_VERSION;
+        if (ktag_inference_validate_model_package(
+                config.model_package_path.c_str(), schema.get(), &validation) !=
+            KTAG_SUCCESS) {
+            std::fprintf(stderr,
+                         "pipeline: model package validation failed: %s\n",
+                         ktag_inference_get_last_error());
+            schema.reset();
+            registry.reset();
+            plugin_loader.unload_all();
+            return -1;
+        }
+        model_input_value_count = validation.input_value_count;
+        if (config.schema_name == "ktag_legacy_v1" &&
+            (validation.input_feature_count != 50U ||
+             model_input_value_count != 351U)) {
+            std::fprintf(
+                stderr,
+                "pipeline: ktag_legacy_v1 application model package must "
+                "select the frozen 50 Features/351 values, but manifest "
+                "selects %u/%u\n",
+                validation.input_feature_count, model_input_value_count);
+            schema.reset();
+            registry.reset();
+            plugin_loader.unload_all();
+            return -1;
+        }
+        if (is_frozen_proxy_experiment(config.schema_name) &&
+            (validation.input_feature_count != schema_feature_count ||
+             model_input_value_count != schema_value_count)) {
+            std::fprintf(
+                stderr,
+                "pipeline: %s model package must use all %u Features/%u "
+                "values, but manifest selects %u/%u\n",
+                config.schema_name.c_str(), schema_feature_count,
+                schema_value_count, validation.input_feature_count,
+                model_input_value_count);
+            schema.reset();
+            registry.reset();
+            plugin_loader.unload_all();
+            return -1;
+        }
+    }
+
+    std::printf("Schema: %s v%u (feature_count=%u, value_count=%u, "
+                "hash=0x%016llx, 插件=%zu)\n",
+                ktag_feature_schema_get_name(schema.get()),
+                ktag_feature_schema_get_version(schema.get()),
+                schema_feature_count, schema_value_count,
+                static_cast<unsigned long long>(schema_hash),
+                plugin_loader.size());
+    if (!config.feature_only) {
+        std::printf("模型输入值数量: %u\n", model_input_value_count);
+    }
+
+    std::vector<pipeline_prediction> predictions;
+    std::vector<ktag_demo_schema_feature_record> feature_records;
+    std::vector<std::pair<std::string, std::string>> partial_captures;
+    pipeline_run_statistics run_statistics;
+    const auto run_start = std::chrono::steady_clock::now();
+    bool success = true;
+  #if KTAG_ENABLE_DPDK_UB
   if (distributed_frontend) {
     success = run_ub_frontend_inputs(
         config, schema.get(), registry.get(), pcap_files, pcap_file_count,
@@ -3195,65 +3233,77 @@ int ktag_demo_run_pipeline_internal(
   } else
 #endif
       if (interface_name != nullptr && interface_name[0] != '\0') {
-    std::printf("\n========== 网口实时抓包模式 ==========\n");
-    std::printf("网口: %s\n", interface_name);
-    std::printf("输出: %s\n",
-                output_file == nullptr ? "仅控制台显示" : output_file);
-    std::printf("开始实时抓包 (Ctrl+C 退出)...\n\n");
-    pipeline_source_statistics source_statistics;
-    success =
-        config.mode == ktag_demo_pipeline_mode::single_thread
-            ? run_single_source(config, schema.get(), registry.get(),
-                                interface_name, true, 0U, &predictions,
-                                &feature_records, &source_statistics, &error)
-            : run_parallel_source(config, schema.get(), registry.get(),
-                                  interface_name, true, 0U, &predictions,
-                                  &feature_records, &source_statistics, &error);
-    if (success) {
-      add_source_statistics(&run_statistics, source_statistics);
-    }
-  } else {
-    std::printf("\n========== PCAP文件%s模式 ==========\n",
-                config.feature_only ? "特征提取" : "推理");
-    std::printf("文件数量: %d\n", pcap_file_count);
-    std::printf("管线模式: %s\n", ktag_demo_pipeline_mode_name(config.mode));
-    if (output_file != nullptr) {
-      std::printf("输出文件: %s (格式: %s)\n", output_file,
-                  output_format == ktag_demo_pipeline_output_format::csv
-                      ? "CSV"
-                      : "JSON");
-    }
-    for (int index = 0;
-         index < pcap_file_count && success && pipeline_interrupted == 0;
-         ++index) {
-      if (config.feature_only) {
-        std::printf("\n处理文件 %d/%d: %s\n", index + 1, pcap_file_count,
-                    pcap_files[index]);
-      } else {
-        std::printf("\n处理文件 %d/%d: %s (Label=%d)\n", index + 1,
-                    pcap_file_count, pcap_files[index], index);
-      }
-      pipeline_source_statistics source_statistics;
-      success =
-          config.mode == ktag_demo_pipeline_mode::single_thread
-              ? run_single_source(config, schema.get(), registry.get(),
-                                  pcap_files[index], false,
-                                  static_cast<uint32_t>(index), &predictions,
-                                  &feature_records, &source_statistics, &error)
-              : run_parallel_source(
-                    config, schema.get(), registry.get(), pcap_files[index],
-                    false, static_cast<uint32_t>(index), &predictions,
-                    &feature_records, &source_statistics, &error);
-      if (success) {
-        add_source_statistics(&run_statistics, source_statistics);
-        if (!source_statistics.partial_capture_error.empty()) {
-          partial_captures.emplace_back(
-              pcap_files[index], source_statistics.partial_capture_error);
+        std::printf("\n========== 网口实时抓包模式 ==========\n");
+        std::printf("网口: %s\n", interface_name);
+        std::printf("输出: %s\n",
+                    output_file == nullptr ? "仅控制台显示" : output_file);
+        std::printf("开始实时抓包 (Ctrl+C 退出)...\n\n");
+        pipeline_source_statistics source_statistics;
+        success = config.mode == ktag_demo_pipeline_mode::single_thread
+                      ? run_single_source(config, schema.get(), registry.get(),
+                                          interface_name, true, 0U,
+                                          &predictions, &feature_records,
+                                          &source_statistics, &error)
+                      : run_parallel_source(
+                            config, schema.get(), registry.get(),
+                            interface_name, true, 0U, &predictions,
+                            &feature_records, &source_statistics, &error);
+        if (success) {
+            add_source_statistics(&run_statistics, source_statistics);
         }
-      }
+    } else {
+        std::printf("\n========== PCAP文件%s模式 ==========\n",
+                    config.feature_only ? "特征提取" : "推理");
+        std::printf("文件数量: %d\n", pcap_file_count);
+        std::printf("管线模式: %s\n",
+                    ktag_demo_pipeline_mode_name(config.mode));
+        if (output_file != nullptr) {
+            std::printf("输出文件: %s (格式: %s)\n", output_file,
+                        output_format == ktag_demo_pipeline_output_format::csv
+                            ? "CSV"
+                            : "JSON");
+        }
+        for (int index = 0;
+             index < pcap_file_count && success && pipeline_interrupted == 0;
+             ++index) {
+            if (config.feature_only) {
+                std::printf("\n处理文件 %d/%d: %s\n", index + 1,
+                            pcap_file_count, pcap_files[index]);
+            } else {
+                std::printf("\n处理文件 %d/%d: %s (source_index=%d, ground_truth_label=%d)\n",
+                            index + 1, pcap_file_count, pcap_files[index], index,
+                            pcap_labels.label_for(static_cast<uint32_t>(index)));
+            }
+            pipeline_source_statistics source_statistics;
+            success =
+                config.mode == ktag_demo_pipeline_mode::single_thread
+                    ? run_single_source(config, schema.get(), registry.get(),
+                                        pcap_files[index], false,
+                                        static_cast<uint32_t>(index),
+                                        &predictions, &feature_records,
+                                        &source_statistics, &error)
+                    : run_parallel_source(config, schema.get(), registry.get(),
+                                          pcap_files[index], false,
+                                          static_cast<uint32_t>(index),
+                                          &predictions, &feature_records,
+                                          &source_statistics, &error);
+            if (success) {
+                add_source_statistics(&run_statistics, source_statistics);
+                if (!source_statistics.partial_capture_error.empty()) {
+                    partial_captures.emplace_back(
+                        pcap_files[index],
+                        source_statistics.partial_capture_error);
+                }
+            }
+        }
+    }
+
+  if (success && pcap_inference) {
+    for (const auto &prediction : predictions) {
+      pcap_labels.label_for(prediction.source_index);
+      pcap_labels.validate_prediction(prediction.record.label);
     }
   }
-
   if (success) {
     const auto io_start = std::chrono::steady_clock::now();
     if (distributed_frontend) {
@@ -3300,17 +3350,18 @@ int ktag_demo_run_pipeline_internal(
           run_statistics.capture_nanoseconds / nanoseconds_per_second;
       performance.feature_extraction_time =
           run_statistics.feature_nanoseconds / nanoseconds_per_second;
+      performance.feature_cpu_time =
+          run_statistics.feature_cpu_nanoseconds / nanoseconds_per_second;
       performance.inference_time =
           run_statistics.inference_nanoseconds / nanoseconds_per_second;
-      performance.file_io_time =
-          run_statistics.file_io_nanoseconds / nanoseconds_per_second;
-      performance.total_time = performance.feature_extraction_time +
-                               performance.inference_time +
-                               performance.file_io_time;
+      performance.inference_cpu_time =
+          run_statistics.inference_cpu_nanoseconds / nanoseconds_per_second;
       performance.end_to_end_time =
           run_statistics.elapsed_nanoseconds / nanoseconds_per_second;
       performance.total_packets = run_statistics.packets;
       performance.total_bytes = run_statistics.bytes;
+      performance.inference_inputs = run_statistics.inference_inputs;
+      performance.predictions = run_statistics.predictions;
       print_performance_stats_ex(
           &performance,
           config.mode == ktag_demo_pipeline_mode::single_thread ? 0 : 1);
@@ -3321,7 +3372,10 @@ int ktag_demo_run_pipeline_internal(
           "UB 发送特征记录数: %llu\n",
           static_cast<unsigned long long>(run_statistics.emitted_flows));
     } else if (config.feature_only) {
-      std::printf("Schema CSV记录数: %llu\n",
+      std::printf("Schema %s记录数: %llu\n",
+                  output_format == ktag_demo_pipeline_output_format::csv
+                      ? "CSV"
+                      : "JSON",
                   static_cast<unsigned long long>(feature_records.size()));
     } else {
       const uint64_t kept = run_statistics.predictions;
@@ -3353,6 +3407,18 @@ int ktag_demo_run_pipeline_internal(
                 static_cast<unsigned long long>(run_statistics.queue_drops),
                 static_cast<unsigned long long>(run_statistics.queue_failures),
                 pipeline_interrupted != 0 ? "是" : "否");
+    /* 执行度 = 推理完成率：产生预测的流数 / 进入推理的流数。 */
+    if (run_statistics.inference_inputs > 0U) {
+      std::printf(
+          "执行度(推理完成率):  %7.2f%%  (%llu / %llu)\n",
+          100.0 * static_cast<double>(run_statistics.predictions) /
+              static_cast<double>(run_statistics.inference_inputs),
+          static_cast<unsigned long long>(run_statistics.predictions),
+          static_cast<unsigned long long>(run_statistics.inference_inputs));
+    } else {
+      std::printf("执行度(推理完成率):   N/A (无推理输入)\n");
+    }
+
     if (run_statistics.capture_stats_available) {
       std::printf("\n======================= DPDK 收包统计 "
                   "=======================\n");
@@ -3407,10 +3473,10 @@ int ktag_demo_run_pipeline_internal(
                     static_cast<unsigned long long>(entry.second));
       }
     }
-    /* 分类报告与 pcap 文件输入模式一致：在线无真值标签，label 用
-     * source_index（单网口恒为 0），accuracy = 预测为类别 0 的流占比，
-     * 用于和 pcap 输入模式做同口径对比。 */
     if (!config.feature_only && !predictions.empty()) {
+      if (predictions.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        throw std::runtime_error("有效样本数超出分类报告支持范围");
+      }
       std::vector<int> labels;
       std::vector<int> predicted_labels;
       labels.reserve(predictions.size());
@@ -3419,34 +3485,47 @@ int ktag_demo_run_pipeline_internal(
         if (!prediction.ground_truth_valid) {
           continue;
         }
-        labels.push_back(static_cast<int>(prediction.source_index));
+        labels.push_back(pcap_inference ? pcap_labels.label_for(prediction.source_index)
+                                       : static_cast<int>(prediction.source_index));
         predicted_labels.push_back(static_cast<int>(prediction.record.label));
       }
       if (labels.empty()) {
         std::printf("无有效 ground truth，不生成 Classification Report。\n");
       } else {
+        auto report_labels = pcap_inference ? pcap_labels.report_labels : labels;
         ClassificationReport *report = calculate_classification_report(
             labels.data(), predicted_labels.data(),
-            static_cast<int>(labels.size()));
+            static_cast<int>(labels.size()), report_labels,
+            pcap_inference ? pcap_labels.description : std::string());
         if (report != nullptr) {
-          (void)print_and_save_classification_report(report, output_file);
+          success = print_and_save_classification_report(report, output_file) == 0;
           free_classification_report(report);
+        } else {
+          success = false;
         }
       }
+    } else if (pcap_inference) {
+      std::printf("无有效推理样本，未生成 Classification Report；accuracy=N/A。\n");
     }
     if (!distributed_frontend && output_file != nullptr) {
-      std::printf("%s已保存到: %s\n",
-                  config.feature_only ? "Schema 特征 CSV" : "推理结果",
-                  output_file);
+      if (config.feature_only) {
+        std::printf("Schema 特征 %s已保存到: %s\n",
+                    output_format == ktag_demo_pipeline_output_format::csv
+                        ? "CSV"
+                        : "JSON",
+                    output_file);
+      } else {
+        std::printf("推理结果已保存到: %s\n", output_file);
+      }
     }
   }
 
-  /* Required order: Contexts are local and already gone, then Schema and
-   * Registry, finally plugin state and dlclose. */
-  schema.reset();
-  registry.reset();
-  plugin_loader.unload_all();
-  return success ? 0 : -1;
+    /* Required order: Contexts are local and already gone, then Schema and
+     * Registry, finally plugin state and dlclose. */
+    schema.reset();
+    registry.reset();
+    plugin_loader.unload_all();
+    return success ? 0 : -1;
 }
 
 int ktag_demo_run_pipeline(const ktag_demo_pipeline_config &config,
