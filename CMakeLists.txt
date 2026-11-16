@@ -64,7 +64,7 @@ option(KTAG_BUILD_PROXY_FEATURES
        "Build the official proxy protocol Feature Provider plugin"
        ON)
 option(KTAG_ENABLE_DPDK_UB
-       "Enable the optional DPDK UB transport in ktag_demo"
+       "Enable the optional DPDK UB transport in KFlowLens"
        OFF)
 option(KTAG_ENABLE_DPDK
        "Build the optional DPDK poll-mode live capture backend" OFF)

@@ -57,8 +57,8 @@ function ktag_appid_build()
         echo "build failed: ${OUTPUT_DIR}/libktag_appidlib.so was not generated"
         exit 1
     fi
-    if [ ! -x "${OUTPUT_DIR}/ktag_demo" ]; then
-        echo "build failed: ${OUTPUT_DIR}/ktag_demo was not generated or is not executable"
+    if [ ! -x "${OUTPUT_DIR}/KFlowLens" ]; then
+        echo "build failed: ${OUTPUT_DIR}/KFlowLens was not generated or is not executable"
         exit 1
     fi
     if [ ! -x "${OUTPUT_DIR}/ktag_three_layer_example" ]; then
@@ -97,7 +97,7 @@ function ktag_appid_build()
             libktag_feature.so \
             libktag_inference.so \
             ktag_three_layer_example \
-            ktag_demo; do
+            KFlowLens; do
             if ldd "${OUTPUT_DIR}/${artifact}" 2>&1 | grep -q "not found"; then
                 echo "build failed: ${artifact} has unresolved runtime dependencies"
                 ldd "${OUTPUT_DIR}/${artifact}"
@@ -110,7 +110,7 @@ function ktag_appid_build()
     echo "  library: ${OUTPUT_DIR}/libktag_capture.so"
     echo "  library: ${OUTPUT_DIR}/libktag_feature.so"
     echo "  library: ${OUTPUT_DIR}/libktag_inference.so"
-    echo "  demo:    ${OUTPUT_DIR}/ktag_demo"
+    echo "  demo:    ${OUTPUT_DIR}/KFlowLens"
     echo "  example: ${OUTPUT_DIR}/ktag_three_layer_example"
     echo "  plugin:  ${OUTPUT_DIR}/plugins/libktag_example_feature_plugin.so"
     echo "  plugin:  ${OUTPUT_DIR}/plugins/libktag_proxy_features.so"

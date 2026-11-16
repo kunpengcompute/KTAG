@@ -79,7 +79,7 @@ function ktag_appid_uninstall()
         "${INSTALL_LIB_PATH}" \
         /usr/local/lib/cmake/KTAG \
         /usr/local/share/KTAG
-    rm -f /usr/local/bin/ktag_demo /usr/local/bin/ktag_three_layer_example
+    rm -f /usr/local/bin/KFlowLens /usr/local/bin/ktag_three_layer_example
     # 删除安装脚本写入的环境变量。
     while grep -q "# Added by KTAG_APPID install script" /etc/profile; do
         sed -i "/# Added by KTAG_APPID install script/{N;N;N;d}" /etc/profile

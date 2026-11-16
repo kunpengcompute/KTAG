@@ -27,7 +27,7 @@ KTAG用于对网络流量组流、提取特征并执行模型分类，功能范�
 
 | 安装方式 | 适用人群 | 核心优势 | 选择理由 |
 | :--- | :--- | :--- | :--- |
-| 源码编译安装 | 需要构建或集成KTAG的用户 | 可调整插件和可选后端 | 生成公共库、ktag_demo、示例和插件 |
+| 源码编译安装 | 需要构建或集成KTAG的用户 | 可调整插件和可选后端 | 生成公共库、KFlowLens、示例和插件 |
 
 本指南提供源码编译流程。已有部署产物时，可直接按《[快速入门](quick_start.md)》检查并运行；软件包和镜像的交付方式不在本流程中展开。
 
@@ -129,7 +129,7 @@ cd /opt/KTAG
 
 `ONNXRUNTIME_HOME` 指向解压后的ONNX Runtime根目录。未设置时，构建默认查找仓库的 `util/onnxruntime-linux-aarch64-1.22.0`；安装在其他位置时必须设置。`LD_LIBRARY_PATH` 供动态链接器定位运行库。
 
-上面的export立即作用于当前Shell及其子进程，新终端需重新执行。若需持久化，可将同样的两条export写入 `~/.bashrc`，执行 `source ~/.bashrc` 后用 `printf` 和 `ldd output/ktag_demo` 验证。版本1.22.0的获取入口见[官方发布页](https://github.com/microsoft/onnxruntime/releases/tag/v1.22.0)；本指南未声明相近版本的替换兼容性。
+上面的export立即作用于当前Shell及其子进程，新终端需重新执行。若需持久化，可将同样的两条export写入 `~/.bashrc`，执行 `source ~/.bashrc` 后用 `printf` 和 `ldd output/KFlowLens` 验证。版本1.22.0的获取入口见[官方发布页](https://github.com/microsoft/onnxruntime/releases/tag/v1.22.0)；本指南未声明相近版本的替换兼容性。
 
 <a id="配置-python-环境"></a>
 
@@ -183,7 +183,7 @@ cmake --build /opt/KTAG/build
 
 | 选项 | 默认值 | ON / OFF 的作用 |
 | :--- | :--- | :--- |
-| KTAG_BUILD_TOOLS | ON | 构建 / 不构建ktag_demo与示例插件；开启时依赖正式插件构建 |
+| KTAG_BUILD_TOOLS | ON | 构建 / 不构建KFlowLens与示例插件；开启时依赖正式插件构建 |
 | KTAG_BUILD_FEATURE_PLUGINS | ON | 构建 / 不构建正式Feature Provider插件，包含Traffic插件 |
 | KTAG_BUILD_PROXY_FEATURES | ON | 在正式插件构建开启时构建 / 不构建Proxy插件；代理分类需同时加载Traffic与Proxy插件 |
 | ENABLE_BUILD_LIB | 未设置，等同 OFF | 额外构建 / 不构建版本查询库 libktag_appidlib.so；bash build.sh -lib 启用 |
@@ -204,7 +204,7 @@ Traffic插件负责通用流量特征，Proxy插件增加代理特征。三层�
 /opt/KTAG/output/libktag_capture.so
 /opt/KTAG/output/libktag_feature.so
 /opt/KTAG/output/libktag_inference.so
-/opt/KTAG/output/ktag_demo
+/opt/KTAG/output/KFlowLens
 /opt/KTAG/output/ktag_three_layer_example
 /opt/KTAG/output/plugins/libktag_example_feature_plugin.so
 /opt/KTAG/output/plugins/libktag_traffic_features.so
@@ -214,12 +214,12 @@ Traffic插件负责通用流量特征，Proxy插件增加代理特征。三层�
 | 产物 | 类型与用途 |
 | :--- | :--- |
 | libktag_capture.so / libktag_feature.so / libktag_inference.so | 三层公共动态库，供示例与客户程序链接 |
-| ktag_demo | 命令行工具，运行入口为 output/ktag_demo -h |
+| KFlowLens | 命令行工具，运行入口为 output/KFlowLens -h |
 | ktag_three_layer_example | 三层API集成示例，运行方法见[示例说明](../../examples/README.md) |
 | plugins/libktag_example_feature_plugin.so | 自定义插件示例 |
 | plugins/libktag_traffic_features.so / plugins/libktag_proxy_features.so | 正式特征插件，由配置指定并动态加载 |
 
-可执行文件、公共库和插件应配套部署并保留相对布局；运行时依赖检查使用 `ldd /opt/KTAG/output/ktag_demo`，预期无 `not found`。
+可执行文件、公共库和插件应配套部署并保留相对布局；运行时依赖检查使用 `ldd /opt/KTAG/output/KFlowLens`，预期无 `not found`。
 
 ## 配置与运行
 

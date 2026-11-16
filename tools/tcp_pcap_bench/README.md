@@ -45,7 +45,7 @@ output/ktag_tcp_pcap_bench --help
 export LD_LIBRARY_PATH="$PWD/output:$KTAG_ORT/lib:/usr/local/lib:/usr/local/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-两角色使用同一个新可执行文件，所以前端不需要模型包，但仍需要可加载 ONNX Runtime 动态库。无需先编译 `ktag_demo`。如果只构建主程序，测试目标需另外构建后才能执行 CTest；关闭测试可用 `-DKTAG_TCP_PCAP_BENCH_BUILD_TESTS=OFF`。
+两角色使用同一个新可执行文件，所以前端不需要模型包，但仍需要可加载 ONNX Runtime 动态库。无需先编译 `KFlowLens`。如果只构建主程序，测试目标需另外构建后才能执行 CTest；关闭测试可用 `-DKTAG_TCP_PCAP_BENCH_BUILD_TESTS=OFF`。
 
 ## 输入和配置
 

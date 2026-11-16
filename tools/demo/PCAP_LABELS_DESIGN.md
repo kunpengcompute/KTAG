@@ -10,7 +10,7 @@
 
 ## 1. 最终需求结论
 
-为 `ktag_demo -r ... -p ...` 增加可选参数 `--pcap-labels`，显式指定每个输入 PCAP 的真实类别，修正分类报告把输入文件序号当成真实类别的问题。
+为 `KFlowLens -r ... -p ...` 增加可选参数 `--pcap-labels`，显式指定每个输入 PCAP 的真实类别，修正分类报告把输入文件序号当成真实类别的问题。
 
 本轮实现必须满足：
 
@@ -39,7 +39,7 @@
 用户执行：
 
 ```bash
-./output/ktag_demo -r tools/demo/proxy_config.yaml \
+./output/KFlowLens -r tools/demo/proxy_config.yaml \
   -p /data2/proxy_data/class-05-vmess-websocket-tls/sample-01.pcap \
   --pipeline-mode feature_parallel -n 4 \
   -c ./result/prediction.csv
@@ -83,14 +83,14 @@
 
 ```bash
 # 一个输入文件，真实类别为 2。
-./output/ktag_demo -r tools/demo/proxy_config.yaml \
+./output/KFlowLens -r tools/demo/proxy_config.yaml \
   -p /data2/proxy_data/class-05-vmess-websocket-tls/sample-01.pcap \
   --pcap-labels 2 \
   --pipeline-mode feature_parallel -n 4 \
   -c ./result/prediction.csv
 
 # 三个文件；前两个文件都属于类别 2。
-./output/ktag_demo -r /absolute/path/config.yaml \
+./output/KFlowLens -r /absolute/path/config.yaml \
   -p /data/a.pcap -p /data/b.pcap -p /data/c.pcap \
   --pcap-labels 2,2,3 \
   -c /absolute/path/result.csv
@@ -473,7 +473,7 @@ create_pipeline_package(
 ### 13.1 复现用户日志中的单文件情况
 
 ```bash
-./output/ktag_demo -r tools/demo/proxy_config.yaml \
+./output/KFlowLens -r tools/demo/proxy_config.yaml \
   -p /data2/proxy_data/class-05-vmess-websocket-tls/sample-01.pcap \
   --pcap-labels 2 \
   --pipeline-mode feature_parallel -n 4 \

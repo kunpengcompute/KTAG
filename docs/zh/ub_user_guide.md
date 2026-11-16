@@ -49,7 +49,7 @@ Backend先向各Frontend投递CREDIT空缓冲区；Frontend填入特征后发送
 - DPDK/UB：`DPDK_ub-24.11/DPDK_ub`。
 - 运行时库：`librte_ub_ring.so`（24.11对应版本）。
 - UB依赖库：`libubsm_sdk.so`。
-- KTAG可执行文件：`output/ktag_demo`，必须使用启用DPDK/UB的构建版本。
+- KTAG可执行文件：`output/KFlowLens`，必须使用启用DPDK/UB的构建版本。
 
 > ![](public_sys-resources/icon-note.gif) **说明。**
 >
@@ -148,8 +148,8 @@ export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:/path/to/KTAG/output:${
 KTAG_ENABLE_DPDK_UB=ON bash build.sh
 # 使用以下命令检查 KTAG 可执行文件和必需插件
 ls -l output/plugins/libktag_traffic_features.so
-ldd output/ktag_demo | grep -E 'rte_ub_ring|ubsm_sdk|not found'
-output/ktag_demo -h | grep -E 'distributed-role|node-id'
+ldd output/KFlowLens | grep -E 'rte_ub_ring|ubsm_sdk|not found'
+output/KFlowLens -h | grep -E 'distributed-role|node-id'
 ```
 
 应能看到 `librte_ub_ring`，且不能有 `not found`；UB依赖解析结果见[检查动态库和依赖](#检查动态库和依赖)。帮助信息中应包含 `--distributed-role` 和 `--node-id`，但帮助参数本身不能证明已启用UB。`bash build.sh dpdk` 只启用DPDK收包后端，UB传输需独立设置 `KTAG_ENABLE_DPDK_UB=ON`。
@@ -169,7 +169,7 @@ output/ktag_demo -h | grep -E 'distributed-role|node-id'
 sha256sum tools/demo/config.yaml
 ```
 
-4个SHA256必须相同。`libktag_traffic_features.so` 是通用流量特征提取插件，应与ktag_demo、公共库配套部署；输入为组流后的报文信息，输出为当前Schema的特征。
+4个SHA256必须相同。`libktag_traffic_features.so` 是通用流量特征提取插件，应与KFlowLens、公共库配套部署；输入为组流后的报文信息，输出为当前Schema的特征。
 
 ### UB 配置示例
 
@@ -211,7 +211,7 @@ pipeline:
       credits_per_queue: 64
       backend_worker_cpus: "0-2"
       poll_us: 50
-      eal_arguments: [ktag_demo, --no-huge, -l, "0"]
+      eal_arguments: [KFlowLens, --no-huge, -l, "0"]
 
   plugins:
     - ../../output/plugins/libktag_traffic_features.so
@@ -222,7 +222,7 @@ pipeline:
     add_features: []
 ```
 
-Backend的模型包由本项目训练生成：按[训练步骤](user_guide.md#训练)准备应用Schema CSV，再使用同一配置执行 `ktag_demo -t`，产物写入 `pipeline.model_package_path`。也可部署已有且契约一致的交付模型包。示例路径表示部署位置，不表示仓库必然附带预训练模型。
+Backend的模型包由本项目训练生成：按[训练步骤](user_guide.md#训练)准备应用Schema CSV，再使用同一配置执行 `KFlowLens -t`，产物写入 `pipeline.model_package_path`。也可部署已有且契约一致的交付模型包。示例路径表示部署位置，不表示仓库必然附带预训练模型。
 
 `pipeline.enabled: true` 表示普通单机Pipeline默认启用；`distributed.ub_ring.enabled: false` 表示UB默认关闭。`--distributed-role frontend/backend` 会为本次运行启用对应的UB角色，因此测试命令必须同时指定该参数与 `--node-id`。Frontend要求 `feature_parallel`，Backend线程数为Provider数×每Provider队列数，且显式配置同等数量的 `backend_worker_cpus`。UB场景不能再通过命令行覆盖线程数或Pipeline模式。
 
@@ -246,7 +246,7 @@ Backend的模型包由本项目训练生成：按[训练步骤](user_guide.md#�
 | inference.threads | 必须在YAML中显式配置为Provider数×queues_per_provider；每个worker独占队列和推理Context |
 | model_package_path | Backend必须能访问匹配当前Schema的模型包；Frontend只做特征提取 |
 | poll_us | 空轮询退避间隔，单位微秒，默认50；uint32范围，0时让出线程调度，不表示超时时间 |
-| eal_arguments | 有序字符串列表；省略时为 [ktag_demo, --no-huge, -l, "0"]，首项为程序名； --no-huge 是此UB传输初始化的默认参数，不代表DPDK收包后端无需hugepage；现场调整需遵守配套DPDK/UB要求 |
+| eal_arguments | 有序字符串列表；省略时为 [KFlowLens, --no-huge, -l, "0"]，首项为程序名； --no-huge 是此UB传输初始化的默认参数，不代表DPDK收包后端无需hugepage；现场调整需遵守配套DPDK/UB要求 |
 | feature.threads / feature.queue_capacity | 默认4 / 65536，分别为Feature线程数 / 报文队列元素数，均为正uint32；按实际CPU和内存选取 |
 | inference.queue_capacity | Feature记录队列容量，单位为记录数，默认4096，正uint32 |
 | inference.batch_size / batch_timeout_us | 默认256条 / 1000微秒，均为正uint32；后者为批量等待时间，不是建链超时 |
@@ -276,13 +276,13 @@ ground_truth_labels:
 
 ### 测试前准备
 
-1. 4台机器部署相同版本的 `output/ktag_demo`、三层公共库、Traffic插件和配置文件，保留相对布局。
+1. 4台机器部署相同版本的 `output/KFlowLens`、三层公共库、Traffic插件和配置文件，保留相对布局。
 2. 调整复制后的插件、模型包路径，并按[配置文件分发原则](#配置文件分发原则)核对一致性。
 3. 3台Frontend各自准备PCAP；PCAP不要求内容相同，建议先使用已经通过单机基线验证的数据。
 4. Backend准备与YAML Schema匹配的模型包。
-5. 停止上一轮遗留的 `ktag_demo` 进程。不要在进程仍运行时重复启动同一套 `region`/`shm_prefix`。
+5. 停止上一轮遗留的 `KFlowLens` 进程。不要在进程仍运行时重复启动同一套 `region`/`shm_prefix`。
 6. 在4台机器设置 `LD_LIBRARY_PATH`。
-7. 分别检查 `ldd output/ktag_demo`，确认无 `not found`。
+7. 分别检查 `ldd output/KFlowLens`，确认无 `not found`。
 
 停止旧任务前，可用 `ps -eo pid,args | grep '[k]tag_demo'` 核对本轮任务PID，再以 `kill -INT PID` 请求停止（将PID替换为对应任务的实际值）。用 `ps -p PID -o pid,args` 确认退出；不要按进程名批量终止其他任务。UB等待循环可能无法立即响应，未退出时先保留日志，由现场管理员协调本轮全部节点停止。
 
@@ -297,7 +297,7 @@ ground_truth_labels:
 cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 
-output/ktag_demo \
+output/KFlowLens \
   -r tools/demo/config.yaml \
   -p /data/computer01/class0.pcap \
   -p /data/computer01/class1.pcap \
@@ -312,7 +312,7 @@ output/ktag_demo \
 cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 
-output/ktag_demo \
+output/KFlowLens \
   -r tools/demo/config.yaml \
   -p /data/computer02/class0.pcap \
   -p /data/computer02/class1.pcap \
@@ -327,7 +327,7 @@ output/ktag_demo \
 cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 
-output/ktag_demo \
+output/KFlowLens \
   -r tools/demo/config.yaml \
   -p /data/computer03/class0.pcap \
   -p /data/computer03/class1.pcap \
@@ -339,7 +339,7 @@ output/ktag_demo \
 >
 > 启动Backend前，在各Frontend另一个终端执行 `ps -eo pid,args | grep '[k]tag_demo'`，确认本轮进程仍在且没有初始化错误。此时可能仍在等待底层共享内存或CREDIT，尚未出现 `UB Frontend ready` 属正常现象；该日志在收到首个CREDIT后才输出。
 >
-> 每个Frontend的 `--node-id` 必须与本机 `hostname` 完全一致。`-p` 可以重复使用；如果使用实时网口采集，可将多个 `-p` 替换为 `-i <interface>`。接口名用 `output/ktag_demo -l` 列出，保持名称大小写并准备抓包权限。此处只切换采集输入，UB拓扑不变；长期网口采集需持续看管背压和资源，停止时先请求Frontend结束，再等待Backend尾批完成。DPDK收包还需单独启用并配置其设备。
+> 每个Frontend的 `--node-id` 必须与本机 `hostname` 完全一致。`-p` 可以重复使用；如果使用实时网口采集，可将多个 `-p` 替换为 `-i <interface>`。接口名用 `output/KFlowLens -l` 列出，保持名称大小写并准备抓包权限。此处只切换采集输入，UB拓扑不变；长期网口采集需持续看管背压和资源，停止时先请求Frontend结束，再等待Backend尾批完成。DPDK收包还需单独启用并配置其设备。
 
 ### 启动 Backend
 
@@ -351,7 +351,7 @@ cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 mkdir -p /data/result
 
-output/ktag_demo \
+output/KFlowLens \
   -r tools/demo/config.yaml \
   --distributed-role backend \
   --node-id "$(hostname)" \

@@ -7,7 +7,7 @@
 `-r` 使用 `-p` 读取 PCAP 时，可用 `--pcap-labels` 逐文件指定真实标签：
 
 ```bash
-output/ktag_demo -r tools/demo/proxy_config.yaml \
+output/KFlowLens -r tools/demo/proxy_config.yaml \
   -p /data/a.pcap -p /data/b.pcap -p /data/c.pcap \
   --pcap-labels 2,2,3 -c result/prediction.csv
 ```
@@ -35,6 +35,9 @@ output/ktag_demo -r tools/demo/proxy_config.yaml \
 
 ## 编译
 
+命令行程序生成并安装为 `KFlowLens`。CMake 内部构建目标仍为 `ktag_demo`，
+因此下文的 `cmake --build ... --target ktag_demo` 命令继续使用该目标名。
+
 推荐使用一键编译命令，会同时编译 KTAG 库和 demo：
 
 ```bash
@@ -47,7 +50,7 @@ sh /opt/KTAG/build.sh
 /opt/KTAG/output/libktag_capture.so
 /opt/KTAG/output/libktag_feature.so
 /opt/KTAG/output/libktag_inference.so
-/opt/KTAG/output/ktag_demo
+/opt/KTAG/output/KFlowLens
 /opt/KTAG/output/plugins/libktag_example_feature_plugin.so
 /opt/KTAG/output/plugins/libktag_proxy_features.so
 /opt/KTAG/output/python/training.py
@@ -66,7 +69,7 @@ cmake --build /opt/KTAG/build --target ktag_demo
 
 如需仅编译库，设置 `KTAG_BUILD_TOOLS=OFF`。KTAG 现有的依赖项（libpcap、yaml-cpp 和 ONNX Runtime）同样适用于 demo。
 
-可执行文件输出到 `/opt/KTAG/output/ktag_demo`。其 Python 辅助脚本在编译时会拷贝到 `/opt/KTAG/output/python`，因此训练和评估无需依赖原独立工具仓库的目录结构。
+可执行文件输出到 `/opt/KTAG/output/KFlowLens`。其 Python 辅助脚本在编译时会拷贝到 `/opt/KTAG/output/python`，因此训练和评估无需依赖原独立工具仓库的目录结构。
 
 使用 `-t` 或 `-e` 前请先安装 Python 依赖：
 
@@ -78,12 +81,12 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 
 ```bash
 # 应用分类
-/opt/KTAG/output/ktag_demo -t /opt/KTAG/tools/demo/config.yaml
-/opt/KTAG/output/ktag_demo -e /opt/KTAG/tools/demo/config.yaml
+/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/config.yaml
+/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/config.yaml
 
 # 代理分类：先替换配置中的全部 /path/to CSV 路径
-/opt/KTAG/output/ktag_demo -t /opt/KTAG/tools/demo/proxy_config.yaml
-/opt/KTAG/output/ktag_demo -e /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/proxy_config.yaml
 ```
 
 新的 pipeline 为可选启用。若 YAML 中设置
@@ -111,10 +114,10 @@ python3 /opt/KTAG/tools/model_package/create_legacy_package.py \
 临时启用某种拓扑：
 
 ```bash
-/opt/KTAG/output/ktag_demo -r /opt/KTAG/tools/demo/config.yaml -p sample.pcap \
+/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/config.yaml -p sample.pcap \
   --pipeline-mode feature_parallel -n 4 -c result.csv
 
-/opt/KTAG/output/ktag_demo -r /opt/KTAG/tools/demo/config.yaml -p sample.pcap \
+/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/config.yaml -p sample.pcap \
   --pipeline-mode full_parallel -n 4 --inference-threads 2 \
   -c result.csv
 ```
@@ -136,11 +139,11 @@ python3 /opt/KTAG/tools/model_package/create_legacy_package.py \
 
 ```bash
 # 应用：CSV 为 12 个 meta.* 列 + 354 个 Schema 值
-/opt/KTAG/output/ktag_demo -f application.pcap \
+/opt/KTAG/output/KFlowLens -f application.pcap \
   --config /opt/KTAG/tools/demo/config.yaml -c application.csv
 
 # 代理：CSV 为 12 个 meta.* 列 + 619 个 Schema 值
-/opt/KTAG/output/ktag_demo -f proxy.pcap \
+/opt/KTAG/output/KFlowLens -f proxy.pcap \
   --config /opt/KTAG/tools/demo/proxy_config.yaml -c proxy.csv
 ```
 
@@ -185,9 +188,9 @@ IPv4/IPv6 覆盖只产生诊断信息：仅含 IPv4 或仅含 IPv6 的数据集�
 训练和评估继续使用现有命令：
 
 ```bash
-/opt/KTAG/output/ktag_demo -t /opt/KTAG/tools/demo/proxy_config.yaml
-/opt/KTAG/output/ktag_demo -e /opt/KTAG/tools/demo/proxy_config.yaml
-/opt/KTAG/output/ktag_demo -r /opt/KTAG/tools/demo/proxy_config.yaml -p sample.pcap -c predictions.csv
+/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/proxy_config.yaml -p sample.pcap -c predictions.csv
 ```
 
 训练阶段会在内存中执行 `filter_packets` 和 `columns_to_remove`，打印最终输入列，保存
@@ -234,10 +237,10 @@ cmake --build build --target ktag_demo ktag_capture_dpdk
 
 ```bash
 # SP600/HiSilicon 网卡按 PCI 地址收包
-output/ktag_demo -r config.yaml -i 0000:03:00.0 --dpdk -j result.json
+output/KFlowLens -r config.yaml -i 0000:03:00.0 --dpdk -j result.json
 
 # 或通过命令行指定 EAL 参数
-output/ktag_demo -r config.yaml -i 0000:03:00.0 --dpdk \
+output/KFlowLens -r config.yaml -i 0000:03:00.0 --dpdk \
   --dpdk-eal-args "-a 0000:03:00.0 --log-level=lib.eal:7" -j result.json
 ```
 

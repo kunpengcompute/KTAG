@@ -823,9 +823,9 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
                       "参数指定JSON格式输出\n");
       fprintf(stderr, "示例:\n");
       fprintf(stderr, "  %s -f input.pcap -c output.csv\n",
-              (argc > 0) ? argv[0] : "ktag_demo");
+              (argc > 0) ? argv[0] : "KFlowLens");
       fprintf(stderr, "  %s -f input.pcap -j output.json\n",
-              (argc > 0) ? argv[0] : "ktag_demo");
+              (argc > 0) ? argv[0] : "KFlowLens");
       return -1;
     }
     if (args->feature_config_file != nullptr) {
@@ -899,11 +899,11 @@ int parse_args(int argc, char *argv[], CommandLineArgs *args) {
       fprintf(stderr, "示例:\n");
       fprintf(stderr,
               "  %s -r config.yaml -p file1.pcap -p file2.pcap -c result.csv\n",
-              (argc > 0) ? argv[0] : "ktag_demo");
+              (argc > 0) ? argv[0] : "KFlowLens");
       fprintf(
           stderr,
           "  %s -r config.yaml -p file1.pcap -p file2.pcap -j result.json\n",
-          (argc > 0) ? argv[0] : "ktag_demo");
+          (argc > 0) ? argv[0] : "KFlowLens");
       return -1;
     }
 

@@ -2,7 +2,7 @@
 
 # KTAG用户指南
 
-本文介绍 `ktag_demo` 的完整使用方法：功能范围、安装与构建、流量分类场景、工具操作维护、常用操作、常见问题和故障排除。KTAG源码根目录以 `/opt/KTAG` 为例，命令均使用绝对路径。快速上手见《[快速入门](quick_start.md)》。
+本文介绍 `KFlowLens` 的完整使用方法：功能范围、安装与构建、流量分类场景、工具操作维护、常用操作、常见问题和故障排除。KTAG源码根目录以 `/opt/KTAG` 为例，命令均使用绝对路径。快速上手见《[快速入门](quick_start.md)》。
 
 ## KTAG 简介
 
@@ -72,7 +72,7 @@ Salamander等混淆后，标准QUIC Header可能无法解析；解析失败计�
 
 **操作场景**
 
-构建KTAG，并确认 `ktag_demo`、公共动态库和插件产物可用。
+构建KTAG，并确认 `KFlowLens`、公共动态库和插件产物可用。
 
 **前提条件**
 
@@ -89,7 +89,7 @@ Salamander等混淆后，标准QUIC Header可能无法解析；解析失败计�
    与应用/代理分类有关的主要产物如下。
 
    ```text
-   /opt/KTAG/output/ktag_demo
+   /opt/KTAG/output/KFlowLens
    /opt/KTAG/output/libktag_capture.so
    /opt/KTAG/output/libktag_feature.so
    /opt/KTAG/output/libktag_inference.so
@@ -99,16 +99,16 @@ Salamander等混淆后，标准QUIC Header可能无法解析；解析失败计�
    /opt/KTAG/output/python/evaluation.py
    ```
 
-   `ktag_demo` 的全部推理入口（包括 `--pipeline-mode legacy`）统一使用 `libktag_capture.so`、
+   `KFlowLens` 的全部推理入口（包括 `--pipeline-mode legacy`）统一使用 `libktag_capture.so`、
    `libktag_feature.so` 和 `libktag_inference.so`。应用分类加载Traffic插件，代理分类同时加载
    Traffic与Proxy插件；二者均由默认构建生成。旧固定向量提取、推理接口及独立兼容库已移除。
 
 2. 检查产物并查看帮助信息。
 
    ```bash
-   ls -l /opt/KTAG/output/ktag_demo /opt/KTAG/output/libktag_capture.so \
+   ls -l /opt/KTAG/output/KFlowLens /opt/KTAG/output/libktag_capture.so \
      /opt/KTAG/output/libktag_feature.so /opt/KTAG/output/libktag_inference.so
-   /opt/KTAG/output/ktag_demo -h
+   /opt/KTAG/output/KFlowLens -h
    ```
 
 ## 安装训练和评估依赖
@@ -282,7 +282,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
    **应用分类**
 
    ```bash
-   /opt/KTAG/output/ktag_demo \
+   /opt/KTAG/output/KFlowLens \
      -f /path/to/application.pcap \
      --config /opt/KTAG/tools/demo/config.yaml \
      -c /path/to/application.csv
@@ -291,7 +291,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
    **代理分类**
 
    ```bash
-   /opt/KTAG/output/ktag_demo \
+   /opt/KTAG/output/KFlowLens \
      -f /path/to/proxy.pcap \
      --config /opt/KTAG/tools/demo/proxy_config.yaml \
      -c /path/to/proxy.csv
@@ -362,10 +362,10 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
    ```bash
    # 应用模型
-   /opt/KTAG/output/ktag_demo -t /opt/KTAG/tools/demo/config.yaml
+   /opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/config.yaml
 
    # 代理模型
-   /opt/KTAG/output/ktag_demo -t /opt/KTAG/tools/demo/proxy_config.yaml
+   /opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/proxy_config.yaml
    ```
 
 2. 检查训练产物和模型包。
@@ -400,8 +400,8 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 1. 根据分类任务，执行对应评估命令。
 
    ```bash
-   /opt/KTAG/output/ktag_demo -e /opt/KTAG/tools/demo/config.yaml
-   /opt/KTAG/output/ktag_demo -e /opt/KTAG/tools/demo/proxy_config.yaml
+   /opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/config.yaml
+   /opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/proxy_config.yaml
    ```
 
    预期结果：评估使用 `evaluation_data_paths`，生成整体Classification Report、预测明细、整体
@@ -457,7 +457,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 1. 使用应用配置执行推理。
 
    ```bash
-   /opt/KTAG/output/ktag_demo \
+   /opt/KTAG/output/KFlowLens \
      -r /opt/KTAG/tools/demo/config.yaml \
      -p /path/to/application.pcap \
      --pipeline-mode feature_parallel \
@@ -481,7 +481,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 1. 使用代理配置执行推理。
 
    ```bash
-   /opt/KTAG/output/ktag_demo \
+   /opt/KTAG/output/KFlowLens \
      -r /opt/KTAG/tools/demo/proxy_config.yaml \
      -p /path/to/proxy.pcap \
      --pipeline-mode feature_parallel \
@@ -516,13 +516,13 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 1. 列出可用接口。
 
    ```bash
-   /opt/KTAG/output/ktag_demo -l
+   /opt/KTAG/output/KFlowLens -l
    ```
 
 2. 选择接口并启动实时推理。
 
    ```bash
-   /opt/KTAG/output/ktag_demo \
+   /opt/KTAG/output/KFlowLens \
      -r /opt/KTAG/tools/demo/proxy_config.yaml \
      -i eth0 \
      --pipeline-mode full_parallel \
@@ -543,7 +543,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
 1. 保持程序、动态库和插件的相对布局。
 
-   构建树的 `ktag_demo` 已设置运行时库搜索路径。若将程序、动态库或插件复制到其他目录，请保留其相对布局，或配置 `LD_LIBRARY_PATH`，并确保配置中的Traffic、Proxy插件路径可被加载。
+   构建树的 `KFlowLens` 已设置运行时库搜索路径。若将程序、动态库或插件复制到其他目录，请保留其相对布局，或配置 `LD_LIBRARY_PATH`，并确保配置中的Traffic、Proxy插件路径可被加载。
 
 2. 保留训练和评估使用的Python辅助脚本目录。
 
@@ -583,7 +583,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 1. 需要显式设置两类线程数时，执行以下命令。
 
    ```bash
-   /opt/KTAG/output/ktag_demo -r /opt/KTAG/tools/demo/proxy_config.yaml \
+   /opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/proxy_config.yaml \
      -p /path/to/proxy.pcap \
      --pipeline-mode full_parallel -n 4 --inference-threads 2 \
      -c /path/to/prediction.csv
@@ -632,12 +632,12 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
 | 目标 | 命令 |
 |---|---|
-| 帮助/网口 | /opt/KTAG/output/ktag_demo -h / /opt/KTAG/output/ktag_demo -l |
-| 历史格式特征CSV | /opt/KTAG/output/ktag_demo -f input.pcap -c feature.csv |
-| 历史格式特征JSON（含rawbow） | /opt/KTAG/output/ktag_demo -f input.pcap -j feature.json -w |
-| Schema CSV | /opt/KTAG/output/ktag_demo -f input.pcap --config task.yaml -c schema.csv |
-| 训练/评估 | /opt/KTAG/output/ktag_demo -t task.yaml / /opt/KTAG/output/ktag_demo -e task.yaml |
-| PCAP/网口推理 | /opt/KTAG/output/ktag_demo -r task.yaml -p input.pcap -c result.csv / /opt/KTAG/output/ktag_demo -r task.yaml -i eth0 -j result.json |
+| 帮助/网口 | /opt/KTAG/output/KFlowLens -h / /opt/KTAG/output/KFlowLens -l |
+| 历史格式特征CSV | /opt/KTAG/output/KFlowLens -f input.pcap -c feature.csv |
+| 历史格式特征JSON（含rawbow） | /opt/KTAG/output/KFlowLens -f input.pcap -j feature.json -w |
+| Schema CSV | /opt/KTAG/output/KFlowLens -f input.pcap --config task.yaml -c schema.csv |
+| 训练/评估 | /opt/KTAG/output/KFlowLens -t task.yaml / /opt/KTAG/output/KFlowLens -e task.yaml |
+| PCAP/网口推理 | /opt/KTAG/output/KFlowLens -r task.yaml -p input.pcap -c result.csv / /opt/KTAG/output/KFlowLens -r task.yaml -i eth0 -j result.json |
 
 不带 `--config` 的 `-f` 通过公共Feature API和Traffic插件提取特征，再转换为历史
 固定向量CSV/JSON格式，可附带rawbow，主要用于人工打标核验；与正式Schema CSV的
@@ -655,7 +655,7 @@ test -r "$KTAG_LEGACY_FEATURE_PLUGIN"
 ldd "$KTAG_LEGACY_FEATURE_PLUGIN"
 ```
 
-export对当前Shell及后续子进程立即生效；需要持久化时将export写入 `~/.bashrc`，再执行 `source ~/.bashrc`。预期输出所设路径、文件可读且 `ldd` 无 `not found`；最终加载结果以ktag_demo的插件加载日志为准。
+export对当前Shell及后续子进程立即生效；需要持久化时将export写入 `~/.bashrc`，再执行 `source ~/.bashrc`。预期输出所设路径、文件可读且 `ldd` 无 `not found`；最终加载结果以KFlowLens的插件加载日志为准。
 
 # 常见问题
 

@@ -2,7 +2,7 @@
 
 ## 介绍
 
-本文指导用户快速使用 `ktag_demo` 完成流量分类：使用已有模型推理，或从PCAP（网络报文捕获文件）训练自己的模型。KTAG源码根目录以 `/opt/KTAG` 为例，命令均使用绝对路径。配置文件的详细说明、训练步骤和参数含义见《[用户指南](user_guide.md)》。
+本文指导用户快速使用 `KFlowLens` 完成流量分类：使用已有模型推理，或从PCAP（网络报文捕获文件）训练自己的模型。KTAG源码根目录以 `/opt/KTAG` 为例，命令均使用绝对路径。配置文件的详细说明、训练步骤和参数含义见《[用户指南](user_guide.md)》。
 
 ## 环境准备
 
@@ -15,7 +15,7 @@
 确认以下产物存在。
 
 ```bash
-ls -l /opt/KTAG/output/ktag_demo \
+ls -l /opt/KTAG/output/KFlowLens \
   /opt/KTAG/output/plugins/libktag_traffic_features.so
 ```
 
@@ -47,7 +47,7 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 1. 确认 `/opt/KTAG/work/app.yaml` 中的 `pipeline.model_package_path` 指向已有应用模型包，建议使用绝对路径。配置修改方法见《[用户指南](user_guide.md#配置文件)》。然后执行推理，输出CSV文件。
 
    ```bash
-   /opt/KTAG/output/ktag_demo -r /opt/KTAG/work/app.yaml \
+   /opt/KTAG/output/KFlowLens -r /opt/KTAG/work/app.yaml \
      -p /opt/KTAG/work/pcap/sample.pcap \
      --pipeline-mode feature_parallel -n 4 \
      -c /opt/KTAG/work/result/prediction.csv
@@ -56,7 +56,7 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 2. 输出JSON（JavaScript对象表示法）文件使用 `-j`。
 
    ```bash
-   /opt/KTAG/output/ktag_demo -r /opt/KTAG/work/app.yaml \
+   /opt/KTAG/output/KFlowLens -r /opt/KTAG/work/app.yaml \
      -p /opt/KTAG/work/pcap/sample.pcap \
      -j /opt/KTAG/work/result/prediction.json
    ```
@@ -67,11 +67,18 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 
 | 参数 | 示例中使用的含义与约束 |
 | :--- | :--- |
+| --pcap-labels | 可选，按 `-p` 顺序用逗号分隔列表指定各文件真实标签；数量须与PCAP一致，可重复，标签须属于模型包 `class_labels`；仅用于单机PCAP推理 |
 | --pipeline-mode | 可选 legacy、single_thread、staged、feature_parallel、full_parallel，各模式见[模式表](user_guide.md#pipeline-mode-与线程配置)；省略时使用配置中的调度方式 |
 | -n | Feature线程数，十进制正整数 1..4294967295；省略时使用YAML，缺省值为4，并受模式归一化约束；single_thread/staged只允许显式指定1 |
 | --inference-threads | Inference线程数，同一正整数范围；省略时使用YAML，缺省值为1；single_thread/staged/feature_parallel只允许显式指定1 |
 
 上述范围是参数解析范围，实际线程数应结合CPU和内存配置。`legacy` 不接受这两个线程参数。
+
+若 `sample.pcap` 的真实类别为0，可在上述命令中增加 `--pcap-labels 0`。多个文件
+可使用 `-p a.pcap -p b.pcap --pcap-labels 0,0`，表示两个文件均属于类别0；
+数字标签需以实际训练和采集记录为准，不会覆盖模型预测的 `label`。
+省略时程序按文件顺序假定真实标签为0、1、2……并打印WARNING；模型包必须包含有效的
+`class_labels`，缺少时先使用当前版本 `-t` 重新导出。完整要求见[指定PCAP真实标签](user_guide.md#%E6%8C%87%E5%AE%9A-pcap-%E7%9C%9F%E5%AE%9E%E6%A0%87%E7%AD%BE)。
 
 **结果说明**
 
@@ -84,13 +91,13 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 1. 列出可用网口。
 
    ```bash
-   /opt/KTAG/output/ktag_demo -l
+   /opt/KTAG/output/KFlowLens -l
    ```
 
 2. 对指定网口实时分类，使用Ctrl+C停止。
 
    ```bash
-   /opt/KTAG/output/ktag_demo -r /opt/KTAG/work/app.yaml -i eth0 \
+   /opt/KTAG/output/KFlowLens -r /opt/KTAG/work/app.yaml -i eth0 \
      --pipeline-mode full_parallel -n 4 --inference-threads 2 \
      -j /opt/KTAG/work/result/live_prediction.json
    ```
@@ -109,7 +116,7 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
    从每个PCAP生成一份特征CSV（每个PCAP单独执行一次）。
 
    ```bash
-   /opt/KTAG/output/ktag_demo -f /opt/KTAG/work/pcap/video_train_1.pcap \
+   /opt/KTAG/output/KFlowLens -f /opt/KTAG/work/pcap/video_train_1.pcap \
      --config /opt/KTAG/work/app.yaml \
      -c /opt/KTAG/work/csv/video_train_1.csv
    ```
@@ -134,8 +141,8 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 3. 训练并评估。
 
    ```bash
-   /opt/KTAG/output/ktag_demo -t /opt/KTAG/work/app.yaml
-   /opt/KTAG/output/ktag_demo -e /opt/KTAG/work/app.yaml
+   /opt/KTAG/output/KFlowLens -t /opt/KTAG/work/app.yaml
+   /opt/KTAG/output/KFlowLens -e /opt/KTAG/work/app.yaml
    ```
 
 **参数说明**

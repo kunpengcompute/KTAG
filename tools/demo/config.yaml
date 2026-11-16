@@ -58,7 +58,7 @@ filter_packets: 16
 pipeline:
   enabled: true
   mode: feature_parallel
-  # 选择完整 Legacy V1 契约时，ktag_demo -t 在写出旧 ONNX/Scaler 后自动生成
+  # 选择完整 Legacy V1 契约时，KFlowLens -t 在写出旧 ONNX/Scaler 后自动生成
   # 与该 Schema 绑定的模型包。
   model_package_path: ../../result/legacy_model_package
   # 在线 -c/-j 保留数字 label/confidence 和 IPv4/IPv6 流元数据。confidence=0
@@ -110,7 +110,7 @@ pipeline:
       #   fe-02: [1, 4]
       #   fe-03: [2]
       # 第一项是 EAL 的 argv[0]；现场根据 CPU 绑核和部署环境调整。
-      eal_arguments: [ktag_demo, --no-huge, -l, "0"]
+      eal_arguments: [KFlowLens, --no-huge, -l, "0"]
 
   plugins:
     - ../../output/plugins/libktag_traffic_features.so

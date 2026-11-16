@@ -1,5 +1,5 @@
 if(NOT TARGET ktag_capture OR NOT TARGET ktag_feature OR NOT TARGET ktag_inference)
-    message(FATAL_ERROR "ktag_demo must be built as part of the KTAG source tree")
+    message(FATAL_ERROR "KFlowLens must be built as part of the KTAG source tree")
 endif()
 
 find_package(Threads REQUIRED)
@@ -88,7 +88,7 @@ if(KTAG_ENABLE_DPDK)
 endif()
 
 # The loader consumes this example exactly like a customer-provided .so. It is
-# deliberately not linked into ktag_demo.
+# deliberately not linked into KFlowLens.
 add_library(ktag_example_feature_plugin SHARED
     ${PROJECT_SOURCE_DIR}/examples/feature_plugin/custom_feature_plugin.c
 )
@@ -149,10 +149,11 @@ add_custom_command(TARGET ktag_demo POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${PROJECT_SOURCE_DIR}/tools/model_package/create_legacy_package.py"
             "$<TARGET_FILE_DIR:ktag_demo>/python/create_legacy_package.py"
-    COMMENT "Copying ktag_demo Python helpers"
+    COMMENT "Copying KFlowLens Python helpers"
 )
 
 set_target_properties(ktag_demo PROPERTIES
+    OUTPUT_NAME KFlowLens
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     BUILD_RPATH "$ORIGIN;${KTAG_DEMO_YAML_CPP_LIB_DIR}"
