@@ -24,6 +24,11 @@ int main() {
       "replay:\n  rate_mode: invalid_unused\n  source_mac: invalid_unused\n  drain_timeout_s: 0\n"; }
     auto args = front; args.insert(args.end(), {"--config", path.string()}); auto ub = parse(args);
     require(ub.packet_pool == 2 && ub.rules_hash() == defaults.rules_hash(), "UB configuration/default normalization changed semantics");
+    { std::ofstream f(path); f << "pipeline:\n  plugins: [plugins/libktag_traffic_features.so]\n"; }
+    auto plugin_config = parse(args);
+    require(plugin_config.plugin_paths == std::vector<std::string>{
+        (path.parent_path()/"plugins/libktag_traffic_features.so").lexically_normal().string()},
+        "plugin path must resolve relative to YAML");
     auto append = [&](std::initializer_list<std::string> extra) { auto args = front; args.insert(args.end(), extra); return parse(args); };
     rejects([&] { append({"--replay-interface", "eth0"}); });
     rejects([&] { append({"--capture-interface", "eth0"}); });
