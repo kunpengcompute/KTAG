@@ -20,9 +20,11 @@ public:
     ktag_demo_inference_session(const ktag_demo_inference_session &) = delete;
     ktag_demo_inference_session &operator=(const ktag_demo_inference_session &) = delete;
 
+    /* Optional counter excludes Demo batch construction and result conversion. */
     bool predict(const feature_vector_list &features,
                  std::vector<feature_vector> *accepted,
-                 std::vector<int> *labels, std::string *error);
+                 std::vector<int> *labels, std::string *error,
+                 double *compute_seconds = nullptr);
 
 private:
     ktag_demo_inference_session() = default;

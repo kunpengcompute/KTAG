@@ -1,6 +1,7 @@
 /* Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved. */
 #include "inference_session.h"
 
+#include <chrono>
 #include <filesystem>
 #include <limits>
 #include <stdexcept>
@@ -75,7 +76,7 @@ ktag_demo_inference_session::~ktag_demo_inference_session() {
 
 bool ktag_demo_inference_session::predict(
     const feature_vector_list &features, std::vector<feature_vector> *accepted,
-    std::vector<int> *labels, std::string *error) {
+    std::vector<int> *labels, std::string *error, double *compute_seconds) {
     if (error) error->clear();
     if (accepted) accepted->clear();
     if (labels) labels->clear();
@@ -97,7 +98,15 @@ bool ktag_demo_inference_session::predict(
                 return fail(error, "cannot append Demo feature record");
             }
         }
-        if (ktag_inference_predict(context_, features_, predictions_) != KTAG_SUCCESS) {
+        const auto compute_start = compute_seconds != nullptr
+            ? std::chrono::steady_clock::now()
+            : std::chrono::steady_clock::time_point{};
+        const auto status = ktag_inference_predict(context_, features_, predictions_);
+        if (compute_seconds != nullptr) {
+            *compute_seconds += std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - compute_start).count();
+        }
+        if (status != KTAG_SUCCESS) {
             return fail(error, ktag_inference_get_last_error());
         }
         const auto count = ktag_prediction_batch_get_count(predictions_);

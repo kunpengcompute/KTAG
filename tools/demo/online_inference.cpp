@@ -78,10 +78,9 @@ void predict_and_append(ktag_demo_inference_session &session,
     std::vector<feature_vector> selected;
     std::vector<int> predictions;
     std::string error;
-    const auto start = get_time_in_seconds();
-    if (!session.predict(input, &selected, &predictions, &error))
+    if (!session.predict(input, &selected, &predictions, &error,
+                         &stats.inference_time))
         throw std::runtime_error("inference failed: " + error);
-    stats.inference_time += get_time_in_seconds() - start;
     stats.inference_inputs += input.count;
     stats.predictions += predictions.size();
     if (predictions.size() > static_cast<size_t>(std::numeric_limits<int>::max()) - output.predictions.size())
@@ -97,7 +96,7 @@ void predict_and_append(ktag_demo_inference_session &session,
 }
 
 /* Preserve -m 2's disk round trip without a shared temp.csv filename. */
-void roundtrip_features(std::vector<feature_vector> &features, PerformanceStats &stats) {
+void roundtrip_features(std::vector<feature_vector> &features) {
     if (features.empty()) return;
     struct temporary_file {
         std::string path;
@@ -110,7 +109,6 @@ void roundtrip_features(std::vector<feature_vector> &features, PerformanceStats 
         }
         ~temporary_file() { std::remove(path.c_str()); }
     } file;
-    const auto start = get_time_in_seconds();
     file_writer_config config{};
     config.file_path = file.path.c_str();
     config.format = FILE_FORMAT_CSV;
@@ -143,7 +141,6 @@ void roundtrip_features(std::vector<feature_vector> &features, PerformanceStats 
     }
     if (!stream.eof() || loaded.size() != features.size()) throw std::runtime_error("cannot read complete temporary feature file");
     features.swap(loaded);
-    stats.file_io_time += get_time_in_seconds() - start;
 }
 
 void run_source(ktag_demo_inference_session &inference, const char *source,
@@ -174,8 +171,8 @@ void run_source(ktag_demo_inference_session &inference, const char *source,
         feature_vector features{};
         int ready = 0;
         const auto timestamp = packet_timeval(next.packet);
-        const auto extracted = extractor->process(next.packet.data, next.packet.captured_length, &timestamp, &features, &ready);
-        stats.feature_extraction_time += get_time_in_seconds() - captured;
+        const auto extracted = extractor->process(next.packet.data, next.packet.captured_length,
+            &timestamp, &features, &ready, &stats.feature_extraction_time);
         if (extracted != KTAG_SUCCESS) throw std::runtime_error("feature extraction failed");
         if (ready) {
             if (immediate) {
@@ -184,23 +181,21 @@ void run_source(ktag_demo_inference_session &inference, const char *source,
             } else pending.push_back(features);
         }
     }
-    const auto start = get_time_in_seconds();
     feature_list_guard remaining;
-    if (extractor->flush(&remaining.list) != KTAG_SUCCESS) throw std::runtime_error("cannot flush remaining feature records");
-    stats.feature_extraction_time += get_time_in_seconds() - start;
+    if (extractor->flush(&remaining.list, &stats.feature_extraction_time) != KTAG_SUCCESS)
+        throw std::runtime_error("cannot flush remaining feature records");
     if (immediate) predict_and_append(inference, remaining.list, label, live, output, stats);
     else {
         if (remaining.list.count)
             pending.insert(pending.end(), remaining.list.vectors, remaining.list.vectors + remaining.list.count);
-        if (mode == 2) roundtrip_features(pending, stats);
+        if (mode == 2) roundtrip_features(pending);
         const auto batch = view(pending);
         predict_and_append(inference, batch, label, false, output, stats);
     }
 }
 
-void write_results(const char *path, file_format format, results &output, PerformanceStats &stats) {
+void write_results(const char *path, file_format format, results &output) {
     if (!path || output.features.empty()) return;
-    const auto start = get_time_in_seconds();
     file_writer_config config{};
     config.file_path = path;
     config.format = format;
@@ -210,7 +205,6 @@ void write_results(const char *path, file_format format, results &output, Perfor
     if (!writer || writer_write_features_with_predictions(writer.get(), &features, output.predictions.data(),
             static_cast<uint32_t>(output.predictions.size())) != WRITER_SUCCESS || writer_flush(writer.get()) != WRITER_SUCCESS)
         throw std::runtime_error("cannot write inference results");
-    stats.file_io_time += get_time_in_seconds() - start;
 }
 }
 
@@ -254,8 +248,7 @@ int online_inference_mode(const char *config_file, const char **pcap_files, int 
                 std::printf("无有效推理样本，未生成 Classification Report；accuracy=N/A。\n");
             }
         }
-        write_results(output_file, format, output, stats);
-        stats.total_time = stats.feature_extraction_time + stats.inference_time + stats.file_io_time;
+        write_results(output_file, format, output);
         stats.end_to_end_time = get_time_in_seconds() - start;
         print_performance_stats(&stats);
         std::printf("过滤统计: 保留 %zu 个样本, 过滤掉 %llu 个样本\n", output.features.size(), static_cast<unsigned long long>(output.rejected));

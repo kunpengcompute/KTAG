@@ -6,6 +6,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <new>
 
@@ -111,32 +112,31 @@ ktag_status set_scalar(ktag_feature_output *output,
   return set_optional(output, feature, &value, 1U);
 }
 
-float printable_ratio(const uint8_t *data, size_t length) {
+struct prefix_byte_statistics {
+  float entropy = 0.0F;
+  float printable_ratio = 0.0F;
+  float zero_ratio = 0.0F;
+};
+
+prefix_byte_statistics calculate_prefix_byte_statistics(const uint8_t *data,
+                                                        size_t length) {
   if (data == nullptr || length == 0U) {
-    return 0.0F;
+    return {};
   }
+  std::array<uint32_t, 256U> counts{};
   size_t printable = 0U;
   for (size_t index = 0U; index < length; ++index) {
-    if (data[index] >= 0x20U && data[index] <= 0x7eU) {
+    const uint8_t value = data[index];
+    ++counts[value];
+    if (value >= 0x20U && value <= 0x7eU) {
       ++printable;
     }
   }
-  return static_cast<float>(static_cast<double>(printable) /
-                            static_cast<double>(length));
-}
-
-float zero_ratio(const uint8_t *data, size_t length) {
-  if (data == nullptr || length == 0U) {
-    return 0.0F;
-  }
-  size_t zeros = 0U;
-  for (size_t index = 0U; index < length; ++index) {
-    if (data[index] == 0U) {
-      ++zeros;
-    }
-  }
-  return static_cast<float>(static_cast<double>(zeros) /
-                            static_cast<double>(length));
+  return {byte_entropy_from_counts(counts, length),
+          static_cast<float>(static_cast<double>(printable) /
+                             static_cast<double>(length)),
+          static_cast<float>(static_cast<double>(counts[0U]) /
+                             static_cast<double>(length))};
 }
 
 void add_segment(prefix_state *prefix, const uint8_t *payload,
@@ -171,6 +171,15 @@ void add_segment(prefix_state *prefix, const uint8_t *payload,
   const size_t copy_length = std::min(payload_length, writable);
   if (copy_length < payload_length || offset + copy_length == PREFIX_CAPACITY) {
     prefix->truncated = true;
+  }
+
+  // Append in bulk only when there are no gaps or buffered bytes ahead.
+  if (offset == contiguous_before && offset == highest_before) {
+    std::memcpy(prefix->bytes.data() + offset, payload, copy_length);
+    std::memset(prefix->present.data() + offset, 1, copy_length);
+    prefix->contiguous_length = offset + copy_length;
+    prefix->highest_seen_end = prefix->contiguous_length;
+    return;
   }
 
   bool duplicate_found = false;
@@ -294,6 +303,10 @@ write_tcp_features(const tcp_signature_flow_state &state,
                    ktag_feature_output *output) {
   const auto &forward = state.prefixes[0U];
   const auto &reverse = state.prefixes[1U];
+  const auto forward_statistics = calculate_prefix_byte_statistics(
+      forward.bytes.data(), forward.contiguous_length);
+  const auto reverse_statistics = calculate_prefix_byte_statistics(
+      reverse.bytes.data(), reverse.contiguous_length);
   const tls_parse_result *hello = select_client_hello(tls);
   const std::array<float, 2U> cipher_hash{{
       hello == nullptr ? 0.0F : bounded_float(hello->cipher_suite_hash >> 16U),
@@ -335,22 +348,18 @@ write_tcp_features(const tcp_signature_flow_state &state,
       set_scalar(output, OUT_OF_ORDER_COUNT,
                  bounded_float(state.out_of_order_count)) != KTAG_SUCCESS ||
       set_scalar(output, FORWARD_ENTROPY,
-                 byte_entropy(forward.bytes.data(),
-                              forward.contiguous_length)) != KTAG_SUCCESS ||
+                 forward_statistics.entropy) != KTAG_SUCCESS ||
       set_scalar(output, REVERSE_ENTROPY,
-                 byte_entropy(reverse.bytes.data(),
-                              reverse.contiguous_length)) != KTAG_SUCCESS ||
+                 reverse_statistics.entropy) != KTAG_SUCCESS ||
       set_scalar(output, FORWARD_PRINTABLE_RATIO,
-                 printable_ratio(forward.bytes.data(),
-                                 forward.contiguous_length)) != KTAG_SUCCESS ||
+                 forward_statistics.printable_ratio) != KTAG_SUCCESS ||
       set_scalar(output, REVERSE_PRINTABLE_RATIO,
-                 printable_ratio(reverse.bytes.data(),
-                                 reverse.contiguous_length)) != KTAG_SUCCESS ||
+                 reverse_statistics.printable_ratio) != KTAG_SUCCESS ||
       set_scalar(output, FORWARD_ZERO_RATIO,
-                 zero_ratio(forward.bytes.data(), forward.contiguous_length)) !=
+                 forward_statistics.zero_ratio) !=
           KTAG_SUCCESS ||
       set_scalar(output, REVERSE_ZERO_RATIO,
-                 zero_ratio(reverse.bytes.data(), reverse.contiguous_length)) !=
+                 reverse_statistics.zero_ratio) !=
           KTAG_SUCCESS ||
       set_scalar(output, TLS_RECORD_CANDIDATE,
                  record_candidate ? 1.0F : 0.0F) != KTAG_SUCCESS ||

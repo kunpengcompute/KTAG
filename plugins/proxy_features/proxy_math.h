@@ -4,6 +4,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #ifndef KTAG_PROXY_MATH_H
 #define KTAG_PROXY_MATH_H
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -25,6 +26,9 @@ float log2_1p_u64(uint64_t value);
 float signed_log2_1p_u64(uint64_t value, ktag_direction direction);
 
 float byte_entropy(const uint8_t *data, size_t length);
+
+float byte_entropy_from_counts(const std::array<uint32_t, 256U> &counts,
+                               size_t length);
 
 } // namespace ktag_proxy_features
 
