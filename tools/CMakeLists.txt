@@ -1,4 +1,7 @@
 add_subdirectory(demo)
+if(KTAG_ENABLE_DPDK AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(rx_bench)
+endif()
 if(KTAG_BUILD_TCP_PCAP_BENCH)
     add_subdirectory(tcp_pcap_bench)
 endif()
