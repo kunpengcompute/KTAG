@@ -17,8 +17,7 @@ class SourcePipeline {
       output_(c.feature_queue), audit_(audit), active_(c.feature_threads),
       registry_(ktag_feature_registry_create(), ktag_feature_registry_destroy),
       domain_(nullptr, ktag_domain_store_destroy) {
-    require(bool(registry_) && ktag_feature_registry_register_legacy_builtins(registry_.get()) == KTAG_SUCCESS,
-            "cannot create builtin feature registry");
+    load_feature_plugins(c, registry_.get(), plugins_);
     ktag_domain_store_config dc{}; dc.struct_size = sizeof(dc); dc.api_version = KTAG_API_VERSION;
     dc.max_entries = KTAG_DOMAIN_DEFAULT_MAX_ENTRIES; dc.journal_capacity = KTAG_DOMAIN_DEFAULT_JOURNAL_CAPACITY;
     domain_.reset(ktag_domain_store_create(&dc)); require(bool(domain_), "cannot create domain store");
@@ -213,6 +212,7 @@ class SourcePipeline {
   std::atomic<uint32_t> active_;
   // Contexts borrow these objects; destroy contexts first, including on a
   // partially constructed pipeline.
+  FeaturePlugins plugins_;
   Registry registry_; Domain domain_;
   std::vector<std::unique_ptr<Queue<Packet>>> packets_;
   std::unique_ptr<OfflineInput> capture_;

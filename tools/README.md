@@ -1,6 +1,25 @@
 # KTAG 工具集
 
-`tools` 目录包含命令行 demo 以及原先维护在 KDADK-TOOLS 中的数据准备工具。
+`tools` 目录包含命令行 demo 以及从原独立工具仓库整合的数据准备工具。
+
+## PCAP 推理的真实标签
+
+`-r` 使用 `-p` 读取 PCAP 时，可用 `--pcap-labels` 逐文件指定真实标签：
+
+```bash
+output/KFlowLens -r tools/demo/proxy_config.yaml \
+  -p /data/a.pcap -p /data/b.pcap -p /data/c.pcap \
+  --pcap-labels 2,2,3 -c result/prediction.csv
+```
+
+三个标签分别对应三个 PCAP。重复标签的有效流合并统计；报告类别只取该列表的去重集合，
+按数值升序显示，因此上例只显示 2、3。预测落入其他模型类别的错误样本仍参与统计。
+未传该参数时按 PCAP 顺序假定真实标签为 0、1、2……，并打印提示；请确认顺序正确。
+标签数量不符、格式错误、标签不属于模型时，在读包前报错。
+
+模型包必须包含 `manifest.json` 的 `class_labels`。使用新版本执行 `-t` 会从实际训练
+模型导出该字段；缺少时必须先重新导出，不能仅凭 YAML 分组数手工猜测类别。
+该参数只用于单机 `-r/-p`，不支持训练、特征提取、网口 `-i` 或 UB 分布式组合。
 
 ## 目录结构
 
@@ -9,12 +28,15 @@
 - `demo/python`：demo 在模型训练和评估时调用的 Python 辅助脚本。
 - `demo/config.yaml`：现有应用分类的完整训练、评估和推理示例。
 - `demo/proxy_config.yaml`：`ktag_proxy_v1` 的训练、评估、特征提取和推理配置；
-  当前启用两个 VMess 承载类别，13 类只是数据齐备后的参考训练规划。
+  当前启用两个 SSR 类别和两个 VMess 承载类别，13 类只是数据齐备后的参考训练规划。
 - `data/feature_filter.py`：CSV 特征过滤工具。
 - `data/dataset_preflight.py`：只读检查双栈 Schema CSV 和现有训练/评估配置。
 - `capture` 和 `labeling`：流量抓包和打标签工具。
 
 ## 编译
+
+命令行程序生成并安装为 `KFlowLens`。CMake 内部构建目标仍为 `ktag_demo`，
+因此下文的 `cmake --build ... --target ktag_demo` 命令继续使用该目标名。
 
 推荐使用一键编译命令，会同时编译 KTAG 库和 demo：
 
@@ -27,10 +49,8 @@ sh /opt/KTAG/build.sh
 ```text
 /opt/KTAG/output/libktag_capture.so
 /opt/KTAG/output/libktag_feature.so
-/opt/KTAG/output/libKDADK_feature_extract.so
 /opt/KTAG/output/libktag_inference.so
-/opt/KTAG/output/libKDADK_inference.so
-/opt/KTAG/output/kdadk_demo
+/opt/KTAG/output/KFlowLens
 /opt/KTAG/output/plugins/libktag_example_feature_plugin.so
 /opt/KTAG/output/plugins/libktag_proxy_features.so
 /opt/KTAG/output/python/training.py
@@ -44,12 +64,12 @@ sh /opt/KTAG/build.sh
 
 ```bash
 cmake -S /opt/KTAG -B /opt/KTAG/build -DKTAG_BUILD_TOOLS=ON
-cmake --build /opt/KTAG/build --target kdadk_demo
+cmake --build /opt/KTAG/build --target ktag_demo
 ```
 
 如需仅编译库，设置 `KTAG_BUILD_TOOLS=OFF`。KTAG 现有的依赖项（libpcap、yaml-cpp 和 ONNX Runtime）同样适用于 demo。
 
-可执行文件输出到 `/opt/KTAG/output/kdadk_demo`。其 Python 辅助脚本在编译时会拷贝到 `/opt/KTAG/output/python`，因此训练和评估无需依赖旧的 KDADK-TOOLS 目录结构。
+可执行文件输出到 `/opt/KTAG/output/KFlowLens`。其 Python 辅助脚本在编译时会拷贝到 `/opt/KTAG/output/python`，因此训练和评估无需依赖原独立工具仓库的目录结构。
 
 使用 `-t` 或 `-e` 前请先安装 Python 依赖：
 
@@ -61,29 +81,43 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 
 ```bash
 # 应用分类
-/opt/KTAG/output/kdadk_demo -t /opt/KTAG/tools/demo/config.yaml
-/opt/KTAG/output/kdadk_demo -e /opt/KTAG/tools/demo/config.yaml
+/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/config.yaml
+/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/config.yaml
 
 # 代理分类：先替换配置中的全部 /path/to CSV 路径
-/opt/KTAG/output/kdadk_demo -t /opt/KTAG/tools/demo/proxy_config.yaml
-/opt/KTAG/output/kdadk_demo -e /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/proxy_config.yaml
 ```
 
-新的 pipeline 为可选启用。若 YAML 中缺少 `pipeline` 块或设置
-`pipeline.enabled: false`，则保留旧推理路径。应用任务使用
+新的 pipeline 为可选启用。若 YAML 中设置
+`pipeline.enabled: false`，则保留历史命令的调度和输出格式，推理仍调用公共 Inference API。应用任务使用
 `/opt/KTAG/tools/demo/config.yaml`，代理任务使用
 `/opt/KTAG/tools/demo/proxy_config.yaml`；其中的 `model_package_path` 必须指向与
 Schema 匹配的模型包。插件 ABI 见《[API 参考](../docs/zh/api_reference.md)》，代理
 Schema 的详细约定见《[用户指南](../docs/zh/user_guide.md)》。
 
+历史入口同样要求 `pipeline.model_package_path`，路径相对于 YAML 文件解析。
+`--pipeline-mode legacy` 保留 `-m 0/1/2` 的单流、批量和文件调度以及历史 CSV/JSON
+格式；列选择、标准化和包数过滤统一由模型包控制，修改旧顶层 `columns_to_remove`、
+`filter_packets` 或 `onnx_log_level` 后应重新生成模型包。已有 ONNX/Scaler 可转换：
+
+```bash
+python3 /opt/KTAG/tools/model_package/create_legacy_package.py \
+  --config /opt/KTAG/tools/demo/config.yaml \
+  --output /opt/KTAG/result/legacy_model_package
+```
+
+模型推理统一使用公共 `libktag_inference.so`，旧固定向量推理接口与独立兼容库已移除。
+`ktag_legacy_types.h` 仅保留历史文件格式的数据类型；版本查询由独立的版本库目标提供。
+
 同一份完整 YAML 可保持 `pipeline.enabled: false` 以默认走旧路径，并在某次调用时
 临时启用某种拓扑：
 
 ```bash
-/opt/KTAG/output/kdadk_demo -r /opt/KTAG/tools/demo/config.yaml -p sample.pcap \
+/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/config.yaml -p sample.pcap \
   --pipeline-mode feature_parallel -n 4 -c result.csv
 
-/opt/KTAG/output/kdadk_demo -r /opt/KTAG/tools/demo/config.yaml -p sample.pcap \
+/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/config.yaml -p sample.pcap \
   --pipeline-mode full_parallel -n 4 --inference-threads 2 \
   -c result.csv
 ```
@@ -95,21 +129,21 @@ Schema 的详细约定见《[用户指南](../docs/zh/user_guide.md)》。
 
 - `/opt/KTAG/tools/demo/config.yaml` 保持应用分类示例：`ktag_legacy_v1`，53 个 Feature
   Descriptor、354 个数值，Hash 为 `0xdd48882b53bebfa5`。
-- `/opt/KTAG/tools/demo/proxy_config.yaml` 是代理 Schema 完整结构和两分类数据示例配置：加载
+- `/opt/KTAG/tools/demo/proxy_config.yaml` 是代理 Schema 完整结构和四分类数据示例配置：加载
   `libktag_proxy_features.so`，组合 `ktag_proxy_v1`，118 个 Feature Descriptor、
   619 个数值，Hash 为 `0xca1eae5086b41ee5`；数字标签由当前启用的数据组顺序决定。
-  当前文件实际启用两个 VMess 承载类别，只是增量训练示例；普通流量和其余代理类别
+  当前文件实际启用两个 SSR 类别和两个 VMess 承载类别，只是增量训练示例；普通流量和其余代理类别
   需要在具备相应数据后作为新的外层组加入并重新训练。
 
 生成 Schema CSV：
 
 ```bash
 # 应用：CSV 为 12 个 meta.* 列 + 354 个 Schema 值
-/opt/KTAG/output/kdadk_demo -f application.pcap \
+/opt/KTAG/output/KFlowLens -f application.pcap \
   --config /opt/KTAG/tools/demo/config.yaml -c application.csv
 
 # 代理：CSV 为 12 个 meta.* 列 + 619 个 Schema 值
-/opt/KTAG/output/kdadk_demo -f proxy.pcap \
+/opt/KTAG/output/KFlowLens -f proxy.pcap \
   --config /opt/KTAG/tools/demo/proxy_config.yaml -c proxy.csv
 ```
 
@@ -154,9 +188,9 @@ IPv4/IPv6 覆盖只产生诊断信息：仅含 IPv4 或仅含 IPv6 的数据集�
 训练和评估继续使用现有命令：
 
 ```bash
-/opt/KTAG/output/kdadk_demo -t /opt/KTAG/tools/demo/proxy_config.yaml
-/opt/KTAG/output/kdadk_demo -e /opt/KTAG/tools/demo/proxy_config.yaml
-/opt/KTAG/output/kdadk_demo -r /opt/KTAG/tools/demo/proxy_config.yaml -p sample.pcap -c predictions.csv
+/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/proxy_config.yaml -p sample.pcap -c predictions.csv
 ```
 
 训练阶段会在内存中执行 `filter_packets` 和 `columns_to_remove`，打印最终输入列，保存
@@ -191,7 +225,7 @@ sh build.sh dpdk
 
 ```bash
 cmake -S . -B build -DKTAG_BUILD_TOOLS=ON -DKTAG_ENABLE_DPDK=ON
-cmake --build build --target kdadk_demo ktag_capture_dpdk
+cmake --build build --target ktag_demo ktag_capture_dpdk
 ```
 
 默认 `sh build.sh` 不带 DPDK（`KTAG_ENABLE_DPDK=OFF`）。
@@ -203,10 +237,10 @@ cmake --build build --target kdadk_demo ktag_capture_dpdk
 
 ```bash
 # SP600/HiSilicon 网卡按 PCI 地址收包
-output/kdadk_demo -r config.yaml -i 0000:03:00.0 --dpdk -j result.json
+output/KFlowLens -r config.yaml -i 0000:03:00.0 --dpdk -j result.json
 
 # 或通过命令行指定 EAL 参数
-output/kdadk_demo -r config.yaml -i 0000:03:00.0 --dpdk \
+output/KFlowLens -r config.yaml -i 0000:03:00.0 --dpdk \
   --dpdk-eal-args "-a 0000:03:00.0 --log-level=lib.eal:7" -j result.json
 ```
 
@@ -218,6 +252,8 @@ output/kdadk_demo -r config.yaml -i 0000:03:00.0 --dpdk \
   `--dpdk-eal-args` 优先于 YAML 中的 `capture.dpdk.eal_args`。
 - 单线程模式（BORROWED）零拷贝指向 mbuf；并行模式（OWNED）复用
   `ktag_packet_make_owned` 拷入引用计数 buffer。
+- UB Frontend还支持多RX及 `capture.dpdk.handoff: ring`：使用mbuf直通和按RX/Feature分片的SPSC交接；worker注册到EAL以使用mbuf cache。queue交接仍保留。多RX、绑核和多sender示例见 `demo/config-ub-1to1.yaml`。
+- 普通流量特征由 `pipeline.plugins` 中的 `libktag_traffic_features.so` 提供；单机和UB共享354维契约，UB后端按相同Schema通过公共Inference API推理。UB线程、队列、credits与绑核要求见[UB指南](../docs/zh/ub_user_guide.md)。
 
 离线验证（无需真实流量，用 DPDK net_pcap vdev 把 pcap 文件模拟成网卡）：
 

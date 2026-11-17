@@ -11,22 +11,22 @@ LIB_ROOT_PATH=$(cd "$(dirname "${0}")"; pwd -P)
 source ${LIB_ROOT_PATH}/function.sh
 OBJ_DIR=${LIB_ROOT_PATH}/build
 OUTPUT_DIR=${LIB_ROOT_PATH}/output
-INSTALL_LIB_PATH=/usr/local/lib/KDADK_APPID/
-INSTALL_INCLUDE_PATH=/usr/local/include/KDADK_APPID/
+INSTALL_LIB_PATH=/usr/local/lib/KTAG_APPID/
+INSTALL_INCLUDE_PATH=/usr/local/include/KTAG_APPID/
 DEBPACK_ROOT_PATH=${LIB_ROOT_PATH}/package/debpack
-DEBPACK_INCLUDE_PATH=${DEBPACK_ROOT_PATH}/KDADK_APPID/include
-DEBPACK_LIB_PATH=${DEBPACK_ROOT_PATH}/KDADK_APPID/lib
+DEBPACK_INCLUDE_PATH=${DEBPACK_ROOT_PATH}/KTAG_APPID/include
+DEBPACK_LIB_PATH=${DEBPACK_ROOT_PATH}/KTAG_APPID/lib
 
-KDADK_APPID_INFO_VERSION=$(xmllint --xpath "//KDADK_APPID_INFO_VERSION/text()" ${LIB_ROOT_PATH}/dependence.xml)
-KDADK_APPID_INFO_COMPONENT_NAME=$(xmllint --xpath "//KDADK_APPID_INFO_COMPONENT_NAME/text()" ${LIB_ROOT_PATH}/dependence.xml)
-KDADK_APPID_INFO_SOFTWARE_NAME=$(xmllint --xpath "//KDADK_APPID_INFO_SOFTWARE_NAME/text()" ${LIB_ROOT_PATH}/dependence.xml)
-KDADK_APPID_INFO_PRODUCT_VERSION=$(xmllint --xpath "//KDADK_APPID_INFO_PRODUCT_VERSION/text()" ${LIB_ROOT_PATH}/dependence.xml)
-cpulimit=$(xmllint --xpath "//KDADK_APPID_CPU_CHECK_ENABLE/text()" ${LIB_ROOT_PATH}/dependence.xml)
-KDADK_APPID_C_TOOLCHAIN=$(xmllint --xpath "//KDADK_APPID_C_TOOLCHAIN/text()" ${LIB_ROOT_PATH}/dependence.xml)
-export CC=${KDADK_APPID_C_TOOLCHAIN}
-export KDADK_APPID_CPU_CHECK_ENABLE=${cpulimit}
+KTAG_APPID_INFO_VERSION=$(xmllint --xpath "//KTAG_APPID_INFO_VERSION/text()" ${LIB_ROOT_PATH}/dependence.xml)
+KTAG_APPID_INFO_COMPONENT_NAME=$(xmllint --xpath "//KTAG_APPID_INFO_COMPONENT_NAME/text()" ${LIB_ROOT_PATH}/dependence.xml)
+KTAG_APPID_INFO_SOFTWARE_NAME=$(xmllint --xpath "//KTAG_APPID_INFO_SOFTWARE_NAME/text()" ${LIB_ROOT_PATH}/dependence.xml)
+KTAG_APPID_INFO_PRODUCT_VERSION=$(xmllint --xpath "//KTAG_APPID_INFO_PRODUCT_VERSION/text()" ${LIB_ROOT_PATH}/dependence.xml)
+cpulimit=$(xmllint --xpath "//KTAG_APPID_CPU_CHECK_ENABLE/text()" ${LIB_ROOT_PATH}/dependence.xml)
+KTAG_APPID_C_TOOLCHAIN=$(xmllint --xpath "//KTAG_APPID_C_TOOLCHAIN/text()" ${LIB_ROOT_PATH}/dependence.xml)
+export CC=${KTAG_APPID_C_TOOLCHAIN}
+export KTAG_APPID_CPU_CHECK_ENABLE=${cpulimit}
 
-function kdadk_appid_clean()
+function ktag_appid_clean()
 {
     if [ -d "${OBJ_DIR}" ]; then
         rm -rf ${OBJ_DIR}
@@ -36,7 +36,7 @@ function kdadk_appid_clean()
     fi
 }
 
-function kdadk_appid_install()
+function ktag_appid_install()
 {
     # 检查是否以超级用户权限运行
     if [[ $EUID -ne 0 ]]; then
@@ -55,7 +55,7 @@ function kdadk_appid_install()
     fi
     cmake --install "${OBJ_DIR}" --prefix /usr/local
 
-    MARK="# Added by KDADK_APPID install script"
+    MARK="# Added by KTAG_APPID install script"
     if ! grep -q "$MARK" /etc/profile; then
     {
         echo "$MARK"
@@ -71,18 +71,18 @@ function kdadk_appid_install()
     source /etc/profile
 }
 
-function kdadk_appid_uninstall()
+function ktag_appid_uninstall()
 {
-    kdadk_appid_clean
+    ktag_appid_clean
     rm -rf \
         "${INSTALL_INCLUDE_PATH}" \
         "${INSTALL_LIB_PATH}" \
         /usr/local/lib/cmake/KTAG \
         /usr/local/share/KTAG
-    rm -f /usr/local/bin/kdadk_demo /usr/local/bin/ktag_three_layer_example
+    rm -f /usr/local/bin/KFlowLens /usr/local/bin/ktag_three_layer_example
     # 删除安装脚本写入的环境变量。
-    while grep -q "# Added by KDADK_APPID install script" /etc/profile; do
-        sed -i "/# Added by KDADK_APPID install script/{N;N;N;d}" /etc/profile
+    while grep -q "# Added by KTAG_APPID install script" /etc/profile; do
+        sed -i "/# Added by KTAG_APPID install script/{N;N;N;d}" /etc/profile
     done
 }
 
@@ -91,35 +91,35 @@ DPDK_OPTION="-DKTAG_ENABLE_DPDK=OFF"
 
 if [ "$1" == "" ] ;then
     COVERAGE_OPTION=""
-    kdadk_appid_build
+    ktag_appid_build
 elif [ "$1" == "-lib" ]; then
-    COVERAGE_OPTION="-DENABLE_BUILD_LIB=ON -DKDADK_ENABLE_HIDDEN_VISIBILITY=OFF"
-    kdadk_appid_build
+    COVERAGE_OPTION="-DENABLE_BUILD_LIB=ON -DKTAG_ENABLE_HIDDEN_VISIBILITY=OFF"
+    ktag_appid_build
 elif [ "$1" == "-sve256" ]; then
     COVERAGE_OPTION="-DENABLE_SVE_256=ON"
-    kdadk_appid_build
+    ktag_appid_build
 elif [ "$1" == "-coverage" ]; then
     COVERAGE_OPTION="-DENABLE_TEST_COVERAGE=ON"
-    kdadk_appid_build
+    ktag_appid_build
 elif [ "$1" == "-perf" ]; then
     COVERAGE_OPTION=""
     PERF_OPTION="-DKTAG_ENABLE_PERF_PROFILING=ON"
-    kdadk_appid_build
+    ktag_appid_build
 elif [ "$1" == "dpdk" ] || [ "$1" == "-dpdk" ]; then
     COVERAGE_OPTION=""
     DPDK_OPTION="-DKTAG_ENABLE_DPDK=ON"
     echo "==> 启用 DPDK 轮询收包后端 (KTAG_ENABLE_DPDK=ON)"
-    kdadk_appid_build
+    ktag_appid_build
 elif [ "$1" == "clean" ] ;then
-    kdadk_appid_clean
+    ktag_appid_clean
 elif [ "$1" == "install" ] ;then
-    kdadk_appid_install
+    ktag_appid_install
 elif [ "$1" == "uninstall" ] ;then
-    kdadk_appid_uninstall
+    ktag_appid_uninstall
 elif [ "$1" == "deb" ] ;then
-    kdadk_appid_clean
-    kdadk_appid_build
+    ktag_appid_clean
+    ktag_appid_build
     deb_pack
 elif [ "$1" == "util" ] ;then
-    kdadk_appid_util_conf
+    ktag_appid_util_conf
 fi

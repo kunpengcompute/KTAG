@@ -66,7 +66,15 @@ Config parse_config(int argc, char **argv) {
     };
     auto f = section(n, "feature"), inf = section(n, "inference"), cap = section(n, "capture");
     auto s = section(n, "schema"), t = section(root, "transport"), z = section(root, "compression");
-    if (n["plugins"]) require(n["plugins"].size() == 0, "only legacy builtins are supported");
+    if (n["plugins"]) {
+      require(n["plugins"].IsSequence(), "pipeline.plugins must be a sequence");
+      for (const auto &plugin : n["plugins"]) {
+        auto path = std::filesystem::path(plugin.as<std::string>());
+        require(!path.empty(), "feature plugin path is empty");
+        if (path.is_relative()) path = std::filesystem::absolute(c.config_path).parent_path() / path;
+        c.plugin_paths.push_back(path.lexically_normal().string());
+      }
+    }
     if (s["name"]) require(s["name"].as<std::string>() == "ktag_legacy_v1", "unsupported schema");
     if (s["version"]) require(s["version"].as<unsigned>() == 1, "unsupported schema version");
     for (auto key : {"feature_order", "feature_ids", "remove_features", "add_features"})

@@ -29,6 +29,7 @@ def main():
 
     fixture = (Path(__file__).with_suffix('.cpp')).read_text(encoding='utf-8')
     actual = '\n'.join([
+        between('class worker_thread_scope {', '#include <arpa/inet.h>'),
         between('class owned_packet {', 'bool is_recoverable_truncated_capture'),
         between('bool is_recoverable_truncated_capture', 'void add_source_statistics('),
         between('uint64_t timestamp_us(', 'bool flow_key_less('),

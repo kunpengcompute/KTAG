@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 #include "ktag_feature.h"
+#include "ktag_feature_plugin.h"
 #include "ktag_inference.h"
 #include "ub_feature_wire.h"
 
@@ -37,11 +38,13 @@ using FeatureBatch = Handle<ktag_feature_batch, ktag_feature_batch_destroy>;
 using Domain = Handle<ktag_domain_store, ktag_domain_store_destroy>;
 using Inference = Handle<ktag_inference_context, ktag_inference_destroy>;
 using Predictions = Handle<ktag_prediction_batch, ktag_prediction_batch_destroy>;
+using FeaturePlugins = std::vector<Handle<ktag_loaded_feature_plugin, ktag_feature_plugin_unload>>;
 
 struct Config {
   std::string role, config_path, local_ip, peer_ip, network_interface;
   std::string model, result, stats, audit;
   std::vector<std::string> pcaps;
+  std::vector<std::string> plugin_paths;
   uint32_t port = 19090, feature_threads = 4;
   uint64_t flow_hash_seed = 2026;
   uint32_t packet_pool = 65536, packet_queue = 65536, feature_queue = 4096;
@@ -62,6 +65,8 @@ struct Config {
   uint64_t rules_hash() const;
 };
 Config parse_config(int argc, char **argv);
+// Keep these handles alive until all Feature Contexts and the Registry are gone.
+void load_feature_plugins(const Config &, ktag_feature_registry *, FeaturePlugins &);
 void usage();
 
 struct SourceStats {

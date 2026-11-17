@@ -4,6 +4,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include "ub_ring_transport.h"
 
 #include "ub_feature_wire.h"
+#include "ub_node_validation.h"
 
 #include <algorithm>
 #include <array>
@@ -59,6 +60,10 @@ bool validate_config(const ktag_demo_ub_transport_config &config,
             set_error(error, "UB User hostname must be non-empty and unique");
             return false;
         }
+    }
+    if (!ktag_demo_validate_ub_hostname_order(
+            config.provider_nodes, config.user_nodes.front(), error)) {
+        return false;
     }
     if (config.region.empty() || config.shm_prefix.empty()) {
         set_error(error, "UB region and shm prefix are required");
@@ -118,7 +123,7 @@ bool initialize_eal(const ktag_demo_ub_transport_config &config, bool *owns_eal,
 
     std::vector<std::string> arguments = config.eal_arguments;
     if (arguments.empty()) {
-        arguments = {"kdadk_demo", "--no-huge", "-l", "0"};
+        arguments = {"KFlowLens", "--no-huge", "-l", "0"};
     } else if (arguments.front().empty()) {
         set_error(error, "the first DPDK EAL argument must be a program name");
         return false;

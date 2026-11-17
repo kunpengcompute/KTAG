@@ -2,11 +2,147 @@
 Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  */
 #include "utils.h"
+#include "pcap_labels.h"
 
+#include <algorithm>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
 #include <sys/time.h>
+#include <yaml-cpp/yaml.h>
+
+namespace {
+int parse_label(const std::string &text, const std::string &where) {
+  const auto first = text.find_first_not_of(" \t\r\n");
+  if (first == std::string::npos) {
+    throw std::runtime_error(where + ": 标签不能为空");
+  }
+  const auto last = text.find_last_not_of(" \t\r\n");
+  int value = 0;
+  for (size_t i = first; i <= last; ++i) {
+    if (text[i] < '0' || text[i] > '9' ||
+        value > (std::numeric_limits<int>::max() - (text[i] - '0')) / 10) {
+      throw std::runtime_error(where + ": 标签必须为 0..INT_MAX 范围的十进制整数: " + text);
+    }
+    value = value * 10 + (text[i] - '0');
+  }
+  return value;
+}
+
+std::string labels_text(const std::vector<int> &labels) {
+  std::ostringstream text;
+  text << '[';
+  for (size_t i = 0; i < labels.size(); ++i) {
+    if (i) text << ',';
+    text << labels[i];
+  }
+  text << ']';
+  return text.str();
+}
+} // namespace
+
+std::string ktag_demo_model_package_path(const char *config_path) {
+  if (!config_path || !config_path[0]) throw std::runtime_error("config path is required");
+  const auto config = std::filesystem::absolute(config_path);
+  const auto yaml = YAML::LoadFile(config.string());
+  const auto pipeline = yaml["pipeline"];
+  if (!pipeline || !pipeline.IsMap() || !pipeline["model_package_path"] ||
+      !pipeline["model_package_path"].IsScalar()) {
+    throw std::runtime_error("pipeline.model_package_path is required");
+  }
+  const auto configured = pipeline["model_package_path"].as<std::string>();
+  if (configured.empty()) throw std::runtime_error("model_package_path cannot be empty");
+  std::filesystem::path package(configured);
+  if (package.is_relative()) package = config.parent_path() / package;
+  return package.lexically_normal().string();
+}
+
+int ktag_demo_pcap_labels::label_for(uint32_t source_index) const {
+  if (source_index >= source_labels.size()) {
+    throw std::runtime_error("预测记录的 source_index 超出 PCAP 标签列表");
+  }
+  return source_labels[source_index];
+}
+
+void ktag_demo_pcap_labels::validate_prediction(int64_t label) const {
+  if (label < 0 || label > std::numeric_limits<int>::max() ||
+      !std::binary_search(model_labels.begin(), model_labels.end(), static_cast<int>(label))) {
+    throw std::runtime_error("模型返回了未在 class_labels 中声明的类别: " + std::to_string(label));
+  }
+}
+
+ktag_demo_pcap_labels ktag_demo_load_pcap_labels(
+    const std::string &model_package_path, const char *label_list,
+    const char **pcap_files, int pcap_count) {
+  if (!pcap_files || pcap_count <= 0) throw std::runtime_error("PCAP 输入不能为空");
+  ktag_demo_pcap_labels plan;
+  plan.explicit_labels = label_list != nullptr;
+  if (label_list) {
+    const std::string text(label_list);
+    size_t offset = 0;
+    for (;;) {
+      const auto comma = text.find(',', offset);
+      plan.source_labels.push_back(parse_label(
+          text.substr(offset, comma == std::string::npos ? comma : comma - offset),
+          "--pcap-labels"));
+      if (comma == std::string::npos) break;
+      offset = comma + 1;
+    }
+  } else {
+    for (int i = 0; i < pcap_count; ++i) plan.source_labels.push_back(i);
+  }
+  if (plan.source_labels.size() != static_cast<size_t>(pcap_count)) {
+    throw std::runtime_error("--pcap-labels 标签数 " + std::to_string(plan.source_labels.size()) +
+                             " 与 PCAP 数量 " + std::to_string(pcap_count) + " 不一致");
+  }
+
+  const auto manifest_path = std::filesystem::path(model_package_path) / "manifest.json";
+  const auto manifest = YAML::LoadFile(manifest_path.string());
+  const auto classes = manifest["class_labels"];
+  if (!classes || !classes.IsSequence() || classes.size() == 0) {
+    throw std::runtime_error(manifest_path.string() +
+        ": 缺少有效的 class_labels，请使用当前版本 -t 重新导出模型包");
+  }
+  for (const auto &item : classes) {
+    if (!item.IsScalar() || item.Tag() == "!" ||
+        item.Tag() == "tag:yaml.org,2002:str") {
+      throw std::runtime_error("manifest.class_labels 必须是整数数组");
+    }
+    plan.model_labels.push_back(parse_label(item.as<std::string>(), "manifest.class_labels"));
+  }
+  std::sort(plan.model_labels.begin(), plan.model_labels.end());
+  if (std::adjacent_find(plan.model_labels.begin(), plan.model_labels.end()) != plan.model_labels.end()) {
+    throw std::runtime_error("manifest.class_labels 包含重复类别");
+  }
+  for (size_t i = 0; i < plan.source_labels.size(); ++i) {
+    if (!std::binary_search(plan.model_labels.begin(), plan.model_labels.end(), plan.source_labels[i])) {
+      throw std::runtime_error("PCAP[" + std::to_string(i) + "] 的真实标签 " +
+          std::to_string(plan.source_labels[i]) + " 不属于当前模型，支持类别为 " + labels_text(plan.model_labels));
+    }
+  }
+  plan.report_labels = plan.source_labels;
+  std::sort(plan.report_labels.begin(), plan.report_labels.end());
+  plan.report_labels.erase(std::unique(plan.report_labels.begin(), plan.report_labels.end()), plan.report_labels.end());
+  std::ostringstream description;
+  if (!plan.explicit_labels) {
+    description << "WARNING: 未指定 --pcap-labels，按 PCAP 顺序假定真实标签；请确认与模型类别一致。\n";
+  }
+  for (int i = 0; i < pcap_count; ++i) {
+    description << "PCAP[" << i << "]: " << pcap_files[i]
+                << " -> ground_truth_label=" << plan.source_labels[i]
+                << " (source=" << (plan.explicit_labels ? "explicit" : "pcap_order") << ")\n";
+  }
+  description << "报告类别: " << labels_text(plan.report_labels)
+              << "；macro average 仅统计这些类别（包括已选但无有效样本的类别）。\n";
+  plan.description = description.str();
+  std::printf("%s", plan.description.c_str());
+  return plan;
+}
 
 double get_time_in_seconds() {
   struct timeval tv;
@@ -25,54 +161,8 @@ double calculate_accuracy(const int *y_true, const int *y_pred, int count) {
   return count > 0 ? (double)correct / count : 0.0;
 }
 
-// 获取唯一类别
-void get_unique_classes(const int *y_true, const int *y_pred, int count,
-                        int **classes, int *num_classes) {
-  int *temp_classes = (int *)malloc(count * 2 * sizeof(int));
-  int temp_count = 0;
-
-  // 收集所有类别
-  for (int i = 0; i < count; i++) {
-    int found = 0;
-    for (int j = 0; j < temp_count; j++) {
-      if (temp_classes[j] == y_true[i]) {
-        found = 1;
-        break;
-      }
-    }
-    if (!found) {
-      temp_classes[temp_count++] = y_true[i];
-    }
-
-    found = 0;
-    for (int j = 0; j < temp_count; j++) {
-      if (temp_classes[j] == y_pred[i]) {
-        found = 1;
-        break;
-      }
-    }
-    if (!found) {
-      temp_classes[temp_count++] = y_pred[i];
-    }
-  }
-
-  // 排序
-  for (int i = 0; i < temp_count - 1; i++) {
-    for (int j = i + 1; j < temp_count; j++) {
-      if (temp_classes[i] > temp_classes[j]) {
-        int tmp = temp_classes[i];
-        temp_classes[i] = temp_classes[j];
-        temp_classes[j] = tmp;
-      }
-    }
-  }
-
-  *classes = temp_classes;
-  *num_classes = temp_count;
-}
-
 // 计算分类指标
-void calculate_class_metrics(const int *classes, int num_classes,
+bool calculate_class_metrics(const int *classes, int num_classes,
                              const int *y_true, const int *y_pred, int count,
                              ClassificationReport *report) {
   report->classes = (int *)malloc(num_classes * sizeof(int));
@@ -81,6 +171,10 @@ void calculate_class_metrics(const int *classes, int num_classes,
   report->f1_score = (double *)calloc(num_classes, sizeof(double));
   report->support = (int *)calloc(num_classes, sizeof(int));
   report->num_classes = num_classes;
+  if (!report->classes || !report->precision || !report->recall ||
+      !report->f1_score || !report->support) {
+    return false;
+  }
 
   memcpy(report->classes, classes, num_classes * sizeof(int));
 
@@ -125,6 +219,7 @@ void calculate_class_metrics(const int *classes, int num_classes,
           (report->precision[c_idx] + report->recall[c_idx]);
     }
   }
+  return true;
 }
 
 // 计算平均指标
@@ -170,37 +265,50 @@ void calculate_average_metrics(const ClassificationReport *report) {
 // 生成分类报告
 ClassificationReport *calculate_classification_report(const int *y_true,
                                                       const int *y_pred,
-                                                      int count) {
-  if (count == 0) {
-    fprintf(stderr, "错误: 无法计算分类报告，样本数为0\n");
+                                                      int count,
+                                                      const std::vector<int> &report_labels,
+                                                      const std::string &context) {
+  if (count <= 0 || !y_true || !y_pred || report_labels.empty() ||
+      report_labels.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    fprintf(stderr, "错误: 无有效样本或报告类别，accuracy=N/A\n");
     return NULL;
   }
-
+  auto classes = report_labels;
+  std::sort(classes.begin(), classes.end());
+  classes.erase(std::unique(classes.begin(), classes.end()), classes.end());
+  for (int i = 0; i < count; ++i) {
+    if (!std::binary_search(classes.begin(), classes.end(), y_true[i])) {
+      fprintf(stderr, "错误: 真实标签 %d 不在报告类别集合中\n", y_true[i]);
+      return NULL;
+    }
+  }
   ClassificationReport *report =
       (ClassificationReport *)calloc(1, sizeof(ClassificationReport));
-
-  int *classes = NULL;
-  int num_classes = 0;
-  get_unique_classes(y_true, y_pred, count, &classes, &num_classes);
-
-  if (num_classes == 0) {
-    fprintf(stderr, "错误: 无法计算分类报告，未发现任何类别\n");
-    free(report);
-    free(classes);
+  if (!report) return NULL;
+  report->context = static_cast<char *>(malloc(context.size() + 1));
+  if (!report->context) {
+    free_classification_report(report);
     return NULL;
   }
-
-  calculate_class_metrics(classes, num_classes, y_true, y_pred, count, report);
+  std::memcpy(report->context, context.c_str(), context.size() + 1);
+  if (!calculate_class_metrics(classes.data(), static_cast<int>(classes.size()), y_true, y_pred, count, report)) {
+    free_classification_report(report);
+    return NULL;
+  }
+  for (int i = 0; i < count; ++i) {
+    if (!std::binary_search(classes.begin(), classes.end(), y_pred[i])) {
+      ++report->outside_report_predictions;
+    }
+  }
   report->accuracy = calculate_accuracy(y_true, y_pred, count);
   calculate_average_metrics(report);
-
-  free(classes);
   return report;
 }
 
 // 释放分类报告
 void free_classification_report(ClassificationReport *report) {
   if (report) {
+    free(report->context);
     free(report->classes);
     free(report->precision);
     free(report->recall);
@@ -217,6 +325,10 @@ print_classification_report_to_stream(FILE *fp,
     return;
   }
 
+  if (report->context && report->context[0]) {
+    fprintf(fp, "%s\n", report->context);
+  }
+
   int total_support = 0;
   for (int i = 0; i < report->num_classes; i++) {
     total_support += report->support[i];
@@ -229,6 +341,15 @@ print_classification_report_to_stream(FILE *fp,
     fprintf(fp, "%12d %9.4f %9.4f %9.4f %9d\n", report->classes[i],
             report->precision[i], report->recall[i], report->f1_score[i],
             report->support[i]);
+  }
+
+  for (int i = 0; i < report->num_classes; ++i) {
+    if (report->support[i] == 0) {
+      fprintf(fp, "提示: 类别 %d 无有效真实样本，指标按零值规则输出并计入 macro average。\n", report->classes[i]);
+    }
+  }
+  if (report->outside_report_predictions) {
+    fprintf(fp, "预测落入报告范围外的样本数: %d（仍计入错误统计）\n", report->outside_report_predictions);
   }
 
   fprintf(fp, "\n");
@@ -260,33 +381,31 @@ int print_classification_report(const ClassificationReport *report) {
 
 int save_classification_report(const ClassificationReport *report,
                                const char *output_file) {
-  if (!report) {
+  if (!report || !output_file) {
     fprintf(stderr, "错误: 分类报告为空\n");
     return -1;
   }
 
-  // 生成报告文件名
-  char report_file[1024];
-  const char *last_slash = strrchr(output_file, '/');
-  if (last_slash) {
-    int dir_len = last_slash - output_file + 1;
-    strncpy(report_file, output_file, dir_len);
-    report_file[dir_len] = '\0';
-    strcat(report_file, "classification_report.txt");
-  } else {
-    strcpy(report_file, "classification_report.txt");
-  }
+  const auto report_file = (std::filesystem::path(output_file).parent_path() /
+                            "classification_report.txt").string();
 
-  FILE *fp = fopen(report_file, "w");
+  FILE *fp = fopen(report_file.c_str(), "w");
   if (!fp) {
-    fprintf(stderr, "错误: 无法创建分类报告文件 %s\n", report_file);
+    fprintf(stderr, "错误: 无法创建分类报告文件 %s: %s\n", report_file.c_str(), std::strerror(errno));
     return -1;
   }
 
+  errno = 0;
   print_classification_report_to_stream(fp, report);
-
-  fclose(fp);
-  printf("分类报告已保存到: %s\n", report_file);
+  int code = 0;
+  if (ferror(fp) || fflush(fp) != 0) code = errno == 0 ? EIO : errno;
+  if (fclose(fp) != 0 && code == 0) code = errno == 0 ? EIO : errno;
+  if (code != 0) {
+    fprintf(stderr, "错误: 写入分类报告失败 %s: %s (errno=%d)\n",
+            report_file.c_str(), std::strerror(code), code);
+    return -1;
+  }
+  printf("分类报告已保存到: %s\n", report_file.c_str());
   return 0;
 }
 
@@ -319,21 +438,33 @@ void print_performance_stats(const PerformanceStats *stats) {
 
 void print_performance_stats_ex(const PerformanceStats *stats,
                                 int stages_overlap) {
+  /* Use one definition for every mode; I/O and queue/transport waits stay out. */
+  const double core_time =
+      stats->feature_extraction_time + stats->inference_time;
   printf("\n======================= 性能统计 =======================\n");
   printf(stages_overlap ? "PCAP读取累计耗时: %10.4f 秒\n"
                         : "PCAP读取耗时:       %10.4f 秒\n",
          stats->pcap_read_time);
-  printf(stages_overlap ? "特征线程最大工作耗时: %10.4f 秒\n"
-                        : "特征提取耗时:         %10.4f 秒\n",
-         stats->feature_extraction_time);
-  printf(stages_overlap ? "推理累计耗时:     %10.4f 秒\n"
-                        : "推理耗时:           %10.4f 秒\n",
-         stats->inference_time);
-  printf("文件IO耗时:         %10.4f 秒\n", stats->file_io_time);
+  if (stages_overlap) {
+    printf("特征计算耗时（最忙线程）: %10.4f 秒\n",
+           stats->feature_extraction_time);
+    printf("特征CPU累计计算量: %10.4f CPU秒\n",
+           stats->feature_cpu_time);
+    if (stats->inference_time > 0) {
+      printf("推理计算耗时（最忙线程）: %10.4f 秒\n",
+             stats->inference_time);
+      printf("推理CPU累计计算量: %10.4f CPU秒\n",
+             stats->inference_cpu_time);
+    }
+  } else {
+    printf("特征提取耗时:         %10.4f 秒\n",
+           stats->feature_extraction_time);
+    printf("推理耗时:           %10.4f 秒\n", stats->inference_time);
+  }
   printf(stages_overlap
-             ? "核心累计耗时:   %10.4f 秒 (多线程阶段可并行重叠)\n"
-             : "总耗时:           %10.4f 秒 (特征提取 + 推理 + 文件IO)\n",
-         stats->total_time);
+             ? "核心计算耗时:   %10.4f 秒 (特征处理 + 推理处理，多线程阶段可重叠)\n"
+             : "核心计算耗时:   %10.4f 秒 (特征处理 + 推理处理)\n",
+         core_time);
   printf("端到端总耗时:       %10.4f 秒 (包含PCAP读取等所有开销)\n",
          stats->end_to_end_time);
   printf("处理包数:           %10lu 个\n", stats->total_packets);
@@ -345,7 +476,10 @@ void print_performance_stats_ex(const PerformanceStats *stats,
                   stats->feature_extraction_time;
     double gbps = (stats->total_bytes * 8.0) / (1024.0 * 1024.0 * 1024.0) /
                   stats->feature_extraction_time;
-    printf("特征提取吞吐量: %10.4f MB/s (%10.4f Gbps)\n", mbps, gbps);
+    printf(stages_overlap
+               ? "特征计算吞吐量: %10.4f MB/s (%10.4f Gbps)\n"
+               : "特征提取吞吐量: %10.4f MB/s (%10.4f Gbps)\n",
+           mbps, gbps);
   }
 
   if (stats->inference_time > 0) {
@@ -353,16 +487,24 @@ void print_performance_stats_ex(const PerformanceStats *stats,
         (stats->total_bytes / (1024.0 * 1024.0)) / stats->inference_time;
     double gbps = (stats->total_bytes * 8.0) / (1024.0 * 1024.0 * 1024.0) /
                   stats->inference_time;
-    printf("推理吞吐量:     %10.4f MB/s (%10.4f Gbps)\n", mbps, gbps);
+    printf(stages_overlap
+               ? "推理计算吞吐量: %10.4f MB/s (%10.4f Gbps)\n"
+               : "推理吞吐量:     %10.4f MB/s (%10.4f Gbps)\n",
+           mbps, gbps);
   }
 
-  if (stats->total_time > 0) {
-    double mbps = (stats->total_bytes / (1024.0 * 1024.0)) / stats->total_time;
+  if (stages_overlap && stats->inference_time > 0 &&
+      stats->inference_inputs > 0) {
+    const double samples_per_second =
+        stats->inference_inputs / stats->inference_time;
+    printf("推理计算样本率: %10.4f samples/s\n", samples_per_second);
+  }
+
+  if (core_time > 0) {
+    double mbps = (stats->total_bytes / (1024.0 * 1024.0)) / core_time;
     double gbps = (stats->total_bytes * 8.0) / (1024.0 * 1024.0 * 1024.0) /
-                  stats->total_time;
-    printf(stages_overlap ? "核心处理吞吐量: %10.4f MB/s (%10.4f Gbps)\n"
-                          : "核心处理吞吐量: %10.4f MB/s (%10.4f Gbps)\n",
-           mbps, gbps);
+                  core_time;
+    printf("核心处理吞吐量: %10.4f MB/s (%10.4f Gbps)\n", mbps, gbps);
   }
 
   if (stats->end_to_end_time > 0) {

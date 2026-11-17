@@ -10,6 +10,10 @@
 #include "ktag_inference.h"
 #include "ktag_capture.h"
 #include "ktag_types.h"
+#include "ktag_core.h"
+#include "ktag_legacy_types.h"
+
+_Static_assert(sizeof(feature_vector) == 355U * sizeof(float), "Historical Demo file vector layout changed");
 
 void ktag_public_headers_c_compatibility_check(void)
 {

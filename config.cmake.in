@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.16.3)
 
 # ----------------------------------------------------------------------------
-# KDADK_APPID cmake options
+# KTAG_APPID cmake options
 # ----------------------------------------------------------------------------
-KDADK_APPID_OPTION(BUILD_SHARED_LIBS            "Build shared libraries (.dll/.so) instead of static ones (.lib/.a)"  ON)
+KTAG_APPID_OPTION(BUILD_SHARED_LIBS            "Build shared libraries (.dll/.so) instead of static ones (.lib/.a)"  ON)
 
-KDADK_APPID_OPTION(OPTIMIZE            "HS OPTIMIZE"  TRUE)
+KTAG_APPID_OPTION(OPTIMIZE            "HS OPTIMIZE"  TRUE)
 
 # Keep runtime search paths in build artifacts. The demo and inference library
 # are executed directly from output/, and the latter depends on yaml-cpp and
@@ -27,21 +27,21 @@ endif()
 endif()
 message("-- Building type: Release")
 
-set(KDADK_APPID_CPU_LIMIT 1)
-if ("$ENV{KDADK_APPID_CPU_CHECK_ENABLE}" STREQUAL "N")
-    set(KDADK_APPID_CPU_LIMIT 0)
+set(KTAG_APPID_CPU_LIMIT 1)
+if ("$ENV{KTAG_APPID_CPU_CHECK_ENABLE}" STREQUAL "N")
+    set(KTAG_APPID_CPU_LIMIT 0)
 endif()
 set(CMAKE_CXX_STANDARD 17)
 
-option(KDADK_ENABLE_HIDDEN_VISIBILITY
+option(KTAG_ENABLE_HIDDEN_VISIBILITY
        "Hide internal symbols via -fvisibility=hidden (default ON; set OFF for test build)" ON)
 
 option(KTAG_ENABLE_PERF_PROFILING
        "Keep optimized binaries symbolized and preserve frame pointers for perf profiling" OFF)
 
-set(KDADK_VISIBILITY_FLAG "")
-if(KDADK_ENABLE_HIDDEN_VISIBILITY)
-    set(KDADK_VISIBILITY_FLAG "-fvisibility=hidden")
+set(KTAG_VISIBILITY_FLAG "")
+if(KTAG_ENABLE_HIDDEN_VISIBILITY)
+    set(KTAG_VISIBILITY_FLAG "-fvisibility=hidden")
 endif()
 
 set(KTAG_PERF_COMPILE_FLAGS "")
@@ -52,9 +52,9 @@ if(KTAG_ENABLE_PERF_PROFILING)
     set(KTAG_STRIP_FLAG "")
 endif()
 
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DKDADK_APPID_CPU_LIMIT=${KDADK_APPID_CPU_LIMIT} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KDADK_VISIBILITY_FLAG} -Wl,-z,relro,-z,now,-z,noexecstack -fPIC ${KTAG_STRIP_FLAG} ${KTAG_PERF_COMPILE_FLAGS} -fcommon")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DKDADK_APPID_CPU_LIMIT=${KDADK_APPID_CPU_LIMIT} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KDADK_VISIBILITY_FLAG} -Wl,-z,relro,-z,now,-z,noexecstack -fPIC ${KTAG_STRIP_FLAG} ${KTAG_PERF_COMPILE_FLAGS} -fcommon")
-set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wall -fopenmp -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KDADK_VISIBILITY_FLAG} -fPIC -fcommon -march=armv8-a+sve")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DKTAG_APPID_CPU_LIMIT=${KTAG_APPID_CPU_LIMIT} -Wall -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KTAG_VISIBILITY_FLAG} -Wl,-z,relro,-z,now,-z,noexecstack -fPIC ${KTAG_STRIP_FLAG} ${KTAG_PERF_COMPILE_FLAGS} -fcommon")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DKTAG_APPID_CPU_LIMIT=${KTAG_APPID_CPU_LIMIT} -Wall -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KTAG_VISIBILITY_FLAG} -Wl,-z,relro,-z,now,-z,noexecstack -fPIC ${KTAG_STRIP_FLAG} ${KTAG_PERF_COMPILE_FLAGS} -fcommon")
+set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wall -Wextra -D_FORTIFY_SOURCE=2 -O2 -fstack-protector-strong ${KTAG_VISIBILITY_FLAG} -fPIC -fcommon -march=armv8-a+sve")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,relro,-z,now,-z,noexecstack ${KTAG_STRIP_FLAG}")
 
 # 添加选项以启用 SVE256 指令集

@@ -7,6 +7,7 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <filesystem>
 #include <limits>
 #include <memory>
 #include <new>
@@ -411,8 +412,9 @@ ktag_inference_create(const ktag_inference_config *config) {
     }
     options.SetGraphOptimizationLevel(
         GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+    const auto model_path = std::filesystem::path(context->contract.model_path);
     context->session.reset(new Ort::Session(
-        *context->environment, context->contract.model_path.c_str(), options));
+        *context->environment, model_path.c_str(), options));
 
     status = validate_model_input(context->session.get(),
                                   context->contract.input_value_count, &error);

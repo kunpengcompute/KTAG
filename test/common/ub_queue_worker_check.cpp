@@ -389,7 +389,8 @@ void run_case(unsigned providers, unsigned queues, unsigned records,
     assert(statistics.emitted_flows == records * providers);
     assert(statistics.bytes == records * providers * 100);
     assert(statistics.packets == records * providers * 2);
-    assert(statistics.inference_nanoseconds == 0);
+    assert((statistics.inference_nanoseconds > 0) == (records > 0));
+    assert(statistics.inference_cpu_nanoseconds >= statistics.inference_nanoseconds);
     assert((statistics.distributed_inference_wall_nanoseconds > 0) == (records > 0));
     std::set<uint64_t> ids;
     size_t expected = 0;

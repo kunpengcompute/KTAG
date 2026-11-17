@@ -1,7 +1,5 @@
-if(NOT TARGET ktag_capture OR NOT TARGET ktag_feature OR
-   NOT TARGET KDADK_feature_extract OR
-   NOT TARGET ktag_inference OR NOT TARGET KDADK_inference)
-    message(FATAL_ERROR "kdadk_demo must be built as part of the KTAG source tree")
+if(NOT TARGET ktag_capture OR NOT TARGET ktag_feature OR NOT TARGET ktag_inference)
+    message(FATAL_ERROR "KFlowLens must be built as part of the KTAG source tree")
 endif()
 
 find_package(Threads REQUIRED)
@@ -20,9 +18,11 @@ get_filename_component(
 
 # 可执行文件
 add_executable(
-    kdadk_demo
+    ktag_demo
     main.cpp
-    kdadk_file_writer.cpp
+    feature_session.cpp
+    inference_session.cpp
+    ktag_file_writer.cpp
     online_inference.cpp
     utils.cpp
     pipeline/pipeline_config.cpp
@@ -35,7 +35,7 @@ add_executable(
 )
 
 # 链接库
-target_include_directories(kdadk_demo PRIVATE
+target_include_directories(ktag_demo PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/pipeline
@@ -43,12 +43,10 @@ target_include_directories(kdadk_demo PRIVATE
     ${YAML_CPP_INCLUDE}
 )
 
-target_link_libraries(kdadk_demo PRIVATE
+target_link_libraries(ktag_demo PRIVATE
     ktag_capture
     ktag_feature
-    KDADK_feature_extract
     ktag_inference
-    KDADK_inference
     ${YAML_CPP_LIB}
     Threads::Threads
     ${CMAKE_DL_LIBS}
@@ -57,17 +55,17 @@ target_link_libraries(kdadk_demo PRIVATE
 if(KTAG_ENABLE_DPDK_UB)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(DPDK REQUIRED IMPORTED_TARGET libdpdk)
-    target_sources(kdadk_demo PRIVATE
+    target_sources(ktag_demo PRIVATE
         pipeline/ub_ring_transport.cpp
     )
-    target_compile_definitions(kdadk_demo PRIVATE
+    target_compile_definitions(ktag_demo PRIVATE
         KTAG_ENABLE_DPDK_UB=1
     )
-    target_link_libraries(kdadk_demo PRIVATE
+    target_link_libraries(ktag_demo PRIVATE
         PkgConfig::DPDK
     )
 else()
-    target_compile_definitions(kdadk_demo PRIVATE
+    target_compile_definitions(ktag_demo PRIVATE
         KTAG_ENABLE_DPDK_UB=0
     )
 endif()
@@ -76,27 +74,21 @@ endif()
 if(KTAG_ENABLE_DPDK)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(DPDK_RING REQUIRED IMPORTED_TARGET libdpdk)
-    target_sources(kdadk_demo PRIVATE
+    target_sources(ktag_demo PRIVATE
         pipeline/dpdk_ring_handoff.cpp
     )
-    target_compile_definitions(kdadk_demo PRIVATE KTAG_DEMO_HAVE_DPDK=1)
-    target_link_libraries(kdadk_demo PRIVATE ktag_capture_dpdk)
-    target_link_directories(kdadk_demo PRIVATE ${DPDK_RING_LIBRARY_DIRS})
-    target_link_libraries(kdadk_demo PRIVATE ${DPDK_RING_LIBRARIES})
+    target_compile_definitions(ktag_demo PRIVATE KTAG_DEMO_HAVE_DPDK=1)
+    target_link_libraries(ktag_demo PRIVATE ktag_capture_dpdk)
+    target_link_directories(ktag_demo PRIVATE ${DPDK_RING_LIBRARY_DIRS})
+    target_link_libraries(ktag_demo PRIVATE ${DPDK_RING_LIBRARIES})
     # DPDK's -include/arch flags apply only to the ring wrapper, never to the
     # rest of the demo, which keeps its portable compiler flags.
     set_source_files_properties(pipeline/dpdk_ring_handoff.cpp PROPERTIES
         COMPILE_OPTIONS "${DPDK_RING_CFLAGS}")
 endif()
 
-# The demo intentionally exercises both the new three-layer API and the
-# retained legacy command path; customer builds still see deprecation warnings.
-target_compile_definitions(kdadk_demo PRIVATE
-    KTAG_SUPPRESS_DEPRECATED_WARNINGS
-)
-
 # The loader consumes this example exactly like a customer-provided .so. It is
-# deliberately not linked into kdadk_demo.
+# deliberately not linked into KFlowLens.
 add_library(ktag_example_feature_plugin SHARED
     ${PROJECT_SOURCE_DIR}/examples/feature_plugin/custom_feature_plugin.c
 )
@@ -113,9 +105,10 @@ set_target_properties(ktag_example_feature_plugin PROPERTIES
     BUILD_RPATH "$ORIGIN/.."
     INSTALL_RPATH "$ORIGIN/.."
 )
-add_dependencies(kdadk_demo ktag_example_feature_plugin)
+add_dependencies(ktag_demo ktag_example_feature_plugin)
+add_dependencies(ktag_demo ktag_traffic_features)
 if(TARGET ktag_proxy_features)
-    add_dependencies(kdadk_demo ktag_proxy_features)
+    add_dependencies(ktag_demo ktag_proxy_features)
 endif()
 
 if(ENABLE_BUILD_LIB)
@@ -148,18 +141,19 @@ if(ENABLE_BUILD_LIB)
 endif()
 
 # Keep the Python training/evaluation helpers beside the executable so the
-# demo no longer depends on the old KDADK-TOOLS repository layout.
-add_custom_command(TARGET kdadk_demo POST_BUILD
+# demo no longer depends on the original standalone tools repository layout.
+add_custom_command(TARGET ktag_demo POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/python"
-            "$<TARGET_FILE_DIR:kdadk_demo>/python"
+            "$<TARGET_FILE_DIR:ktag_demo>/python"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${PROJECT_SOURCE_DIR}/tools/model_package/create_legacy_package.py"
-            "$<TARGET_FILE_DIR:kdadk_demo>/python/create_legacy_package.py"
-    COMMENT "Copying kdadk_demo Python helpers"
+            "$<TARGET_FILE_DIR:ktag_demo>/python/create_legacy_package.py"
+    COMMENT "Copying KFlowLens Python helpers"
 )
 
-set_target_properties(kdadk_demo PROPERTIES
+set_target_properties(ktag_demo PROPERTIES
+    OUTPUT_NAME KFlowLens
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     BUILD_RPATH "$ORIGIN;${KTAG_DEMO_YAML_CPP_LIB_DIR}"
@@ -168,14 +162,10 @@ set_target_properties(kdadk_demo PROPERTIES
 
 install(TARGETS ktag_example_feature_plugin
         LIBRARY DESTINATION "${KTAG_INSTALL_LIBDIR}/plugins")
-if(KTAG_INSTALL_LEGACY_COMPAT)
-    # The demo intentionally retains --pipeline-mode legacy, so installing it
-    # also requires the compatibility libraries.
-    install(TARGETS kdadk_demo
-            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/KTAG/python")
-    install(FILES
-            "${PROJECT_SOURCE_DIR}/tools/model_package/create_legacy_package.py"
-            DESTINATION "${CMAKE_INSTALL_DATADIR}/KTAG/python")
-endif()
+install(TARGETS ktag_demo
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/KTAG/python")
+install(FILES
+        "${PROJECT_SOURCE_DIR}/tools/model_package/create_legacy_package.py"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/KTAG/python")

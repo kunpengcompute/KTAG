@@ -1,174 +1,88 @@
-/*
- * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
- */
-#include "kdadk_test.h"
-#include "kdadk_inference.h"
+/* Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved. */
+#include <gtest/gtest.h>
+#include "ktag_feature.h"
+#include "ktag_inference.h"
+#include <limits>
+#include <memory>
 
-#include <vector>
-#include <yaml-cpp/yaml.h>
-
-// 测试配置文件路径
-static const char *TEST_CONFIG_FILE = "../../../tools/demo/config.yaml";
-
-// 测试夹具
-class InferenceEngineTest : public ::testing::Test {
-protected:
-    inference_engine *engine;
-
-    void SetUp() override
-    {
-        engine = nullptr;
-    }
-
-    void TearDown() override
-    {
-        if (engine) {
-            inference_destroy(engine);
-            engine = nullptr;
-        }
-    }
-};
-
-TEST(InferenceConfigTest, ConfigStructure)
-{
-    inference_config config;
-    config.config_file = TEST_CONFIG_FILE;
-
-    EXPECT_NE(config.config_file, nullptr) << "Config file path should be set";
-    EXPECT_STREQ(config.config_file, TEST_CONFIG_FILE) << "Config file path should match";
+namespace {
+using schema_ptr = std::unique_ptr<ktag_feature_schema, decltype(&ktag_feature_schema_destroy)>;
+ktag_inference_config config_for(const ktag_feature_schema *schema) {
+    ktag_inference_config config{};
+    config.struct_size = sizeof(config);
+    config.api_version = KTAG_API_VERSION;
+    config.feature_schema = schema;
+    config.model_package_path = "unused-by-invalid-configuration-tests";
+    return config;
+}
+void expect_invalid_config(const ktag_inference_config *config) {
+    EXPECT_EQ(nullptr, ktag_inference_create(config));
+    EXPECT_STREQ("invalid Inference configuration", ktag_inference_get_last_error());
+}
 }
 
-TEST_F(InferenceEngineTest, Initialization)
-{
-    inference_config config;
-    config.config_file = TEST_CONFIG_FILE;
-
-    engine = inference_init(&config);
-
-    if (engine) {
-        EXPECT_NE(engine, nullptr) << "Engine should be initialized";
-        EXPECT_EQ(engine->initialized, 1) << "Engine should be marked as initialized";
-    } else {
-        SUCCEED() << "Engine initialization failed gracefully (expected if model files don't exist)";
-    }
+TEST(KTAGInferenceApi, RejectsMissingAndIncompatibleConfiguration) {
+    expect_invalid_config(nullptr);
+    schema_ptr schema(ktag_feature_schema_create_legacy_v1(), ktag_feature_schema_destroy);
+    ASSERT_NE(nullptr, schema);
+    auto config = config_for(schema.get());
+    config.struct_size = 0U;
+    expect_invalid_config(&config);
+    config = config_for(schema.get());
+    config.api_version = KTAG_API_VERSION + 1U;
+    expect_invalid_config(&config);
+    config = config_for(schema.get());
+    config.model_package_path = nullptr;
+    expect_invalid_config(&config);
+    config.model_package_path = "";
+    expect_invalid_config(&config);
 }
 
-TEST_F(InferenceEngineTest, InvalidParameters)
-{
-    inference_engine *engine = inference_init(nullptr);
-    EXPECT_EQ(engine, nullptr) << "Should fail with NULL config";
-
-    inference_config config;
-    config.config_file = nullptr;
-    engine = inference_init(&config);
-    EXPECT_EQ(engine, nullptr) << "Should fail with NULL config file";
-
-    config.config_file = "nonexistent_config.yaml";
-    engine = inference_init(&config);
-    EXPECT_EQ(engine, nullptr) << "Should fail with nonexistent config file";
-
-    feature_vector_list features;
-    inference_result result;
-    int ret = inference_predict(nullptr, &features, &result);
-    EXPECT_EQ(ret, INFERENCE_ERROR) << "Should fail with NULL engine";
-
-    inference_destroy(nullptr);
-    SUCCEED() << "Destroy NULL engine should not crash";
+TEST(KTAGInferenceApi, RequiresFrozenFeatureSchema) {
+    auto config = config_for(nullptr);
+    expect_invalid_config(&config);
+    schema_ptr schema(ktag_feature_schema_create("unfrozen", 1U), ktag_feature_schema_destroy);
+    ASSERT_NE(nullptr, schema);
+    config = config_for(schema.get());
+    expect_invalid_config(&config);
 }
 
-TEST(InferenceResultTest, ResultStructure)
-{
-    inference_result result;
-    result.count = 10;
-    result.predictions = static_cast<int *>(malloc(sizeof(int) * result.count));
-    ASSERT_NE(result.predictions, nullptr) << "Should allocate predictions array";
-
-    for (uint32_t i = 0; i < result.count; i++) {
-        result.predictions[i] = i % 3;
-    }
-
-    EXPECT_EQ(result.predictions[0], 0) << "Prediction value should be 0";
-    EXPECT_EQ(result.predictions[1], 1) << "Prediction value should be 1";
-    EXPECT_EQ(result.predictions[2], 2) << "Prediction value should be 2";
-    EXPECT_EQ(result.predictions[3], 0) << "Prediction value should be 0";
-
-    free(result.predictions);
+TEST(KTAGInferenceApi, RejectsThreadCountsOutsideOnnxIntegerRange) {
+    schema_ptr schema(ktag_feature_schema_create_legacy_v1(), ktag_feature_schema_destroy);
+    ASSERT_NE(nullptr, schema);
+    const auto overflow = static_cast<uint32_t>(std::numeric_limits<int>::max()) + 1U;
+    auto config = config_for(schema.get());
+    config.intra_op_threads = overflow;
+    expect_invalid_config(&config);
+    config = config_for(schema.get());
+    config.inter_op_threads = overflow;
+    expect_invalid_config(&config);
 }
 
-TEST(InferenceAlignmentTest, FeatureInferenceAlignment)
-{
-    feature_vector_list features;
-    features.count = 5;
-    features.capacity = 5;
-    features.vectors = static_cast<feature_vector *>(malloc(sizeof(feature_vector) * features.count));
-    ASSERT_NE(features.vectors, nullptr) << "Should allocate feature vectors";
-
-    for (uint32_t i = 0; i < features.count; i++) {
-        memset(&features.vectors[i], 0, sizeof(feature_vector));
-        features.vectors[i].features[0] = i + 1;  // flow_id
-        features.vectors[i].features[6] = 10;     // 满足过滤条件
-        features.vectors[i].features[164] = 10;
-    }
-
-    inference_result result;
-    result.count = features.count;
-    result.predictions = static_cast<int *>(malloc(sizeof(int) * result.count));
-    ASSERT_NE(result.predictions, nullptr) << "Should allocate predictions";
-
-    EXPECT_EQ(features.count, result.count) << "Feature and prediction count should align";
-
-    free(features.vectors);
-    free(result.predictions);
+TEST(KTAGInferenceApi, NullContextPredictionFailsWithDiagnostic) {
+    EXPECT_EQ(KTAG_ERROR_INVALID_ARGUMENT, ktag_inference_predict(nullptr, nullptr, nullptr));
+    EXPECT_STRNE("", ktag_inference_get_last_error());
+    ktag_inference_destroy(nullptr);
 }
 
-TEST_F(InferenceEngineTest, PredictInputValidation)
-{
-    inference_config config;
-    config.config_file = TEST_CONFIG_FILE;
-    engine = inference_init(&config);
-    if (engine == nullptr) {
-        return;
-    }
-
-    int prediction = 0;
-    inference_result result{};
-    result.predictions = &prediction;
-    int ret = inference_predict(engine, nullptr, &result);
-    EXPECT_EQ(ret, INFERENCE_ERROR) << "Should fail with NULL features";
-
-    feature_vector vector{};
-    feature_vector_list features{};
-    features.count = 1U;
-    features.capacity = 1U;
-    features.vectors = &vector;
-    ret = inference_predict(engine, &features, nullptr);
-    EXPECT_EQ(ret, INFERENCE_ERROR) << "Should fail with NULL result";
+TEST(KTAGPredictionBatchApi, EmptyBatchRemainsEmptyAfterReserveAndClear) {
+    std::unique_ptr<ktag_prediction_batch, decltype(&ktag_prediction_batch_destroy)>
+        batch(ktag_prediction_batch_create(0U), ktag_prediction_batch_destroy);
+    ASSERT_NE(nullptr, batch);
+    EXPECT_EQ(0U, ktag_prediction_batch_get_count(batch.get()));
+    EXPECT_EQ(KTAG_SUCCESS, ktag_prediction_batch_reserve(batch.get(), 16U));
+    EXPECT_EQ(0U, ktag_prediction_batch_get_count(batch.get()));
+    ktag_prediction_record record{};
+    EXPECT_EQ(KTAG_ERROR_INVALID_ARGUMENT, ktag_prediction_batch_get_record(batch.get(), 0U, &record));
+    ktag_prediction_batch_clear(batch.get());
+    EXPECT_EQ(0U, ktag_prediction_batch_get_count(batch.get()));
 }
 
-TEST_F(InferenceEngineTest, ConfigParameters)
-{
-    const YAML::Node expected = YAML::LoadFile(TEST_CONFIG_FILE);
-    ASSERT_TRUE(expected["filter_packets"]);
-    ASSERT_TRUE(expected["columns_to_remove"]);
-    const int expected_filter_packets =
-        expected["filter_packets"].as<int>();
-    const std::vector<int> expected_columns =
-        expected["columns_to_remove"].as<std::vector<int>>();
-
-    inference_config config;
-    config.config_file = TEST_CONFIG_FILE;
-
-    engine = inference_init(&config);
-
-    if (engine) {
-        EXPECT_EQ(expected_filter_packets, engine->filter_packets);
-        ASSERT_EQ(expected_columns.size(), engine->columns_to_remove_count);
-        for (uint32_t index = 0U;
-             index < engine->columns_to_remove_count;
-             ++index) {
-            EXPECT_EQ(
-                expected_columns[index],
-                engine->columns_to_remove[index]);
-        }
-    }
+TEST(KTAGPredictionBatchApi, RejectsNullStorageWithoutDereferencingIt) {
+    ktag_prediction_record record{};
+    EXPECT_EQ(KTAG_ERROR_INVALID_ARGUMENT, ktag_prediction_batch_reserve(nullptr, 1U));
+    EXPECT_EQ(KTAG_ERROR_INVALID_ARGUMENT, ktag_prediction_batch_get_record(nullptr, 0U, &record));
+    EXPECT_EQ(0U, ktag_prediction_batch_get_count(nullptr));
+    ktag_prediction_batch_clear(nullptr);
+    ktag_prediction_batch_destroy(nullptr);
 }

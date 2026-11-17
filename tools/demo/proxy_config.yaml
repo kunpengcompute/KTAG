@@ -1,19 +1,30 @@
 # ktag_proxy_v1 的 Schema CSV、训练、评估和在线推理配置。
-# 当前实际启用的是两分类增量示例：label 0 为 VMess/WebSocket/TLS，label 1 为
-# VMess/XHTTP(H2)/TLS。外层数据组顺序就是当前模型的数字标签，训练和评估必须对齐。
+# 当前启用四分类增量示例：label 0/1 分别为 SSR/auth-aes128-md5 和
+# SSR/auth-aes128-sha1，label 2/3 分别为 VMess/WebSocket/TLS 和 VMess/XHTTP(H2)/TLS。
+# 外层数据组顺序就是当前模型的数字标签，训练和评估必须对齐。
 # 若要形成“普通流量 + 完整代理形态”的新模型，应重新确定并冻结整套外层组顺序，
 # 不能假定当前两分类标签与未来模型保持相同含义。IPv4-only、IPv6-only 和混合数据
 # 都允许训练；缺少地址族只告警，不阻止训练。
 
 training_data_paths:
-  # 标签 0：VMess / WebSocket / TLS
+  - [
+      /data2/proxy_data/class-03-ssr-auth-aes128-md5/sample-01.csv,
+      /data2/proxy_data/class-03-ssr-auth-aes128-md5/sample-02.csv,
+      /data2/proxy_data/class-03-ssr-auth-aes128-md5/sample-05.csv,
+      /data2/proxy_data/class-03-ssr-auth-aes128-md5/sample-04.csv,
+    ]
+  - [
+      /data2/proxy_data/class-04-ssr-auth-aes128-sha1/sample-01.csv,
+      /data2/proxy_data/class-04-ssr-auth-aes128-sha1/sample-05.csv,
+      /data2/proxy_data/class-04-ssr-auth-aes128-sha1/sample-03.csv,
+      /data2/proxy_data/class-04-ssr-auth-aes128-sha1/sample-04.csv,
+    ]
   - [
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-01.csv,
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-02.csv,
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-03.csv,
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-04.csv,
     ]
-  # 标签 1：VMess / XHTTP(H2) / TLS
   - [
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-01.csv,
       /data2/proxy_data/class-06-vmess-xhttp-h2-tls/sample-02.csv,
@@ -24,6 +35,12 @@ training_data_paths:
 evaluation_data_paths:
   # 与 training_data_paths 保持相同外层组顺序。评估文件不能复用训练 CSV；服务器
   # 端点重叠会告警但继续执行，需要结合采集记录人工判断泛化风险。
+  - [
+      /data2/proxy_data/class-03-ssr-auth-aes128-md5/sample-03.csv,
+    ]
+  - [
+      /data2/proxy_data/class-04-ssr-auth-aes128-sha1/sample-02.csv,
+    ]
   - [
       /data2/proxy_data/class-05-vmess-websocket-tls/sample-05.csv,
     ]
@@ -108,6 +125,7 @@ pipeline:
     policy: block
 
   plugins:
+    - ../../output/plugins/libktag_traffic_features.so
     - ../../output/plugins/libktag_proxy_features.so
 
   schema:

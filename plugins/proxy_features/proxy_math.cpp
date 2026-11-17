@@ -78,6 +78,14 @@ float byte_entropy(const uint8_t *data, size_t length) {
   for (size_t index = 0U; index < length; ++index) {
     ++counts[data[index]];
   }
+  return byte_entropy_from_counts(counts, length);
+}
+
+float byte_entropy_from_counts(const std::array<uint32_t, 256U> &counts,
+                               size_t length) {
+  if (length == 0U) {
+    return 0.0F;
+  }
   double entropy = 0.0;
   for (uint32_t count : counts) {
     if (count == 0U) {

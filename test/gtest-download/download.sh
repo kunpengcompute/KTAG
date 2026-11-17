@@ -7,10 +7,10 @@
 set -e
 
 curd=$(pwd)
-kdadk_appid_test=$curd/..
+ktag_appid_test=$curd/..
 root_path=$curd/../..
 
-if [ -d "${kdadk_appid_test}/googletest-release-1.8.0" ]
+if [ -d "${ktag_appid_test}/googletest-release-1.8.0" ]
 then
     echo -e "\033[32m The googletest-release-1.8.0 directory already exists and is valid. \033[0m"
     exit 0
@@ -19,7 +19,7 @@ fi
 curl -L -k https://github.com/google/googletest/archive/refs/tags/release-1.8.0.zip -o googletest-release-1.8.0.zip
 
 # 解压下载的ZIP包
-unzip -d ${kdadk_appid_test} googletest-release-1.8.0.zip
+unzip -d ${ktag_appid_test} googletest-release-1.8.0.zip
 
 # 删除下载的ZIP包
 rm googletest-release-1.8.0.zip

@@ -1,5 +1,23 @@
 # KTAG 测试说明
 
+## POC 与商用特征插件集成回归
+
+普通流量插件的真实 Provider、354维冻结契约、DFA、统计优化、特征提取到UB帧编解码，
+以及应用/代理/UB示例配置可通过以下独立入口验证。依赖源码由调用者提供，不自动下载：
+
+```bash
+python3 test/common/traffic_plugin_contract_check.py --cxx c++ \
+  --gtest test/googletest-release-1.8.0 --yaml-cpp /path/to/yaml-cpp
+python3 test/common/dpdk_rx_worker_check.py --cxx c++
+python3 test/common/ub_queue_worker_check.py --cxx c++
+```
+
+可用 `--zig /path/to/zig` 替代 `--cxx`；pcap头文件不在系统路径时，第一项增加
+`--pcap-include /path/to/pcap/include`。前两类Provider/契约测试使用实际产品算法；
+RX与UB执行器检查使用mock网卡/传输/推理，不能代替真实DPDK/UB多节点性能验收。
+Linux上的常规功能测试也会自动编译新增的 `func_traffic_ub_contract.cpp` 和
+`func_integration_config.cpp`。
+
 本文介绍 KTAG 的测试框架和使用方法，覆盖功能测试、性能测试、ASan 内存检测、
 Fuzz 测试和 Python 工具链测试。测试统一入口为 `/opt/KTAG/test/build/`，KTAG
 源码根目录以 `/opt/KTAG` 为例。
@@ -24,7 +42,7 @@ Fuzz 测试和 Python 工具链测试。测试统一入口为 `/opt/KTAG/test/bu
 ## 2. 环境准备
 
 1. 按《[编译指南](../docs/zh/installation_guide.md)》完成依赖安装；
-2. 以测试选项构建产品库（功能测试需要链接 `libkdadk_appidlib.so`）：
+2. 以测试选项构建产品库（功能测试需要链接 `libktag_appidlib.so`）：
 
 ```bash
 sh /opt/KTAG/build.sh -lib
@@ -45,17 +63,14 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 | 测试源文件 | 覆盖内容 |
 |---|---|
 | `func_capture.cpp` | Capture 层：规范化 Flow Key、正反流量归入同一流、IPv6 扩展头与分片边界、包缓冲和设备接口 |
-| `func_decode.cpp` | 旧解码器：TCP/UDP/DNS/TLS SNI/ClientHello/CipherSuite 解析 |
 | `func_domain_store.cpp` | Domain Store/Cache：并发写入、TTL、增量同步和版本失效 |
-| `func_domain_name_hash.cpp` | 旧域名哈希表接口 |
 | `func_feature_context.cpp` | Feature Context：流生命周期、UDP 报文上限、DNS AAAA 域名关联、线程所有权、与旧固定向量输出一致性 |
-| `func_feature_extract.cpp` | 旧特征计算函数 |
+| `func_feature_extract.cpp` | 插件冻结统计算法 |
 | `func_feature_provider.cpp` | Provider 回调和 Fill Zero 策略（需 `internal=y`，使用内部头文件） |
 | `func_feature_schema.cpp` | Schema 组合与维度展开 |
-| `func_flow_hash.cpp` | Flow Key 哈希 |
-| `func_inference.cpp` | Inference Context 基本流程 |
+| `func_inference.cpp` | 公共 Inference 配置校验、线程数边界和 Prediction Batch 生命周期 |
 | `func_inference_contract.cpp` | 模型包与 Schema 契约校验 |
-| `func_inference_legacy_adapter.cpp` | 旧推理接口适配 |
+| `func_demo_inference_session.cpp` | 历史 Demo 调度的公共推理桥接：真实 ONNX 推理、过滤后源记录对齐、标准化及错误处理 |
 | `func_proxy_features.cpp` | 代理特征插件：Sequence/Burst、TCP Signature、QUIC |
 | `func_demo_pipeline.cpp` | demo Pipeline：配置解析、队列容量与背压、Schema CSV/预测输出契约、插件加载与卸载、冻结 Schema 保护 |
 | `compile_ktag_public_headers.c` | 6 个公共头文件可独立编译 |
@@ -64,7 +79,7 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 ### 3.2 构建与运行
 
 ```bash
-# 构建功能测试（生成 kdadk_appid_functest）
+# 构建功能测试（生成 ktag_appid_functest）
 cd /opt/KTAG/test/build
 make func
 
@@ -94,7 +109,7 @@ make rfunc func=KTAGFeatureProvider
 性能测试包含 `perf_calculate.cpp`（特征计算）和 `perf_e2e.cpp`（端到端耗时）。
 
 ```bash
-# 构建性能测试（生成 kdadk_appid_perftest）
+# 构建性能测试（生成 ktag_appid_perftest）
 cd /opt/KTAG/test/build
 make perf
 
@@ -102,7 +117,7 @@ make perf
 make rperf
 
 # 运行指定性能测试
-make rperf func=KDADK_PERFTEST_E2E
+make rperf func=KTAG_PERFTEST_E2E
 ```
 
 性能对比测试应固定 CPU 频率、线程数和数据规模，多轮取值。
