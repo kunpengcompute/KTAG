@@ -1,0 +1,43 @@
+# Use the project identity referenced by the installation guide.
+project: boostkit/KTAG
+version: "1.4"
+
+# Only src/ and include/ participate in copyright-header checks.
+# This source allow-list excludes root-level files and all other directories.
+directories:
+  # Application code and public headers participate in copyright checks.
+  - path: "./src/"
+    type: source
+  - path: "./include/"
+    type: source
+
+  # Functional, performance and fuzz tests, plus their supporting files.
+  - path: "./test/"
+    type: test
+
+  # Bundled GoogleTest parallel runner and test build configuration.
+  - path: "./test/gtest-parallel/"
+    type: third_party
+  - path: "./test/build/"
+    type: build
+
+  # Project documentation.
+  - path: "./docs/"
+    type: docs
+
+  # CMake configuration, CI workflows and helper scripts.
+  - path: "./cmake/"
+    type: build
+  - path: "./.gitcode/"
+    type: build
+  - path: "./.gitcode/scripts/"
+    type: scripts
+
+files:
+  # Use the repository license and the single-line Huawei copyright template.
+  - path: "./LICENSE"
+    type: license
+  - path: "./.gitcode/copyright-template.txt"
+    type: copyright-template
+  - path: "./.gitcode/opensource-repo-layout.yaml"
+    type: compliance-config

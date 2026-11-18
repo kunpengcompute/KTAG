@@ -1,5 +1,5 @@
 /*
-Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  */
 #ifndef KDADK_INFERENCE_H
 #define KDADK_INFERENCE_H

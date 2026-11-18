@@ -1,5 +1,5 @@
 /*
-Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
  */
 #ifndef FEATURE_EXTRACTOR_H
 #define FEATURE_EXTRACTOR_H

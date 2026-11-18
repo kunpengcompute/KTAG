@@ -1,5 +1,5 @@
 /*
-Copyright (c) Huawei Technologies Co., Ltd. 2025-2025. All rights reserved.
+ * Copyright (c) 2025-2025 Huawei Technologies Co., Ltd.
  */
 #ifndef FLOW_HASH_H
 #define FLOW_HASH_H
