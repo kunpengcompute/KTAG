@@ -22,7 +22,7 @@ CXXFLAGS += -DLIB_KTAG_APPID_NAME=\"libktag_appidlib.so\"
 
 # Options for preprocessing stage, here are mainly header files.
 KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/plugins/traffic_features/
-KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/demo/
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/KFlowLens/
 CPPFLAGS += $(KTAG_APPID_DIR)
 
 # Flags passed to the C++ compiler.
@@ -82,7 +82,7 @@ endif
 all : $(PROGRAM)
 run:
 	@test -f "$(KTAG_APPID_OUTPUT_DIR)/libktag_appidlib.so" || \
-		(echo "missing $(KTAG_APPID_OUTPUT_DIR)/libktag_appidlib.so; run 'sh build.sh -lib' from the repository root"; exit 1)
+		(echo "missing $(KTAG_APPID_OUTPUT_DIR)/libktag_appidlib.so; run 'bash buildtools/build.sh -lib' from the repository root"; exit 1)
 	@test -f "$(KTAG_APPID_OUTPUT_DIR)/libktag_feature.so" || \
 		(echo "missing $(KTAG_APPID_OUTPUT_DIR)/libktag_feature.so; rebuild phase-8 libraries"; exit 1)
 	env LD_LIBRARY_PATH=$(KTAG_APPID_OUTPUT_DIR):$(ONNXRUNTIME_LIB_DIR):/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./ktag_appid_perftest --gtest_filter=$(FILTER)

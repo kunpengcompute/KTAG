@@ -889,7 +889,7 @@ int main(int argc, char **argv)
 将代码保存为 `capture_example.c`，在仓库根目录执行。
 
 ```bash
-bash /opt/KTAG/build.sh   # 若尚未构建，产物位于 /opt/KTAG/output/
+bash /opt/KTAG/buildtools/build.sh   # 若尚未构建，产物位于 /opt/KTAG/output/
 cc -std=c11 -I/opt/KTAG/include /opt/KTAG/capture_example.c \
    -L/opt/KTAG/output -lktag_capture -Wl,-rpath,/opt/KTAG/output \
    -o /opt/KTAG/output/capture_example
@@ -3581,7 +3581,7 @@ int main(int argc, char **argv)
 将代码保存为 `feature_example.c`，在仓库根目录执行。
 
 ```bash
-bash /opt/KTAG/build.sh   # 若尚未构建
+bash /opt/KTAG/buildtools/build.sh   # 若尚未构建
 cc -std=c11 -I/opt/KTAG/include /opt/KTAG/feature_example.c \
    -L/opt/KTAG/output -lktag_capture -lktag_feature \
    -Wl,-rpath,/opt/KTAG/output -o /opt/KTAG/output/feature_example
@@ -4542,7 +4542,7 @@ int main(int argc, char **argv)
 构建与运行（与 `examples/three_layer` 一致）。
 
 ```bash
-bash /opt/KTAG/build.sh   # 若尚未构建
+bash /opt/KTAG/buildtools/build.sh   # 若尚未构建
 cc -std=c11 -I/opt/KTAG/include /opt/KTAG/inference_example.c \
    -L/opt/KTAG/output -lktag_capture -lktag_feature -lktag_inference \
    -Wl,-rpath,/opt/KTAG/output -o /opt/KTAG/output/inference_example
@@ -4601,7 +4601,7 @@ Demo的私有C++ Session负责上述转换，不构成SDK公共接口或独立�
 
 ### 产品版本查询
 
-查询产品元数据及库版本，实现位于 `src/core/version.c`。执行 `bash build.sh -lib`，或在已有构建上设置 `ENABLE_BUILD_LIB=ON`，生成独立的 `libktag_appidlib.so`；调用方链接 `-lktag_appidlib`，该库目前不随 `KTAGTargets` 导出。
+查询产品元数据及库版本，实现位于 `src/core/version.c`。执行 `bash buildtools/build.sh -lib`，或在已有构建上设置 `ENABLE_BUILD_LIB=ON`，生成独立的 `libktag_appidlib.so`；调用方链接 `-lktag_appidlib`，该库目前不随 `KTAGTargets` 导出。
 
 #### `KTAG_GetProductVersion`
 

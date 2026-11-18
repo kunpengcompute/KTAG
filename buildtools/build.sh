@@ -2,13 +2,14 @@
 ##############################################################
 ## Copyright: Copyright (c) Huawei Technologies Co., Ltd. 2020-2020. All rights reserved.
 ## @Filename: build.sh
-## @Usage: sh build.sh, sh build.sh -perf, sh build.sh dpdk, sh build.sh clean, sh build.sh install or sh build.sh uninstall
+## @Usage: bash buildtools/build.sh [ -lib | -sve256 | -coverage | -perf | dpdk | clean | install | uninstall | deb | util ]
 ##############################################################
 
 set -e
 
-LIB_ROOT_PATH=$(cd "$(dirname "${0}")"; pwd -P)
-source ${LIB_ROOT_PATH}/function.sh
+BUILD_TOOLS_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+LIB_ROOT_PATH=$(cd -- "${BUILD_TOOLS_DIR}/.." && pwd -P)
+source "${BUILD_TOOLS_DIR}/function.sh"
 OBJ_DIR=${LIB_ROOT_PATH}/build
 OUTPUT_DIR=${LIB_ROOT_PATH}/output
 INSTALL_LIB_PATH=/usr/local/lib/KTAG_APPID/
@@ -17,22 +18,22 @@ DEBPACK_ROOT_PATH=${LIB_ROOT_PATH}/package/debpack
 DEBPACK_INCLUDE_PATH=${DEBPACK_ROOT_PATH}/KTAG_APPID/include
 DEBPACK_LIB_PATH=${DEBPACK_ROOT_PATH}/KTAG_APPID/lib
 
-KTAG_APPID_INFO_VERSION=$(xmllint --xpath "//KTAG_APPID_INFO_VERSION/text()" ${LIB_ROOT_PATH}/dependence.xml)
-KTAG_APPID_INFO_COMPONENT_NAME=$(xmllint --xpath "//KTAG_APPID_INFO_COMPONENT_NAME/text()" ${LIB_ROOT_PATH}/dependence.xml)
-KTAG_APPID_INFO_SOFTWARE_NAME=$(xmllint --xpath "//KTAG_APPID_INFO_SOFTWARE_NAME/text()" ${LIB_ROOT_PATH}/dependence.xml)
-KTAG_APPID_INFO_PRODUCT_VERSION=$(xmllint --xpath "//KTAG_APPID_INFO_PRODUCT_VERSION/text()" ${LIB_ROOT_PATH}/dependence.xml)
-cpulimit=$(xmllint --xpath "//KTAG_APPID_CPU_CHECK_ENABLE/text()" ${LIB_ROOT_PATH}/dependence.xml)
-KTAG_APPID_C_TOOLCHAIN=$(xmllint --xpath "//KTAG_APPID_C_TOOLCHAIN/text()" ${LIB_ROOT_PATH}/dependence.xml)
+KTAG_APPID_INFO_VERSION=$(xmllint --xpath "//KTAG_APPID_INFO_VERSION/text()" "${LIB_ROOT_PATH}/dependence.xml")
+KTAG_APPID_INFO_COMPONENT_NAME=$(xmllint --xpath "//KTAG_APPID_INFO_COMPONENT_NAME/text()" "${LIB_ROOT_PATH}/dependence.xml")
+KTAG_APPID_INFO_SOFTWARE_NAME=$(xmllint --xpath "//KTAG_APPID_INFO_SOFTWARE_NAME/text()" "${LIB_ROOT_PATH}/dependence.xml")
+KTAG_APPID_INFO_PRODUCT_VERSION=$(xmllint --xpath "//KTAG_APPID_INFO_PRODUCT_VERSION/text()" "${LIB_ROOT_PATH}/dependence.xml")
+cpulimit=$(xmllint --xpath "//KTAG_APPID_CPU_CHECK_ENABLE/text()" "${LIB_ROOT_PATH}/dependence.xml")
+KTAG_APPID_C_TOOLCHAIN=$(xmllint --xpath "//KTAG_APPID_C_TOOLCHAIN/text()" "${LIB_ROOT_PATH}/dependence.xml")
 export CC=${KTAG_APPID_C_TOOLCHAIN}
 export KTAG_APPID_CPU_CHECK_ENABLE=${cpulimit}
 
 function ktag_appid_clean()
 {
     if [ -d "${OBJ_DIR}" ]; then
-        rm -rf ${OBJ_DIR}
+        rm -rf "${OBJ_DIR}"
     fi
     if [ -d "${OUTPUT_DIR}" ]; then
-        rm -rf ${OUTPUT_DIR}
+        rm -rf "${OUTPUT_DIR}"
     fi
 }
 
@@ -44,7 +45,7 @@ function ktag_appid_install()
         exit 1
     fi
     if [ ! -f "${OBJ_DIR}/CMakeCache.txt" ]; then
-        echo "build directory is missing; run 'sh build.sh' first"
+        echo "build directory is missing; run 'bash buildtools/build.sh' from the repository root first"
         exit 1
     fi
     if [ ! -d "${INSTALL_LIB_PATH}" ]; then

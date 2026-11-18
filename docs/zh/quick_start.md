@@ -22,7 +22,7 @@ ls -l /opt/KTAG/output/KFlowLens \
 仅使用已有模型推理时不需要Python；要训练自己的模型，先安装依赖。
 
 ```bash
-python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
+python3 -m pip install -r /opt/KTAG/tools/KFlowLens/python/packages.txt
 ```
 
 ## 快速开始
@@ -35,7 +35,7 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 
    ```bash
    mkdir -p /opt/KTAG/work/{pcap,csv,model,result}
-   cp /opt/KTAG/tools/demo/config.yaml /opt/KTAG/work/app.yaml
+   cp /opt/KTAG/tools/KFlowLens/config.yaml /opt/KTAG/work/app.yaml
    sed -i 's|../../output/plugins/|/opt/KTAG/output/plugins/|g; s|../../result|/opt/KTAG/result|g' \
      /opt/KTAG/work/app.yaml
    ```

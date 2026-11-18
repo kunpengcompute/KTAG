@@ -55,7 +55,7 @@
 |Schema Pipeline|增加Schema CSV、Schema Hash和模型输入契约校验，避免错误组合特征与模型。保留 ktag_legacy_v1：53个描述符、354个数值；训练排除Flow ID和源/目的IP后，输入351个数值。|
 |代理分类|增加 ktag_proxy_v1：118个描述符、619个数值。libktag_proxy_features.so 提供Sequence/Burst、TCP/TLS/Carrier和轻量级QUIC特征，用于训练代理流量分类模型；分类范围由训练数据决定。|
 |并行模式|KFlowLens支持串行执行 single_thread、分阶段执行 staged、特征并行 feature_parallel 和全流水线并行 full_parallel，用于按负载配置线程。CLI的 legacy 保留历史调度和输出格式，仍使用公共Inference API和模型包；约束见[模式表](user_guide.md#pipeline-mode-与线程配置)。|
-|版本查询|版本查询实现位于 src/core/；需要独立查询产品/库版本时，以 ENABLE_BUILD_LIB=ON 或 bash build.sh -lib 生成 libktag_appidlib.so。新构建中该选项未设置等同OFF，此时不额外生成该库。|
+|版本查询|版本查询实现位于 src/core/；需要独立查询产品/库版本时，以 ENABLE_BUILD_LIB=ON 或 bash buildtools/build.sh -lib 生成 libktag_appidlib.so。新构建中该选项未设置等同OFF，此时不额外生成该库。|
 |双栈训练评估|训练/评估支持IPv4-only、IPv6-only或混合数据；评估输出整体及可用地址族分层报告、混淆矩阵和逐流confidence。|
 
 ### 修改特性

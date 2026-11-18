@@ -21,8 +21,8 @@ __pycache__/
 /test/build/perftest/ktag_appid_perftest
 /test/build/*.csv
 /test/build/*.txt
-/tools/demo/**/*.o
-/tools/demo/**/*.o.d
+/tools/KFlowLens/**/*.o
+/tools/KFlowLens/**/*.o.d
 
 # Runtime validation output.
 /classification_report.txt

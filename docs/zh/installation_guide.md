@@ -47,7 +47,7 @@ KTAG用于对网络流量组流、提取特征并执行模型分类，功能范�
 | CMake | 3.16.3或更高版本 | cmake --version |
 | xmllint | 读取仓库根目录的 dependence.xml | xmllint --version |
 | RPM/Yum、libpcap开发包 | 脚本用RPM检查，缺失时调用Yum安装 | rpm -q libpcap libpcap-devel |
-| Python 3及pip | 训练、评估时必需；依赖以 tools/demo/python/packages.txt 为准 | python3 --version、python3 -m pip --version |
+| Python 3及pip | 训练、评估时必需；依赖以 tools/KFlowLens/python/packages.txt 为准 | python3 --version、python3 -m pip --version |
 
 先补齐缺失项再构建。可用 `yum provides '*/xmllint'` 查询本机软件源中提供该命令的软件包。若libpcap包缺失，需由管理员安装 `libpcap libpcap-devel`；系统目录写入需要root权限或sudo。代码目录需要当前用户可写。工具缺失会导致命令失败，CMake或编译器不满足要求会导致配置或编译失败。
 
@@ -135,10 +135,10 @@ cd /opt/KTAG
 
 ### 配置Python环境
 
-离线训练和评估使用的Python依赖记录在 `/opt/KTAG/tools/demo/python/packages.txt`，请先确认Python 3和pip可用，再执行。
+离线训练和评估使用的Python依赖记录在 `/opt/KTAG/tools/KFlowLens/python/packages.txt`，请先确认Python 3和pip可用，再执行。
 
 ```bash
-python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
+python3 -m pip install -r /opt/KTAG/tools/KFlowLens/python/packages.txt
 ```
 
 ## 执行源码编译
@@ -146,12 +146,12 @@ python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
 执行下述命令完成构建。
 
 ```bash
-bash /opt/KTAG/build.sh
+bash /opt/KTAG/buildtools/build.sh
 ```
 
 命令退出码为0且最后出现 `build success` 表示构建成功。脚本会检查主要产物及可解析的运行依赖；失败时根据终端首个错误排查，必要时保存完整输出日志。
 
-`build.sh` 的单个可选参数如下；不传参数执行默认构建，脚本未实现 `--help`。
+`buildtools/build.sh` 的单个可选参数如下；不传参数执行默认构建，脚本未实现 `--help`。
 
 | 参数 | 作用 |
 | :--- | :--- |
@@ -186,7 +186,7 @@ cmake --build /opt/KTAG/build
 | KTAG_BUILD_TOOLS | ON | 构建 / 不构建KFlowLens与示例插件；开启时依赖正式插件构建 |
 | KTAG_BUILD_FEATURE_PLUGINS | ON | 构建 / 不构建正式Feature Provider插件，包含Traffic插件 |
 | KTAG_BUILD_PROXY_FEATURES | ON | 在正式插件构建开启时构建 / 不构建Proxy插件；代理分类需同时加载Traffic与Proxy插件 |
-| ENABLE_BUILD_LIB | 未设置，等同 OFF | 额外构建 / 不构建版本查询库 libktag_appidlib.so；bash build.sh -lib 启用 |
+| ENABLE_BUILD_LIB | 未设置，等同 OFF | 额外构建 / 不构建版本查询库 libktag_appidlib.so；bash buildtools/build.sh -lib 启用 |
 | KTAG_ENABLE_DPDK | OFF | 构建 / 不构建DPDK收包后端；脚本通过 dpdk 参数启用 |
 | KTAG_ENABLE_DPDK_UB | OFF | 启用 / 不启用UB分布式传输；与DPDK收包开关独立 |
 
@@ -231,7 +231,7 @@ Traffic插件负责通用流量特征，Proxy插件增加代理特征。三层�
 
 清理会删除 `build/` 和 `output/`，其中手工放入的模型、配置或日志需先另行备份；运行中的旧任务应先停止。
 
-从含兼容库的旧构建升级时，先执行 `bash /opt/KTAG/build.sh clean` 清理原构建目录和产物，再重新构建。
+从含兼容库的旧构建升级时，先执行 `bash /opt/KTAG/buildtools/build.sh clean` 清理原构建目录和产物，再重新构建。
 
 ## 修订记录
 

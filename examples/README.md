@@ -23,7 +23,7 @@
 ### 构建
 
 ```bash
-sh /opt/KTAG/build.sh
+bash /opt/KTAG/buildtools/build.sh
 ```
 
 ### 运行

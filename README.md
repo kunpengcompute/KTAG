@@ -30,6 +30,9 @@ KTAG（Kunpeng TAG，鲲鹏流量分类库）是鲲鹏数据分析开发套件�
 项目目录结构如下：
 
 ```text
+|—— buildtools                                                # 构建脚本
+│   ├── build.sh                                              # 编译、清理、安装入口
+│   └── function.sh                                           # 构建辅助函数
 |—— cmake                                                     # 工程编译配置
 |—— docs                                                      # 文档资料
 │   └── zh                                                    # 中文文档目录
@@ -49,7 +52,7 @@ KTAG（Kunpeng TAG，鲲鹏流量分类库）是鲲鹏数据分析开发套件�
 │   └── inference                                             # 模型加载与批量推理
 |—— test                                                      # 测试框架
 |—— tools                                                     # 工具集
-│   ├── demo                                                  # 训练/评估/推理命令行工具
+│   ├── KFlowLens                                             # 训练/评估/推理命令行工具
 │   ├── data                                                  # 数据过滤与预检工具
 │   ├── capture                                               # 流量抓包脚本
 │   ├── labeling                                              # 流量打标签工具
@@ -57,7 +60,6 @@ KTAG（Kunpeng TAG，鲲鹏流量分类库）是鲲鹏数据分析开发套件�
 │   └── validation                                            # 一致性验收脚本
 |—— README.md                                                 # 说明文档
 |—— ktag_appidver.h                                          # 项目版本信息头文件
-|—— build.sh                                                  # 项目编译脚本
 ```
 
 ## 版本说明

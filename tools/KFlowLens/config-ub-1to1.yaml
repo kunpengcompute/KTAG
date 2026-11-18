@@ -16,12 +16,12 @@
 # 启动命令（--distributed-role 会强制启用本 distributed 段）：
 #
 #   Frontend (computer01):
-#     output/KFlowLens -r tools/demo/config-ub-1to1.yaml \
+#     output/KFlowLens -r tools/KFlowLens/config-ub-1to1.yaml \
 #       -p /data/class0.pcap -p /data/class1.pcap \
 #       --distributed-role frontend --node-id "$(hostname)"
 #
 #   Backend (controller):
-#     output/KFlowLens -r tools/demo/config-ub-1to1.yaml \
+#     output/KFlowLens -r tools/KFlowLens/config-ub-1to1.yaml \
 #       --distributed-role backend --node-id "$(hostname)" \
 #       -c /data/result/distributed-1to1.csv
 

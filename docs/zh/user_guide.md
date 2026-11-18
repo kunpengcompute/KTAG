@@ -14,8 +14,8 @@ KTAG提供两套正式特征契约。
 
 | 用途 | 配置示例 | Schema | Schema数值 | 模型输入 |
 |---|---|---|---:|---:|
-| 应用分类 | /opt/KTAG/tools/demo/config.yaml | ktag_legacy_v1 v1 | 354 | 351 |
-| 代理分类 | /opt/KTAG/tools/demo/proxy_config.yaml | ktag_proxy_v1 v1 | 619 | 619 |
+| 应用分类 | /opt/KTAG/tools/KFlowLens/config.yaml | ktag_legacy_v1 v1 | 354 | 351 |
+| 代理分类 | /opt/KTAG/tools/KFlowLens/proxy_config.yaml | ktag_proxy_v1 v1 | 619 | 619 |
 
 应用Schema保留原354维契约。训练时排除 `legacy.flow_id`、
 `network.src_ip` 和 `network.dst_ip`，所以随机森林实际接收351个数值。代理
@@ -83,7 +83,7 @@ Salamander等混淆后，标准QUIC Header可能无法解析；解析失败计�
 1. 执行构建命令。
 
    ```bash
-   bash /opt/KTAG/build.sh
+   bash /opt/KTAG/buildtools/build.sh
    ```
 
    与应用/代理分类有关的主要产物如下。
@@ -122,7 +122,7 @@ Salamander等混淆后，标准QUIC Header可能无法解析；解析失败计�
 1. 安装Python依赖。
 
    ```bash
-   python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
+   python3 -m pip install -r /opt/KTAG/tools/KFlowLens/python/packages.txt
    ```
 
 # 流量分类场景
@@ -149,8 +149,8 @@ Salamander等混淆后，标准QUIC Header可能无法解析；解析失败计�
 
 ### 统一配置结构说明
 
-应用任务使用 `/opt/KTAG/tools/demo/config.yaml`，代理任务使用
-`/opt/KTAG/tools/demo/proxy_config.yaml`。两者都沿用以下现有字段，不需要另一种配置格式。
+应用任务使用 `/opt/KTAG/tools/KFlowLens/config.yaml`，代理任务使用
+`/opt/KTAG/tools/KFlowLens/proxy_config.yaml`。两者都沿用以下现有字段，不需要另一种配置格式。
 
 ```yaml
 training_data_paths:
@@ -247,7 +247,7 @@ pipeline:
       - network.src_ip
       - network.dst_ip
     add_features:
-      # 完整顺序见 /opt/KTAG/tools/demo/proxy_config.yaml
+      # 完整顺序见 /opt/KTAG/tools/KFlowLens/proxy_config.yaml
 ```
 
 `ktag_proxy_v1` 包含118个Feature Descriptor、619个数值、Hash
@@ -283,7 +283,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
    ```bash
    /opt/KTAG/output/KFlowLens \
      -f /path/to/application.pcap \
-     --config /opt/KTAG/tools/demo/config.yaml \
+     --config /opt/KTAG/tools/KFlowLens/config.yaml \
      -c /path/to/application.csv
    ```
 
@@ -292,7 +292,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
    ```bash
    /opt/KTAG/output/KFlowLens \
      -f /path/to/proxy.pcap \
-     --config /opt/KTAG/tools/demo/proxy_config.yaml \
+     --config /opt/KTAG/tools/KFlowLens/proxy_config.yaml \
      -c /path/to/proxy.csv
    ```
 
@@ -325,7 +325,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 1. 执行只读预检。
 
    ```bash
-   python3 /opt/KTAG/tools/data/dataset_preflight.py /opt/KTAG/tools/demo/proxy_config.yaml
+   python3 /opt/KTAG/tools/data/dataset_preflight.py /opt/KTAG/tools/KFlowLens/proxy_config.yaml
    ```
 
    预期结果：预检不会修改CSV，主要检查。
@@ -361,10 +361,10 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
    ```bash
    # 应用模型
-   /opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/config.yaml
+   /opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/KFlowLens/config.yaml
 
    # 代理模型
-   /opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/proxy_config.yaml
+   /opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/KFlowLens/proxy_config.yaml
    ```
 
 2. 检查训练产物和模型包。
@@ -399,8 +399,8 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 1. 根据分类任务，执行对应评估命令。
 
    ```bash
-   /opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/config.yaml
-   /opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/proxy_config.yaml
+   /opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/KFlowLens/config.yaml
+   /opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/KFlowLens/proxy_config.yaml
    ```
 
    预期结果：评估使用 `evaluation_data_paths`，生成整体Classification Report、预测明细、整体
@@ -457,7 +457,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
    ```bash
    /opt/KTAG/output/KFlowLens \
-     -r /opt/KTAG/tools/demo/config.yaml \
+     -r /opt/KTAG/tools/KFlowLens/config.yaml \
      -p /path/to/application.pcap \
      --pipeline-mode feature_parallel \
      -n 4 \
@@ -481,7 +481,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
    ```bash
    /opt/KTAG/output/KFlowLens \
-     -r /opt/KTAG/tools/demo/proxy_config.yaml \
+     -r /opt/KTAG/tools/KFlowLens/proxy_config.yaml \
      -p /path/to/proxy.pcap \
      --pipeline-mode feature_parallel \
      -n 4 \
@@ -522,7 +522,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
    ```bash
    /opt/KTAG/output/KFlowLens \
-     -r /opt/KTAG/tools/demo/proxy_config.yaml \
+     -r /opt/KTAG/tools/KFlowLens/proxy_config.yaml \
      -i eth0 \
      --pipeline-mode full_parallel \
      -n 4 \
@@ -582,7 +582,7 @@ columns_to_remove: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 1. 需要显式设置两类线程数时，执行以下命令。
 
    ```bash
-   /opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/proxy_config.yaml \
+   /opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/KFlowLens/proxy_config.yaml \
      -p /path/to/proxy.pcap \
      --pipeline-mode full_parallel -n 4 --inference-threads 2 \
      -c /path/to/prediction.csv

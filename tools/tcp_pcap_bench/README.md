@@ -37,7 +37,7 @@ ldd output/ktag_tcp_pcap_bench
 output/ktag_tcp_pcap_bench --help
 ```
 
-`KTAG_APPID_VERSION_INFO` 必须传入；上面的 `1.0.1` 对应当前 `dependence.xml` 中的 `KTAG_APPID_INFO_VERSION`。原 `build.sh` 会读取并传入此值，直接运行 CMake 时不会自动读取。项目版本变更时须同步使用 XML 中的版本号。
+`KTAG_APPID_VERSION_INFO` 必须传入；上面的 `1.0.1` 对应当前 `dependence.xml` 中的 `KTAG_APPID_INFO_VERSION`。原 `buildtools/build.sh` 会读取并传入此值，直接运行 CMake 时不会自动读取。项目版本变更时须同步使用 XML 中的版本号。
 
 若非标准安装路径的动态库未找到，按实际位置设置运行库搜索路径；sudo 启动时需要显式传入，但本地模式通常不需要 sudo：
 
