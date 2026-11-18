@@ -173,7 +173,7 @@ KTAG_APPIDlib:
 ifeq ("$(cover)", "y")
 	sed -i 's/\bTRUE\b/FALSE/g' $(CMAKE_IN_FILE)
 endif
-	sh $(ROOT_DIR)/build.sh util
+	bash "$(ROOT_DIR)/buildtools/build.sh" util
 	cd $(KTAG_APPID_OBJ_DIR)/;\
 	cmake $(ROOT_DIR) -DKTAG_APPID_TOOLCHAIN_INFO:STRING=${KTAG_APPID_C_TOOLCHAIN} \
 		-DKTAG_APPID_VERSION_INFO=${KTAG_APPID_INFO_VERSION} \

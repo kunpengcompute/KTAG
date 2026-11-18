@@ -34,8 +34,8 @@ def main():
             'feature_context.cpp', 'dns_observer.cpp', 'domain_store.cpp')],
         root / 'src/core/packet_decode_internal.cpp',
         root / 'src/capture/flow_key.cpp', root / 'src/capture/packet_buffer.cpp',
-        root / 'tools/demo/pipeline/ub_feature_wire.cpp',
-        root / 'tools/demo/pipeline/pipeline_config.cpp',
+        root / 'tools/KFlowLens/pipeline/ub_feature_wire.cpp',
+        root / 'tools/KFlowLens/pipeline/pipeline_config.cpp',
         *sorted((yaml_cpp / 'src').glob('*.cpp')),
         *[root / 'test/common/functest' / name for name in (
             'func_feature_schema.cpp', 'func_feature_extract.cpp',
@@ -62,7 +62,7 @@ def main():
     else:
         command += ['-pthread']
     for include in [root / 'include', root / 'src', root / 'plugins/traffic_features',
-                    root / 'tools/demo/pipeline', yaml_cpp / 'include', yaml_cpp / 'src',
+                    root / 'tools/KFlowLens/pipeline', yaml_cpp / 'include', yaml_cpp / 'src',
                     gtest / 'include', gtest]:
         command += ['-I' + str(include)]
     executable = build / ('traffic_contract_check.exe' if os.name == 'nt'
@@ -81,9 +81,9 @@ def main():
         # yaml-cpp uses narrow Windows file APIs. Stage configs under an ASCII
         # temporary root when the repository path contains non-ASCII characters.
         config_root = Path(temporary)
-        (config_root / 'tools/demo').mkdir(parents=True)
+        (config_root / 'tools/KFlowLens').mkdir(parents=True)
         for name in ('config.yaml', 'config-ub-1to1.yaml', 'proxy_config.yaml'):
-            shutil.copyfile(root / 'tools/demo' / name, config_root / 'tools/demo' / name)
+            shutil.copyfile(root / 'tools/KFlowLens' / name, config_root / 'tools/KFlowLens' / name)
         environment['KTAG_TEST_CONFIG_ROOT'] = str(config_root)
         result = subprocess.run([str(executable)], cwd=root, env=environment,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)

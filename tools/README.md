@@ -7,7 +7,7 @@
 `-r` 使用 `-p` 读取 PCAP 时，可用 `--pcap-labels` 逐文件指定真实标签：
 
 ```bash
-output/KFlowLens -r tools/demo/proxy_config.yaml \
+output/KFlowLens -r tools/KFlowLens/proxy_config.yaml \
   -p /data/a.pcap -p /data/b.pcap -p /data/c.pcap \
   --pcap-labels 2,2,3 -c result/prediction.csv
 ```
@@ -23,11 +23,11 @@ output/KFlowLens -r tools/demo/proxy_config.yaml \
 
 ## 目录结构
 
-- `demo`：用于特征提取、训练、评估和在线推理的 C++ 示例程序。
+- `KFlowLens`：用于特征提取、训练、评估和在线推理的 C++ 示例程序。
 - [`tcp_pcap_bench`](tcp_pcap_bench/README.md)：前端本地读取 PCAP、提取及 Zstd 压缩、TCP 回传后端推理；沿用原 PCAP 读取语义，使用独立构建开关并输出计时 / 吞吐统计。
-- `demo/python`：demo 在模型训练和评估时调用的 Python 辅助脚本。
-- `demo/config.yaml`：现有应用分类的完整训练、评估和推理示例。
-- `demo/proxy_config.yaml`：`ktag_proxy_v1` 的训练、评估、特征提取和推理配置；
+- `KFlowLens/python`：demo 在模型训练和评估时调用的 Python 辅助脚本。
+- `KFlowLens/config.yaml`：现有应用分类的完整训练、评估和推理示例。
+- `KFlowLens/proxy_config.yaml`：`ktag_proxy_v1` 的训练、评估、特征提取和推理配置；
   当前启用两个 SSR 类别和两个 VMess 承载类别，13 类只是数据齐备后的参考训练规划。
 - `data/feature_filter.py`：CSV 特征过滤工具。
 - `data/dataset_preflight.py`：只读检查双栈 Schema CSV 和现有训练/评估配置。
@@ -41,7 +41,7 @@ output/KFlowLens -r tools/demo/proxy_config.yaml \
 推荐使用一键编译命令，会同时编译 KTAG 库和 demo：
 
 ```bash
-sh /opt/KTAG/build.sh
+bash /opt/KTAG/buildtools/build.sh
 ```
 
 生成的文件如下：
@@ -74,25 +74,25 @@ cmake --build /opt/KTAG/build --target ktag_demo
 使用 `-t` 或 `-e` 前请先安装 Python 依赖：
 
 ```bash
-python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
+python3 -m pip install -r /opt/KTAG/tools/KFlowLens/python/packages.txt
 ```
 
 命令示例：
 
 ```bash
 # 应用分类
-/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/config.yaml
-/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/config.yaml
+/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/KFlowLens/config.yaml
+/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/KFlowLens/config.yaml
 
 # 代理分类：先替换配置中的全部 /path/to CSV 路径
-/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/proxy_config.yaml
-/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/KFlowLens/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/KFlowLens/proxy_config.yaml
 ```
 
 新的 pipeline 为可选启用。若 YAML 中设置
 `pipeline.enabled: false`，则保留历史命令的调度和输出格式，推理仍调用公共 Inference API。应用任务使用
-`/opt/KTAG/tools/demo/config.yaml`，代理任务使用
-`/opt/KTAG/tools/demo/proxy_config.yaml`；其中的 `model_package_path` 必须指向与
+`/opt/KTAG/tools/KFlowLens/config.yaml`，代理任务使用
+`/opt/KTAG/tools/KFlowLens/proxy_config.yaml`；其中的 `model_package_path` 必须指向与
 Schema 匹配的模型包。插件 ABI 见《[API 参考](../docs/zh/api_reference.md)》，代理
 Schema 的详细约定见《[用户指南](../docs/zh/user_guide.md)》。
 
@@ -103,7 +103,7 @@ Schema 的详细约定见《[用户指南](../docs/zh/user_guide.md)》。
 
 ```bash
 python3 /opt/KTAG/tools/model_package/create_legacy_package.py \
-  --config /opt/KTAG/tools/demo/config.yaml \
+  --config /opt/KTAG/tools/KFlowLens/config.yaml \
   --output /opt/KTAG/result/legacy_model_package
 ```
 
@@ -114,10 +114,10 @@ python3 /opt/KTAG/tools/model_package/create_legacy_package.py \
 临时启用某种拓扑：
 
 ```bash
-/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/config.yaml -p sample.pcap \
+/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/KFlowLens/config.yaml -p sample.pcap \
   --pipeline-mode feature_parallel -n 4 -c result.csv
 
-/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/config.yaml -p sample.pcap \
+/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/KFlowLens/config.yaml -p sample.pcap \
   --pipeline-mode full_parallel -n 4 --inference-threads 2 \
   -c result.csv
 ```
@@ -127,9 +127,9 @@ python3 /opt/KTAG/tools/model_package/create_legacy_package.py \
 应用分类和代理分类复用完全相同的 `pipeline.plugins`、`pipeline.schema`、
 `remove_features` 和 `add_features` 配置结构，不增加任务类型枚举或另一套 YAML。
 
-- `/opt/KTAG/tools/demo/config.yaml` 保持应用分类示例：`ktag_legacy_v1`，53 个 Feature
+- `/opt/KTAG/tools/KFlowLens/config.yaml` 保持应用分类示例：`ktag_legacy_v1`，53 个 Feature
   Descriptor、354 个数值，Hash 为 `0xdd48882b53bebfa5`。
-- `/opt/KTAG/tools/demo/proxy_config.yaml` 是代理 Schema 完整结构和四分类数据示例配置：加载
+- `/opt/KTAG/tools/KFlowLens/proxy_config.yaml` 是代理 Schema 完整结构和四分类数据示例配置：加载
   `libktag_proxy_features.so`，组合 `ktag_proxy_v1`，118 个 Feature Descriptor、
   619 个数值，Hash 为 `0xca1eae5086b41ee5`；数字标签由当前启用的数据组顺序决定。
   当前文件实际启用两个 SSR 类别和两个 VMess 承载类别，只是增量训练示例；普通流量和其余代理类别
@@ -140,11 +140,11 @@ python3 /opt/KTAG/tools/model_package/create_legacy_package.py \
 ```bash
 # 应用：CSV 为 12 个 meta.* 列 + 354 个 Schema 值
 /opt/KTAG/output/KFlowLens -f application.pcap \
-  --config /opt/KTAG/tools/demo/config.yaml -c application.csv
+  --config /opt/KTAG/tools/KFlowLens/config.yaml -c application.csv
 
 # 代理：CSV 为 12 个 meta.* 列 + 619 个 Schema 值
 /opt/KTAG/output/KFlowLens -f proxy.pcap \
-  --config /opt/KTAG/tools/demo/proxy_config.yaml -c proxy.csv
+  --config /opt/KTAG/tools/KFlowLens/proxy_config.yaml -c proxy.csv
 ```
 
 程序启动时会输出实际 Schema Name、Version、Feature Count、Value Count 和 Hash。
@@ -188,9 +188,9 @@ IPv4/IPv6 覆盖只产生诊断信息：仅含 IPv4 或仅含 IPv6 的数据集�
 训练和评估继续使用现有命令：
 
 ```bash
-/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/demo/proxy_config.yaml
-/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/demo/proxy_config.yaml
-/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/demo/proxy_config.yaml -p sample.pcap -c predictions.csv
+/opt/KTAG/output/KFlowLens -t /opt/KTAG/tools/KFlowLens/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -e /opt/KTAG/tools/KFlowLens/proxy_config.yaml
+/opt/KTAG/output/KFlowLens -r /opt/KTAG/tools/KFlowLens/proxy_config.yaml -p sample.pcap -c predictions.csv
 ```
 
 训练阶段会在内存中执行 `filter_packets` 和 `columns_to_remove`，打印最终输入列，保存
@@ -218,7 +218,7 @@ ONNX、Scaler、Schema manifest，以及 `output_dir/feature_importance.csv`。�
 - 以 `-DKTAG_ENABLE_DPDK=ON` 编译，可用一键脚本：
 
 ```bash
-sh build.sh dpdk
+bash buildtools/build.sh dpdk
 ```
 
 或手动配置：
@@ -228,12 +228,12 @@ cmake -S . -B build -DKTAG_BUILD_TOOLS=ON -DKTAG_ENABLE_DPDK=ON
 cmake --build build --target ktag_demo ktag_capture_dpdk
 ```
 
-默认 `sh build.sh` 不带 DPDK（`KTAG_ENABLE_DPDK=OFF`）。
+默认 `bash buildtools/build.sh` 不带 DPDK（`KTAG_ENABLE_DPDK=OFF`）。
 
 ### 使用
 
 在 pipeline 配置中设置 `pipeline.capture.backend: dpdk` 并填写 `capture.dpdk.*`
-选项（见 `tools/demo/proxy_config.yaml` 的 `pipeline.capture` 段），然后：
+选项（见 `tools/KFlowLens/proxy_config.yaml` 的 `pipeline.capture` 段），然后：
 
 ```bash
 # SP600/HiSilicon 网卡按 PCI 地址收包
@@ -252,7 +252,7 @@ output/KFlowLens -r config.yaml -i 0000:03:00.0 --dpdk \
   `--dpdk-eal-args` 优先于 YAML 中的 `capture.dpdk.eal_args`。
 - 单线程模式（BORROWED）零拷贝指向 mbuf；并行模式（OWNED）复用
   `ktag_packet_make_owned` 拷入引用计数 buffer。
-- UB Frontend还支持多RX及 `capture.dpdk.handoff: ring`：使用mbuf直通和按RX/Feature分片的SPSC交接；worker注册到EAL以使用mbuf cache。queue交接仍保留。多RX、绑核和多sender示例见 `demo/config-ub-1to1.yaml`。
+- UB Frontend还支持多RX及 `capture.dpdk.handoff: ring`：使用mbuf直通和按RX/Feature分片的SPSC交接；worker注册到EAL以使用mbuf cache。queue交接仍保留。多RX、绑核和多sender示例见 `KFlowLens/config-ub-1to1.yaml`。
 - 普通流量特征由 `pipeline.plugins` 中的 `libktag_traffic_features.so` 提供；单机和UB共享354维契约，UB后端按相同Schema通过公共Inference API推理。UB线程、队列、credits与绑核要求见[UB指南](../docs/zh/ub_user_guide.md)。
 
 离线验证（无需真实流量，用 DPDK net_pcap vdev 把 pcap 文件模拟成网卡）：

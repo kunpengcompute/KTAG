@@ -97,7 +97,7 @@ computer03(Frontend/Provider) ─┘          └─ 本地批量推理与结果
 
 以下检查在4台机器上都执行。命令只用于确认环境，不涉及安装或修改UB服务。
 
-先取得KTAG源码并进入实际仓库根目录。后文的 `tools/demo/config.yaml`、`output/` 均相对此目录；`/path/to/KTAG` 是占位符，应替换为实际路径，例如 `/opt/KTAG`。
+先取得KTAG源码并进入实际仓库根目录。后文的 `tools/KFlowLens/config.yaml`、`output/` 均相对此目录；`/path/to/KTAG` 是占位符，应替换为实际路径，例如 `/opt/KTAG`。
 
 ### 检查主机名和节点解析
 
@@ -136,7 +136,8 @@ find /usr/local/ubs_mem/lib -name 'libubsm_sdk.so*' -print
 
 ```bash
 # 使用以下命令设置动态库路径
-export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:/path/to/KTAG/output:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=/usr/local/lib64:/usr/local/ubs_mem/lib:/usr/lib64:/opt/DPDK_ub/install/lib:/opt/DPDK_ub/install/lib/dpdk/pmds-25.0
+export PKG_CONFIG_PATH=/opt/DPDK_ub/install/lib/pkgconfig:$PKG_CONFIG_PATH
 ```
 
 上例export在当前Shell及其子进程立即生效，4台机器都需设置，并按本机实际路径调整。需要持久化时可写入 `~/.bashrc`，再执行 `source ~/.bashrc`。使用 `printf '%s\n' "$LD_LIBRARY_PATH"` 查看路径；最终以 `ldd` 无 `not found` 为依赖可解析的判据。
@@ -145,20 +146,20 @@ export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:/path/to/KTAG/output:${
 
 ```bash
 # 在仓库根目录启用 UB 传输并构建
-KTAG_ENABLE_DPDK_UB=ON bash build.sh
+KTAG_ENABLE_DPDK_UB=ON bash buildtools/build.sh 
 # 使用以下命令检查 KTAG 可执行文件和必需插件
 ls -l output/plugins/libktag_traffic_features.so
 ldd output/KFlowLens | grep -E 'rte_ub_ring|ubsm_sdk|not found'
 output/KFlowLens -h | grep -E 'distributed-role|node-id'
 ```
 
-应能看到 `librte_ub_ring`，且不能有 `not found`；UB依赖解析结果见[检查动态库和依赖](#检查动态库和依赖)。帮助信息中应包含 `--distributed-role` 和 `--node-id`，但帮助参数本身不能证明已启用UB。`bash build.sh dpdk` 只启用DPDK收包后端，UB传输需独立设置 `KTAG_ENABLE_DPDK_UB=ON`。
+应能看到 `librte_ub_ring`，且不能有 `not found`；UB依赖解析结果见[检查动态库和依赖](#检查动态库和依赖)。帮助信息中应包含 `--distributed-role` 和 `--node-id`，但帮助参数本身不能证明已启用UB。`bash buildtools/build.sh dpdk` 只启用DPDK收包后端，UB传输需独立设置 `KTAG_ENABLE_DPDK_UB=ON`。
 
 ## 四节点配置
 
 ### 配置文件分发原则
 
-当前仓库的 `tools/demo/config.yaml` 已经包含3:1 UB配置。
+当前仓库的 `tools/KFlowLens/config.yaml` 已经包含3:1 UB配置。
 `provider_nodes` 为 `computer01/02/03`，`user_nodes` 为 `controller`。
 4台机器直接使用这一份文件，不要为每台机器修改Provider/User列表；本机角色通过启动命令中的 `--distributed-role` 和 `--node-id` 指定。
 
@@ -166,14 +167,14 @@ output/KFlowLens -h | grep -E 'distributed-role|node-id'
 
 ```bash
 # 使用以下命令校验配置文件是否一致
-sha256sum tools/demo/config.yaml
+sha256sum tools/KFlowLens/config.yaml
 ```
 
 4个SHA256必须相同。`libktag_traffic_features.so` 是通用流量特征提取插件，应与KFlowLens、公共库配套部署；输入为组流后的报文信息，输出为当前Schema的特征。
 
 ### UB 配置示例
 
-下面是3:1 UB测试的核心配置。`tools/demo/config.yaml` 默认兼顾单机使用，启用3:1 UB前须将 `inference.threads` 改为3，并按实际CPU拓扑设置绑核列表。4台机器使用同一份配置。另有多RX、多sender的1:1示例 `tools/demo/config-ub-1to1.yaml`，也已启用普通流量特征插件。
+下面是3:1 UB测试的核心配置。`tools/KFlowLens/config.yaml` 默认兼顾单机使用，启用3:1 UB前须将 `inference.threads` 改为3，并按实际CPU拓扑设置绑核列表。4台机器使用同一份配置。另有多RX、多sender的1:1示例 `tools/KFlowLens/config-ub-1to1.yaml`，也已启用普通流量特征插件。
 
 ```yaml
 pipeline:
@@ -226,7 +227,7 @@ Backend的模型包由本项目训练生成：按[训练步骤](user_guide.md#�
 
 `pipeline.enabled: true` 表示普通单机Pipeline默认启用；`distributed.ub_ring.enabled: false` 表示UB默认关闭。`--distributed-role frontend/backend` 会为本次运行启用对应的UB角色，因此测试命令必须同时指定该参数与 `--node-id`。Frontend要求 `feature_parallel`，Backend线程数为Provider数×每Provider队列数，且显式配置同等数量的 `backend_worker_cpus`。UB场景不能再通过命令行覆盖线程数或Pipeline模式。
 
-`tools/demo/proxy_config.yaml` 当前用于代理特征、训练和单机推理，文件中没有 `pipeline.distributed.ub_ring` 配置，因此本次UB 3:1验证直接使用 `config.yaml`。如果后续要验证代理模型通过UB传输，需要在代理配置中补充同一套 `distributed.ub_ring` 配置，并同时保证Backend的代理模型包和4台机器的Schema配置一致。
+`tools/KFlowLens/proxy_config.yaml` 当前用于代理特征、训练和单机推理，文件中没有 `pipeline.distributed.ub_ring` 配置，因此本次UB 3:1验证直接使用 `config.yaml`。如果后续要验证代理模型通过UB传输，需要在代理配置中补充同一套 `distributed.ub_ring` 配置，并同时保证Backend的代理模型包和4台机器的Schema配置一致。
 
 关键字段说明。
 
@@ -298,7 +299,7 @@ cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 
 output/KFlowLens \
-  -r tools/demo/config.yaml \
+  -r tools/KFlowLens/config.yaml \
   -p /data/computer01/class0.pcap \
   -p /data/computer01/class1.pcap \
   --distributed-role frontend \
@@ -313,7 +314,7 @@ cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 
 output/KFlowLens \
-  -r tools/demo/config.yaml \
+  -r tools/KFlowLens/config.yaml \
   -p /data/computer02/class0.pcap \
   -p /data/computer02/class1.pcap \
   --distributed-role frontend \
@@ -328,7 +329,7 @@ cd /path/to/KTAG
 export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRARY_PATH}
 
 output/KFlowLens \
-  -r tools/demo/config.yaml \
+  -r tools/KFlowLens/config.yaml \
   -p /data/computer03/class0.pcap \
   -p /data/computer03/class1.pcap \
   --distributed-role frontend \
@@ -352,7 +353,7 @@ export LD_LIBRARY_PATH=/usr/local/ubs_mem/lib:/usr/lib64:$PWD/output:${LD_LIBRAR
 mkdir -p /data/result
 
 output/KFlowLens \
-  -r tools/demo/config.yaml \
+  -r tools/KFlowLens/config.yaml \
   --distributed-role backend \
   --node-id "$(hostname)" \
   -c /data/result/ub-3to1.csv

@@ -10,4 +10,4 @@
 现有库的组织方式或公共接口。
 
 版本库由 `ENABLE_BUILD_LIB` 控制构建和安装，与模型推理独立；
-`sh build.sh -lib` 启用该目标。
+`bash buildtools/build.sh -lib` 启用该目标。

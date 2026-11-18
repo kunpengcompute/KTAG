@@ -122,7 +122,7 @@ TEST(KTAGIntegrationConfig, SharedTransportHostnameGuardHandlesNullErrorOutput) 
 }
 
 TEST(KTAGIntegrationConfig, UbExampleCombinesTrafficPluginWithPocScheduling) {
-    const auto path = repository_root() / "tools/demo/config-ub-1to1.yaml";
+    const auto path = repository_root() / "tools/KFlowLens/config-ub-1to1.yaml";
     for (bool frontend : {true, false}) {
         ktag_demo_pipeline_config_overrides overrides;
         overrides.force_enable = true;
@@ -150,7 +150,7 @@ TEST(KTAGIntegrationConfig, UbExampleCombinesTrafficPluginWithPocScheduling) {
 
 TEST(KTAGIntegrationConfig, ApplicationAndProxyExamplesLoadRequiredPlugins) {
     for (const char *name : {"config.yaml", "proxy_config.yaml"}) {
-        const auto path = repository_root() / "tools/demo" / name;
+        const auto path = repository_root() / "tools/KFlowLens" / name;
         ktag_demo_pipeline_config_overrides overrides;
         overrides.force_enable = true;
         ktag_demo_pipeline_config config;

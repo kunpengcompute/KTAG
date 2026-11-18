@@ -3,7 +3,6 @@ Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 */
 #include "ub_ring_transport.h"
 
-#include "ub_feature_wire.h"
 #include "ub_node_validation.h"
 
 #include <algorithm>
@@ -69,8 +68,9 @@ bool validate_config(const ktag_demo_ub_transport_config &config,
         set_error(error, "UB region and shm prefix are required");
         return false;
     }
-    if (config.data_element_size < ktag_demo_ub_feature_frame_size(0U)) {
-        set_error(error, "UB data element cannot hold a KTAG Feature frame");
+    // Payload shape belongs to the caller (Feature frames or arbitrary bytes).
+    if (config.data_element_size == 0U) {
+        set_error(error, "UB payload capacity must be positive");
         return false;
     }
     if (config.queues_per_provider == 0U || config.queues_per_provider > 512U ||

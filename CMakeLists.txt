@@ -56,7 +56,7 @@ set(EXECUTABLE_OUTPUT_PATH "${PROJECT_SOURCE_DIR}/output")
 option(KTAG_BUILD_TOOLS "Build KTAG command-line tools and demos" ON)
 option(KTAG_BUILD_TCP_PCAP_BENCH
        "Build the independent Linux local-PCAP TCP/Zstd demo" OFF)
-option(KTAG_BUILD_EXAMPLES "Build public three-layer integration examples" ON)
+option(KTAG_BUILD_EXAMPLES "Build KTAG integration examples" ON)
 option(KTAG_BUILD_FEATURE_PLUGINS
        "Build the official Feature Provider plugins"
        ON)
@@ -85,6 +85,9 @@ if(KTAG_BUILD_FEATURE_PLUGINS)
 endif()
 if(KTAG_BUILD_EXAMPLES)
     ADD_SUBDIRECTORY(examples/three_layer)
+    if(KTAG_ENABLE_DPDK_UB)
+        ADD_SUBDIRECTORY(examples/ub_transport)
+    endif()
 endif()
 if(KTAG_BUILD_TOOLS)
     ADD_SUBDIRECTORY(tools)

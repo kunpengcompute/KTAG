@@ -41,7 +41,7 @@ const char *const PROXY_PLUGIN =
 const char *const TRAFFIC_PLUGIN =
     "../../../output/plugins/libktag_traffic_features.so";
 const char *const OFFICIAL_PROXY_CONFIG =
-    "../../../tools/demo/proxy_config.yaml";
+    "../../../tools/KFlowLens/proxy_config.yaml";
 const char *const BAD_ABI_PLUGIN =
     "../../../output/plugins/libktag_test_feature_plugin_bad_abi.so";
 const char *const CREATE_FAIL_PLUGIN =
@@ -1018,8 +1018,8 @@ TEST(KTAGDemoPipelineConfig, RequiresExplicitThreadsEvenForOneQueue)
 
 TEST(KTAGDemoPipelineConfig, ParsesOfficialUbSampleForBothRoles)
 {
-    auto sample = fs::path("tools/demo/config-ub-1to1.yaml");
-    if (!fs::exists(sample)) { sample = fs::path("../../../tools/demo/config-ub-1to1.yaml"); }
+    auto sample = fs::path("tools/KFlowLens/config-ub-1to1.yaml");
+    if (!fs::exists(sample)) { sample = fs::path("../../../tools/KFlowLens/config-ub-1to1.yaml"); }
     for (const bool frontend : {false, true}) {
         auto overrides = ub_queue_test_role(frontend);
         overrides.node_id = frontend ? "computer01" : "controller";

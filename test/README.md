@@ -45,7 +45,7 @@ Fuzz 测试和 Python 工具链测试。测试统一入口为 `/opt/KTAG/test/bu
 2. 以测试选项构建产品库（功能测试需要链接 `libktag_appidlib.so`）：
 
 ```bash
-sh /opt/KTAG/build.sh -lib
+bash /opt/KTAG/buildtools/build.sh -lib
 ```
 
 3. 首次构建测试会自动下载 GoogleTest 1.8.0（需要外网）。离线环境请提前将
@@ -53,7 +53,7 @@ sh /opt/KTAG/build.sh -lib
 4. Python 工具链测试需要安装训练依赖：
 
 ```bash
-python3 -m pip install -r /opt/KTAG/tools/demo/python/packages.txt
+python3 -m pip install -r /opt/KTAG/tools/KFlowLens/python/packages.txt
 ```
 
 ## 3. 功能测试

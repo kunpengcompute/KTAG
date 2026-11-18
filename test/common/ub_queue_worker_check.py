@@ -21,7 +21,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     build = root / 'build/ub-worker-check'
     build.mkdir(parents=True, exist_ok=True)
-    runner = (root / 'tools/demo/pipeline/pipeline_runner.cpp').read_text(encoding='utf-8')
+    runner = (root / 'tools/KFlowLens/pipeline/pipeline_runner.cpp').read_text(encoding='utf-8')
 
     def between(start, end):
         first = runner.index(start)
@@ -47,9 +47,9 @@ def main():
     command += ['-std=c++17', '-O1', '-UNDEBUG', '-DKTAG_BUILDING_DLL', '-DKTAG_ENABLE_DPDK_UB=1']
     if os.name != 'nt':
         command += ['-pthread']
-    for include in ['include', 'tools/demo/pipeline', 'src/inference']:
+    for include in ['include', 'tools/KFlowLens/pipeline', 'src/inference']:
         command += ['-I' + str(root / include)]
-    command += [str(generated), str(root / 'tools/demo/pipeline/ub_feature_wire.cpp'),
+    command += [str(generated), str(root / 'tools/KFlowLens/pipeline/ub_feature_wire.cpp'),
                 str(root / 'src/feature/feature_batch.cpp'),
                 str(root / 'src/inference/prediction_batch.cpp'), '-o', str(executable)]
     environment = os.environ.copy()

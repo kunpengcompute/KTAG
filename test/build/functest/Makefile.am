@@ -16,8 +16,8 @@ KTAG_APPID_DIR += -I $(TEST_modules_DIR)/common/include/
 KTAG_APPID_DIR += -I $(TEST_modules_DIR)/common/functest/
 KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/include/
 KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/src/
-KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/
-KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/demo/plugin/
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/KFlowLens/plugin/
 KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/plugins/proxy_features/
 KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/util/onnxruntime-linux-aarch64-1.22.0/include/
 CFLAGS += -DLIB_KTAG_APPID_NAME=\"libktag_appidlib.so\"
@@ -25,7 +25,7 @@ CXXFLAGS += -DLIB_KTAG_APPID_NAME=\"libktag_appidlib.so\"
 
 # Options for preprocessing stage, here are mainly header files.
 KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/plugins/traffic_features/
-KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/demo/
+KTAG_APPID_DIR += -I $(KTAG_APPID_modules_DIR)/tools/KFlowLens/
 CPPFLAGS += $(KTAG_APPID_DIR)
 
 # Flags passed to the C++ compiler.
@@ -73,15 +73,15 @@ endif
 SRCEXTS   := .c .cc .cpp
 
 SOURCES_MUD = $(foreach d,$(SRC_FILES_DIRS),$(wildcard $(addprefix $(d)/*,$(SRCEXTS))))
-SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/pipeline_config.cpp
-SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/pipeline_runner.cpp
-SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/schema_feature_writer.cpp
-SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/ub_feature_wire.cpp
+SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/pipeline_config.cpp
+SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/pipeline_runner.cpp
+SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/schema_feature_writer.cpp
+SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/ub_feature_wire.cpp
 # pipeline_runner.cpp drives capture through the demo_capture_source factory,
 # so the factory has to be linked in even when the DPDK backend is disabled.
-SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/demo_capture_source.cpp
-SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/plugin/feature_plugin_loader.cpp
-SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/utils.cpp
+SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/demo_capture_source.cpp
+SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/plugin/feature_plugin_loader.cpp
+SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/utils.cpp
 
 # The Provider Pipeline lifecycle test intentionally uses private headers and
 # symbols. Keep normal public-ABI functional builds independent of internals;
@@ -99,8 +99,8 @@ DPDK_PC_CFLAGS := $(shell pkg-config --cflags libdpdk)
 DPDK_PC_LIBS := $(shell pkg-config --libs libdpdk)
 CPPFLAGS += $(DPDK_PC_CFLAGS) -DKTAG_DEMO_HAVE_DPDK=1
 LD_LIBRARIES += -lktag_capture_dpdk $(DPDK_PC_LIBS)
-SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/demo_capture_dpdk_source.cpp
-SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/dpdk_ring_handoff.cpp
+SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/demo_capture_dpdk_source.cpp
+SOURCES_MUD += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/dpdk_ring_handoff.cpp
 else
 # Matched on the suffix: wildcard() yields "../..//common/functest//<file>",
 # so a literal prefix pattern never matches.
@@ -114,8 +114,8 @@ SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/statistics.
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/rawbow_token_dfa.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/http.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/token_histogram.cpp
-SOURCES += $(KTAG_APPID_modules_DIR)/tools/demo/feature_session.cpp
-SOURCES += $(KTAG_APPID_modules_DIR)/tools/demo/inference_session.cpp
+SOURCES += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/feature_session.cpp
+SOURCES += $(KTAG_APPID_modules_DIR)/tools/KFlowLens/inference_session.cpp
 SOURCES += $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.cpp
 
 OBJS    = $(foreach x,$(SRCEXTS), \
@@ -140,7 +140,7 @@ endif
 all : $(PROGRAM)
 run:
 	@test -f "$(KTAG_APPID_OUTPUT_DIR)/libktag_appidlib.so" || \
-		(echo "missing $(KTAG_APPID_OUTPUT_DIR)/libktag_appidlib.so; run 'sh build.sh -lib' from the repository root"; exit 1)
+		(echo "missing $(KTAG_APPID_OUTPUT_DIR)/libktag_appidlib.so; run 'bash buildtools/build.sh -lib' from the repository root"; exit 1)
 	@test -f "$(KTAG_APPID_OUTPUT_DIR)/libktag_feature.so" || \
 		(echo "missing $(KTAG_APPID_OUTPUT_DIR)/libktag_feature.so; rebuild phase-8 libraries"; exit 1)
 	env LD_LIBRARY_PATH=$(KTAG_APPID_OUTPUT_DIR):$(KTAG_APPID_OUTPUT_DIR)/plugins:$(ONNXRUNTIME_LIB_DIR):/usr/local/lib64:$$LD_LIBRARY_PATH ../../gtest-parallel/gtest-parallel ./ktag_appid_functest --gtest_filter=$(FILTER)
@@ -150,19 +150,19 @@ rrun:
 clean :
 	@-$(RM) $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.o $(KTAG_APPID_modules_DIR)/src/feature/dns_observer.o.d
 	@-$(RM) $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o $(KTAG_APPID_modules_DIR)/plugins/traffic_features/legacy/*.o.d
-	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/feature_session.o $(KTAG_APPID_modules_DIR)/tools/demo/feature_session.o.d
-	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/inference_session.o $(KTAG_APPID_modules_DIR)/tools/demo/inference_session.o.d
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/KFlowLens/feature_session.o $(KTAG_APPID_modules_DIR)/tools/KFlowLens/feature_session.o.d
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/KFlowLens/inference_session.o $(KTAG_APPID_modules_DIR)/tools/KFlowLens/inference_session.o.d
 	@-$(RM) *.d *.a *.so
 	@-$(RM)	./$(PROGRAM) $(SRC_DEPS)
 	@find $(TEST_modules_DIR)/common/functest/ -name '*.o' -exec $(RM) {} \;
-	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/pipeline_config.o
-	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/pipeline_runner.o
-	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/schema_feature_writer.o
-	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/ub_feature_wire.o
-	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/demo_capture_source.o
-	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/pipeline/demo_capture_dpdk_source.o
-	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/plugin/feature_plugin_loader.o
-	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/demo/utils.o
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/pipeline_config.o
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/pipeline_runner.o
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/schema_feature_writer.o
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/ub_feature_wire.o
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/demo_capture_source.o
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/KFlowLens/pipeline/demo_capture_dpdk_source.o
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/KFlowLens/plugin/feature_plugin_loader.o
+	@-$(RM) $(KTAG_APPID_modules_DIR)/tools/KFlowLens/utils.o
 
 # Builds a sample test.
 

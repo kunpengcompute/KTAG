@@ -1,15 +1,15 @@
 #!/bin/bash
 ##############################################################
 ## Copyright: Copyright (c) Huawei Technologies Co., Ltd. 2020-2021. All rights reserved.
-## Build ktag_appid lib
+## Build helpers sourced by buildtools/build.sh
 ##############################################################
 
 set -e
 
 function ktag_appid_util_conf()
 {
-    mkdir -p ${OBJ_DIR}
-    mkdir -p ${OUTPUT_DIR}
+    mkdir -p "${OBJ_DIR}"
+    mkdir -p "${OUTPUT_DIR}"
 }
 
 function ktag_appid_build()
