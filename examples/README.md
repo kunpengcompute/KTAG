@@ -1,6 +1,6 @@
 # KTAG 示例
 
-本目录包含四个示例，按从简单到复杂的顺序编排。建议按以下顺序阅读：
+本目录包含五个示例。前三个用于学习特征/推理集成，第四个演示仓外集成；只使用 UB 的客户可直接阅读第五个示例。
 
 | 顺序 | 示例 | 说明 |
 |:---:|------|------|
@@ -8,6 +8,7 @@
 | 2 | [feature_provider](#2-feature_provider--自定义-feature-provider) | 怎么写单个 Feature Provider |
 | 3 | [feature_plugin](#3-feature_plugin--动态加载插件) | 怎么打包成动态库插件并加载 |
 | 4 | [external_consumer](#4-external_consumer--仓外-cmake-集成) | 怎么用 CMake 在 KTAG 源码树之外集成 |
+| 5 | [ub_transport](ub_transport/README.md) | 无特征提取和推理，1:1 传输任意字节并复制到本地缓存 |
 
 ---
 
@@ -31,7 +32,7 @@ sh /opt/KTAG/build.sh
 /opt/KTAG/output/ktag_three_layer_example MODEL_PACKAGE_DIR INPUT.pcap
 ```
 
-其中 `MODEL_PACKAGE_DIR` 是一个 Schema-bound 模型包目录，由训练脚本或模型升级工具生成，内含 `manifest.json`、`scaler.json` 和 `model.onnx`。如果你还没有模型包，可以先通过 `/opt/KTAG/tools/model_package/upgrade_legacy_model.py` 将旧模型转为新格式，或通过 `/opt/KTAG/tools/demo/python/training.py` 训练一个新模型。
+其中 `MODEL_PACKAGE_DIR` 是一个 Schema-bound 模型包目录，由训练脚本或模型升级工具生成，内含 `manifest.json`、`scaler.json` 和 `model.onnx`。如果你还没有模型包，可以先通过 `/opt/KTAG/tools/model_package/upgrade_legacy_model.py` 将旧模型转为新格式，或通过 `/opt/KTAG/tools/KFlowLens/python/training.py` 训练一个新模型。
 
 ### 代码要点
 
@@ -63,7 +64,7 @@ cc -std=c11 -Wall -Wextra -Werror -I/opt/KTAG/include \
 - 通过 `ktag_flow_view_get_packet_count` 等 Query API 读取方向、包数、包长等流信息
 - `ktag_feature_descriptor` 声明特征 ID、维度、值类型
 - `ktag_feature_provider_registration` 注册 Provider 和 feature 列表
-- 示例只负责底层 callbacks 注册，不负责动态库加载。动态库生命周期管理由 `tools/demo` 在此机制之上实现
+- 示例只负责底层 callbacks 注册，不负责动态库加载。动态库生命周期管理由 `tools/KFlowLens` 在此机制之上实现
 
 ---
 
@@ -134,3 +135,11 @@ LD_LIBRARY_PATH=/tmp/ktag-stage/lib/KTAG_APPID:$LD_LIBRARY_PATH \
 ```
 
 配置、编译和运行全部成功，表示公共头文件、三个共享库和 CMake package targets 可以脱离 KTAG 构建树使用。
+
+---
+
+## 5. ub_transport — 只使用 UB 传输任意字节
+
+不使用 Capture、Feature 或 Inference，只复用底层 UB 传输封装。一个 Provider 给一个 User 发送二进制文件，接收端复制到本地缓存后处理，展示 CREDIT 流控、所有权交接和结束确认。
+
+可独立构建，不需要模型、插件、ONNX Runtime 或 yaml-cpp。依赖现场配套的 Linux DPDK/UB SDK；普通上游 DPDK 不含 UB 扩展。构建命令、两节点运行方式、接口对应关系和客户改造位置见 [UB 示例 README](ub_transport/README.md)。
