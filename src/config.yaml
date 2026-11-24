@@ -1,4 +1,3 @@
-# Copyright (c) 2025 Huawei Technologies Co., Ltd.
 training_data_paths:
 - [
   'data/bilibili/csv/bilibili_20250616_204043_10h_android_16.csv',
