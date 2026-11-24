@@ -30,7 +30,11 @@ echo $ONNXRUNTIME_HOME
 ls
 cd ..
 ls
-sh build.sh -lib
+if [ -f buildtools/build.sh ]; then
+    sh buildtools/build.sh -lib
+else
+    sh build.sh -lib
+fi
 cd test/traces
 wget --no-check-certificate https://boostkit-dpi.obs.cn-north-4.myhuaweicloud.com/1229/data.zip
 unzip data.zip

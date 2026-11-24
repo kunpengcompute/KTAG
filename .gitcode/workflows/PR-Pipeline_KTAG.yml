@@ -120,37 +120,23 @@ stages:
             with:
               project-name: "boostkit"
       pre-commit:
-        name: pre-commit
-        runs-on: ["ubuntu-latest", "x64", "slim"]
+        runs-on: [ self-hosted, os=euler, arch=arm64, type=pr, flavor=small ]
+        container:
+          image: swr.cn-north-4.myhuaweicloud.com/cloud_boostkit/openeuler_24.03_lts_sp3:pre-commit_arm_01
         steps:
           - name: Checkout
             uses: checkout
             with:
               allow-unsafe-pr-checkout: true
               ref: refs/merge-requests/${{ env.pr_id }}/merge
-          - name: Setup Python
-            uses: setup-python
-            with:
-              python-version: "3.14"
-          # .pre-commit-config.yaml 含 golangci-lint / gitleaks hook，hosted runner 需补 Go 环境
-          - name: Setup Go
-            uses: setup-go
-            with:
-              go-version: '1.26.1'
-          # gitleaks hook 运行期依赖本机可执行文件，需预装二进制
           - name: install gitleaks
             run: |
-              export GO111MODULE=on
-              export GOPROXY=https://mirrors.huaweicloud.com/repository/goproxy/
-              export GONOSUMDB=*
               cd ${ATOMGIT_WORKSPACE}
-              wget --no-host-directories -c --no-check-certificate https://pytorch-package.obs.cn-north-4.myhuaweicloud.com/pta-codecheck/gitleaks
+              wget -q https://pytorch-package.obs.cn-north-4.myhuaweicloud.com/pta-codecheck/gitleaks
               chmod +x gitleaks
               cd -
           - name: Run pre-commit
-            uses: openlibing/pre-commit-action@v1.0.1
-            with:
-              gc_token: ${{ secrets.PR_LABEL_TOKEN }}
+            uses: openlibing/pre-commit-action@v1.0.0
       build:
         name: build
         if: ${{ jobs.Detect_file_changes.outputs.need_build == 'yes' }}
