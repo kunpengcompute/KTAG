@@ -29,7 +29,11 @@ echo $ONNXRUNTIME_HOME
 ls
 cd ..
 ls
-sh build.sh
+if [ -f buildtools/build.sh ]; then
+    sh buildtools/build.sh
+else
+    sh build.sh
+fi
 # zip -r KDADK-APPID_1.0.zip output/
 # find / -type f -name "KDADK-APPID_1.0.zip"
 # ls
